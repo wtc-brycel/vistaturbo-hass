@@ -8,8 +8,6 @@ Developed and tested against a **VISTA-128BPT**. Other VISTA Turbo models are cu
 
 Vista Turbo RS232 is designed around a network serial server between Home Assistant and the panel. A **Lantronix UDS-series device** is the intended class of hardware. Equivalent transparent serial-to-IP devices may also be used.
 
-The deployment path is:
-
 ```text
 VISTA Turbo panel
       |
@@ -44,13 +42,11 @@ This project uses **TB4** for the permanent connection to the serial-to-IP devic
 
 ### TB4
 
-The TB4 terminals are labeled:
-
 ```text
 TXD   RXD   RTS/DTR   CTS/DSR   GND
 ```
 
-Only three signals are required for Vista Turbo RS232:
+Only three signals are required:
 
 ```text
 VISTA TB4 TXD  -> serial server receive input
@@ -60,9 +56,7 @@ RTS/DTR        -> not connected
 CTS/DSR        -> not connected
 ```
 
-The `TXD` and `RXD` labels above are from the VISTA panel's point of view. The panel transmit signal must reach the serial server's receive input, and the serial server transmit signal must reach the panel receive input.
-
-Do not assume that DB9 pin numbers alone identify signal direction. Serial devices may present themselves as DTE or DCE and may therefore require a straight-through or crossover wiring arrangement. Check the serial server documentation and wire by signal function.
+The `TXD` and `RXD` labels are from the VISTA panel's point of view. Wire by signal function rather than assuming a DB9 pin mapping. Serial servers may present their connector as DTE or DCE.
 
 TB4 is an RS-232 electrical interface, not a TTL UART. Do not connect the panel directly to a 3.3 V or 5 V UART without an RS-232 transceiver.
 
@@ -72,27 +66,7 @@ Power down the panel and serial interface before changing field wiring.
 
 J9 is the alternate 10-pin serial header. A VT-SERCBL adapter converts J9 to a standard serial connector and is useful for temporary service or programming connections.
 
-**TB4 and J9 are two access points to the same panel serial interface and should not be connected to separate serial devices at the same time.** Disconnect one before using the other.
-
-For a permanent Home Assistant installation, TB4 is preferred because it supports direct field wiring to the serial server without leaving a service cable attached to the board.
-
-### Physical path used by this project
-
-```text
-VISTA-128BPT TB4
-   TXD -----------------> serial server RX
-   RXD <----------------- serial server TX
-   GND ------------------ signal ground
-
-serial server
-   9600 8N1, no flow control
-        |
-        | raw TCP
-        v
-Vista Turbo RS232 App
-```
-
-The current installation uses a StarTech NETRS2321POE. A Lantronix UDS or another transparent RS-232-to-IP device can be wired the same way at the signal level.
+**Do not connect separate serial devices to TB4 and J9 at the same time.** Disconnect one before using the other.
 
 ## Requirements
 
@@ -123,7 +97,7 @@ no Telnet negotiation
 no virtual COM-port dependency
 ```
 
-Port numbers are device-specific. Configure a TCP port on the serial server, then set the same value as `panel_port` in the App. The current StarTech installation uses TCP port `10001`, but that port is not required by the VISTA protocol itself.
+Port numbers are device-specific. The current StarTech installation uses TCP port `10001`, but that port is not required by the VISTA protocol itself.
 
 ## Configuration
 
@@ -155,7 +129,7 @@ transport_print_width: 32
 debug_raw_tx_enabled: false
 ```
 
-`panel_host` is the IP address or resolvable hostname of the Lantronix UDS or equivalent serial-to-IP device. `panel_port` is the raw TCP listener configured on that device.
+`panel_host` is the IP address or resolvable hostname of the serial-to-IP device. `panel_port` is its raw TCP listener.
 
 ## Startup synchronization
 
@@ -168,7 +142,7 @@ A new TCP session requests:
 08ZD009A    zone descriptors
 ```
 
-`AS`, `ZS`, and `ZP` complete on `08OK`. `ZD` completes on the panel's `zd000""` terminator. Descriptor retrieval has a longer timeout because the panel walks its zone table before finishing.
+`AS`, `ZS`, and `ZP` complete on `08OK`. `ZD` completes on the panel's `zd000""` terminator.
 
 Every packet is checked against its declared length and checksum before it can change Home Assistant state. Invalid packets remain available on the raw diagnostic topic.
 
@@ -181,9 +155,7 @@ The bridge repeats these dynamic queries every 300 seconds by default:
 08zs004B    zone status
 ```
 
-This catches missed or unknown state transitions without repeatedly requesting static metadata. Startup, periodic, and event-triggered sync operations share one transaction lock.
-
-After repeated failed reconciliations, the bridge closes the panel TCP session and lets the normal reconnect path establish a clean session.
+This catches missed or unknown state transitions without repeatedly requesting static metadata. After repeated failed reconciliations, the bridge closes the panel TCP session and lets the normal reconnect path establish a clean session.
 
 ## Home Assistant entities
 
@@ -207,37 +179,51 @@ Alarm events can overlay the partition state as `triggered` until restore or dis
 
 The MQTT alarm schema requires a command topic. The bridge publishes one but rejects every normal Home Assistant alarm command while control is disabled.
 
-### Zones
+### Zone conditions
 
-Only zones assigned to a VISTA partition are published. The binary sensor is `ON` for fault or alarm. Additional state is kept in attributes:
+Only zones assigned to a VISTA partition are published. Each assigned zone has four independent binary sensors:
 
-```yaml
-zone: 21
-partition: 1
-descriptor: FRONT DOOR
-faulted: false
-trouble: false
-alarm: false
-bypassed: true
-low_battery: false
-tamper: false
-raw_status: "8"
+```text
+021 FRONT DOOR Fault
+021 FRONT DOOR Alarm
+021 FRONT DOOR Check
+021 FRONT DOOR Bypass
 ```
 
-Zone names come directly from the VISTA alpha descriptor stream.
+These map directly to the four per-zone bits in the authoritative `49ZS` snapshot:
+
+```text
+0x1  Fault
+0x2  Check
+0x4  Alarm
+0x8  Bypass
+```
+
+Example zone 34 with a `49ZS` value of `A`:
+
+```text
+034 MAIN BEDROOM WINDOW Fault    OFF
+034 MAIN BEDROOM WINDOW Alarm    OFF
+034 MAIN BEDROOM WINDOW Check    ON
+034 MAIN BEDROOM WINDOW Bypass   ON
+```
+
+Each condition entity also references the common zone attribute payload containing zone number, partition, descriptor, raw status, and internal decoded flags.
+
+The old combined zone binary sensor is removed in 0.2.4. The App clears its retained MQTT Discovery configuration when it connects so Home Assistant can remove the stale entity.
 
 ### Aggregate zone conditions
 
-Four Home Assistant sensors summarize the per-zone conditions available in the authoritative `49ZS` zone-status snapshot:
+Four count sensors summarize the same snapshot-backed conditions:
 
 ```text
-Faulted Zones
-Zones in Check
-Zones in Alarm
-Bypassed Zones
+Fault Zones
+Alarm Zones
+Check Zones
+Bypass Zones
 ```
 
-The sensor state is the number of matching assigned zones. The attributes include the zone number, partition, and current VISTA alpha descriptor for each matching zone.
+The state is the number of matching assigned zones. Attributes include the zone number, partition, and VISTA alpha descriptor for each match.
 
 Example:
 
@@ -257,20 +243,9 @@ attributes:
       descriptor: MAIN BEDROOM WINDOW
 ```
 
-The four snapshot bits are interpreted as:
+The per-zone binary sensors and aggregate sensors refresh from `49ZS` during startup and periodic reconciliation. Relevant unsolicited events also update them immediately.
 
-```text
-0x1  faulted
-0x2  trouble / CHECK
-0x4  alarm
-0x8  bypassed
-```
-
-`Zones in Check` is the Home Assistant display name for the VISTA trouble bit because CHECK is the operator-facing terminology used by the panel.
-
-The aggregate sensors are refreshed from `49ZS` during startup and every periodic reconciliation. They are also updated immediately when an unsolicited event changes one of these tracked zone conditions.
-
-RF low-battery and sensor-tamper conditions are currently learned from unsolicited event codes rather than the `49ZS` snapshot. They remain available in zone attributes and event data, but are not exposed as snapshot-backed aggregate sensors.
+RF low-battery and sensor-tamper conditions are learned from unsolicited event codes rather than the `49ZS` snapshot. They are not presented as equivalent persistent zone-condition entities.
 
 ### Events
 
@@ -280,25 +255,25 @@ Decoded `1Bnq` events are published to:
 - `vista128/event/last`: retained event data
 - `vista128/event/last_description`: retained event description
 
-The state engine handles common arm/disarm, fault, trouble, bypass, alarm, RF low-battery, and tamper transitions. Unknown valid event codes are still published.
+Unknown valid event codes are still published.
 
 ## Raw diagnostics
 
-Default topics:
+Default topics include:
 
-- `vista128/bridge/availability`: App MQTT availability
-- `vista128/panel/connected`: panel TCP state
-- `vista128/raw/frame`: every captured frame as JSON
-- `vista128/raw/last_ascii`: last frame text
-- `vista128/protocol/last_message_type`: packet class
-- `vista128/stats/rx_frames`: received frame count
-- `vista128/stats/rx_bytes`: received byte count
-- `vista128/stats/tx_frames`: transmitted frame count
-- `vista128/stats/tx_bytes`: transmitted byte count
-- `vista128/stats/invalid_frames`: invalid packet count
-- `vista128/sync/last_success`: last successful reconciliation
-- `vista128/sync/consecutive_failures`: current sync failure count
-- `vista128/panel/clock_offset_seconds`: panel time offset from receive time
+- `vista128/bridge/availability`
+- `vista128/panel/connected`
+- `vista128/raw/frame`
+- `vista128/raw/last_ascii`
+- `vista128/protocol/last_message_type`
+- `vista128/stats/rx_frames`
+- `vista128/stats/rx_bytes`
+- `vista128/stats/tx_frames`
+- `vista128/stats/tx_bytes`
+- `vista128/stats/invalid_frames`
+- `vista128/sync/last_success`
+- `vista128/sync/consecutive_failures`
+- `vista128/panel/clock_offset_seconds`
 
 The observed `69ZS` packet is validated and retained as raw data but does not update zone state. `49ZS` block reports are used for zone state.
 
@@ -311,21 +286,7 @@ POST http://<transport_host>:9101/print
 Content-Type: text/plain
 ```
 
-Startup traffic and periodic reconciliation do not print.
-
-Example:
-
-```text
-VISTA EVENT #000001
-2026-08-15 21:50:02
-BYPASS [05]
-P1 Z034 U002
-MAIN BEDROOM WINDOW
-PANEL 2026-08-15 23:44
---------------------------------
-```
-
-Pending receipts are stored in `/data/vista128_print_queue.sqlite3`.
+Startup traffic and periodic reconciliation do not print. Pending receipts are stored in `/data/vista128_print_queue.sqlite3`.
 
 Delivery rules:
 
@@ -333,8 +294,6 @@ Delivery rules:
 - HTTP 204: complete
 - HTTP 4xx: failed
 - timeout, disconnect, or 5xx after submission starts: uncertain, no automatic replay
-
-This prevents an ambiguous network failure from automatically producing duplicate paper output.
 
 ## Raw transmit
 
