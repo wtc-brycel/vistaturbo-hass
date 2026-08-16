@@ -18,32 +18,54 @@
     background:#eceff1;
     color:#222;
   }
+  body.dark {
+    --primary-text-color:#f1f3f4;
+    --secondary-text-color:#aab0b5;
+    --card-background-color:#202124;
+    --ha-card-background:#202124;
+    background:#111315;
+    color:#f1f3f4;
+  }
   h1 { margin:0 0 6px; font-size:28px; }
-  p { margin:0 0 28px; color:#667; }
+  p { margin:0 0 18px; color:var(--secondary-text-color); }
+  .toolbar { display:flex; gap:8px; margin:0 0 28px; }
+  .toolbar button { padding:8px 12px; cursor:pointer; }
   .grid {
     display:grid;
-    grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);
-    gap:42px;
+    grid-template-columns:repeat(auto-fit,minmax(360px,1fr));
+    gap:32px;
     align-items:start;
   }
   .panel {
-    background:#fff;
+    background:var(--card-background-color);
     border-radius:18px;
     padding:24px;
-    box-shadow:0 10px 30px rgba(0,0,0,.12);
+    box-shadow:0 10px 30px rgba(0,0,0,.18);
   }
   .panel h2 { margin:0 0 20px; font-size:20px; font-weight:600; }
-  @media(max-width:900px){.grid{grid-template-columns:1fr}}
 </style>
+<script>if(!customElements.get("ha-card"))customElements.define("ha-card",class extends HTMLElement{});</script>
 <script src="./vista-keypad-card.js"></script>
 </head>
 <body>
 <h1>Vista Turbo HASS keypad card</h1>
-<p>Read-only preview driven from the current keypad MQTT entity shape.</p>
+<p>Production component demo. AUTO follows the simulated Home Assistant dark-mode flag.</p>
+<div class="toolbar">
+  <button id="light">Simulate HA light theme</button>
+  <button id="dark">Simulate HA dark theme</button>
+</div>
 <div class="grid">
   <section class="panel">
-    <h2>6160CR-2</h2>
-    <vista-keypad-card id="cr2"></vista-keypad-card>
+    <h2>6160CR-2 — AUTO</h2>
+    <vista-keypad-card id="cr2-auto"></vista-keypad-card>
+  </section>
+  <section class="panel">
+    <h2>6160CR-2 — explicit red</h2>
+    <vista-keypad-card id="cr2-red"></vista-keypad-card>
+  </section>
+  <section class="panel">
+    <h2>6160CR-2 — explicit dark</h2>
+    <vista-keypad-card id="cr2-dark"></vista-keypad-card>
   </section>
   <section class="panel">
     <h2>6160</h2>
@@ -52,28 +74,45 @@
 </div>
 <script>
   const hass = {
+    themes: { darkMode: false },
     states: {
       "sensor.vista_partition_1_keypad": {
-        state: "P1 DISARMED / BYPAS-RDY TO ARM",
+        state: "P1 DISARMED / READY TO ARM",
         attributes: {
           line_1: "P1   DISARMED   ",
-          line_2: "BYPAS-RDY TO ARM",
+          line_2: "READY TO ARM    ",
           ready: true,
           armed: false,
           trouble: false,
+          power: true,
+          fire_alarm: false,
+          silenced: false,
+          supervisory: false,
           backlight: true
         }
       }
     }
   };
 
-  const cr2 = document.getElementById("cr2");
-  cr2.setConfig({ entity:"sensor.vista_partition_1_keypad", model:"6160cr2", read_only:true });
-  cr2.hass = hass;
+  const cards = [
+    ["cr2-auto", {model:"6160cr2", case_color:"auto"}],
+    ["cr2-red", {model:"6160cr2", case_color:"red"}],
+    ["cr2-dark", {model:"6160cr2", case_color:"dark"}],
+    ["k6160", {model:"6160", case_color:"white"}],
+  ].map(([id, config]) => {
+    const card = document.getElementById(id);
+    card.setConfig({entity:"sensor.vista_partition_1_keypad", read_only:true, ...config});
+    card.hass = hass;
+    return card;
+  });
 
-  const k6160 = document.getElementById("k6160");
-  k6160.setConfig({ entity:"sensor.vista_partition_1_keypad", model:"6160", read_only:true });
-  k6160.hass = hass;
+  function setTheme(dark) {
+    hass.themes.darkMode = dark;
+    document.body.classList.toggle("dark", dark);
+    cards.forEach(card => card.hass = hass);
+  }
+  document.getElementById("light").onclick = () => setTheme(false);
+  document.getElementById("dark").onclick = () => setTheme(true);
 </script>
 </body>
 </html>
