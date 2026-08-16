@@ -18,12 +18,20 @@ class FakeMqtt:
     def __init__(self):
         self.events = []
         self.summary_calls = 0
+        self.keypad_discovery = []
+        self.keypad_states = []
 
     def publish_partition_discovery(self, partition):
         pass
 
     def publish_partition_state(self, partition):
         pass
+
+    def publish_keypad_discovery(self, partition):
+        self.keypad_discovery.append(partition)
+
+    def publish_keypad_state(self, keypad):
+        self.keypad_states.append(keypad)
 
     def publish_zone_discovery(self, zone):
         pass
@@ -49,11 +57,23 @@ class FakePrinter:
 class FakeSynchronizer:
     def __init__(self):
         self.descriptor_complete = 0
+        self.keypad_response = 0
+        self.keypad_partition = None
+        self.keypad_refreshes = []
         self.resync = []
         self.program_mode = False
 
     def mark_descriptor_complete(self):
         self.descriptor_complete += 1
+
+    def mark_keypad_response(self):
+        self.keypad_response += 1
+
+    def active_keypad_partition(self):
+        return self.keypad_partition
+
+    def request_keypad_refresh(self, partition):
+        self.keypad_refreshes.append(partition)
 
     def request_full_resync(self, reason):
         self.resync.append(reason)
@@ -75,6 +95,24 @@ class MessageHandlerTests(unittest.TestCase):
             self.printer,
             self.sync,
         )
+
+    def test_captured_keypad_display_updates_partition_keypad(self):
+        self.sync.keypad_partition = 1
+        self.handler.handle(
+            "keypad_display",
+            b"29kd\xd01   DISARMED   BYPAS-RDY TO ARM100CD",
+            "2026-08-16T13:22:28-04:00",
+        )
+
+        keypad = self.state.keypads[1]
+        self.assertTrue(keypad.initialized)
+        self.assertEqual(keypad.line_1, "P1   DISARMED   ")
+        self.assertEqual(keypad.line_2, "BYPAS-RDY TO ARM")
+        self.assertTrue(keypad.ready_led)
+        self.assertTrue(keypad.backlight)
+        self.assertEqual(self.sync.keypad_response, 1)
+        self.assertEqual(self.mqtt.keypad_discovery, [1])
+        self.assertEqual(len(self.mqtt.keypad_states), 1)
 
     def test_descriptor_event_interleave_updates_state(self):
         self.handler.handle(
@@ -104,6 +142,7 @@ class MessageHandlerTests(unittest.TestCase):
         self.assertGreaterEqual(self.mqtt.summary_calls, 3)
         self.assertEqual(len(self.printer.events), 1)
         self.assertEqual(self.sync.descriptor_complete, 1)
+        self.assertIn(1, self.sync.keypad_refreshes)
 
     def test_captured_bypass_event_refreshes_zone_summaries(self):
         self.handler.handle(
@@ -119,6 +158,7 @@ class MessageHandlerTests(unittest.TestCase):
         )
         self.assertTrue(self.state.zones[34].bypassed)
         self.assertEqual(self.mqtt.summary_calls, before + 1)
+        self.assertEqual(self.sync.keypad_refreshes[-1], 1)
 
 
 if __name__ == "__main__":
