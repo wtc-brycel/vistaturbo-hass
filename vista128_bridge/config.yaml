@@ -1,0 +1,67 @@
+name: "Vista Turbo RS232"
+version: "0.2.2"
+slug: "vista128_bridge"
+description: >-
+  Local TCP/MQTT bridge for the VISTA Turbo RS-232 automation interface.
+  Developed and tested on VISTA-128BPT.
+url: "https://github.com/wtc-brycel/vistaturbo-hass"
+arch:
+  - amd64
+  - aarch64
+startup: application
+stage: experimental
+init: false
+services:
+  - mqtt:need
+options:
+  panel_host: "192.0.2.10"
+  panel_port: 10001
+  panel_timezone: "America/New_York"
+  mqtt_base_topic: "vista128"
+  mqtt_discovery_prefix: "homeassistant"
+  reconnect_min_seconds: 1
+  connect_timeout_seconds: 5
+  reconnect_max_seconds: 30
+  frame_idle_ms: 250
+  raw_logging: true
+  startup_sync_enabled: true
+  startup_sync_initial_delay_ms: 1000
+  startup_sync_command_delay_ms: 500
+  startup_sync_response_timeout_seconds: 5
+  periodic_sync_enabled: true
+  periodic_sync_interval_seconds: 300
+  periodic_sync_reconnect_after_failures: 3
+  transport_print_enabled: false
+  transport_host: ""
+  transport_http_port: 9101
+  transport_print_timeout_seconds: 5
+  transport_print_retry_seconds: 10
+  transport_print_queue_max: 5000
+  transport_print_width: 32
+  debug_raw_tx_enabled: false
+schema:
+  panel_host: str
+  panel_port: port
+  panel_timezone: str
+  mqtt_base_topic: str
+  mqtt_discovery_prefix: str
+  reconnect_min_seconds: int(1,60)
+  connect_timeout_seconds: int(1,60)
+  reconnect_max_seconds: int(1,300)
+  frame_idle_ms: int(25,5000)
+  raw_logging: bool
+  startup_sync_enabled: bool
+  startup_sync_initial_delay_ms: int(100,10000)
+  startup_sync_command_delay_ms: int(100,10000)
+  startup_sync_response_timeout_seconds: int(1,30)
+  periodic_sync_enabled: bool
+  periodic_sync_interval_seconds: int(60,86400)
+  periodic_sync_reconnect_after_failures: int(1,20)
+  transport_print_enabled: bool
+  transport_host: str
+  transport_http_port: port
+  transport_print_timeout_seconds: int(1,60)
+  transport_print_retry_seconds: int(1,3600)
+  transport_print_queue_max: int(1,100000)
+  transport_print_width: int(24,64)
+  debug_raw_tx_enabled: bool

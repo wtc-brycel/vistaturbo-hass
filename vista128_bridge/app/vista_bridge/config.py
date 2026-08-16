@@ -1,0 +1,136 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+import os
+
+
+def _bool_env(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+@dataclass(frozen=True)
+class PanelSettings:
+    host: str
+    port: int
+    timezone: str
+    connect_timeout_seconds: int
+    reconnect_min_seconds: int
+    reconnect_max_seconds: int
+    frame_idle_ms: int
+
+
+@dataclass(frozen=True)
+class MqttSettings:
+    host: str
+    port: int
+    username: str
+    password: str
+    base_topic: str
+    discovery_prefix: str
+
+
+@dataclass(frozen=True)
+class SyncSettings:
+    startup_enabled: bool
+    initial_delay_ms: int
+    command_delay_ms: int
+    response_timeout_seconds: int
+    periodic_enabled: bool
+    periodic_interval_seconds: int
+    reconnect_after_failures: int
+
+
+@dataclass(frozen=True)
+class PrinterSettings:
+    enabled: bool
+    host: str
+    http_port: int
+    timeout_seconds: int
+    retry_seconds: int
+    queue_max: int
+    width: int
+    spool_path: str
+
+
+@dataclass(frozen=True)
+class Settings:
+    panel: PanelSettings
+    mqtt: MqttSettings
+    sync: SyncSettings
+    printer: PrinterSettings
+    raw_logging: bool
+    debug_raw_tx_enabled: bool
+
+    @classmethod
+    def from_env(cls) -> "Settings":
+        settings = cls(
+            panel=PanelSettings(
+                host=os.environ["PANEL_HOST"].strip(),
+                port=int(os.environ["PANEL_PORT"]),
+                timezone=os.environ.get("PANEL_TIMEZONE", "America/New_York").strip(),
+                connect_timeout_seconds=int(os.environ.get("CONNECT_TIMEOUT_SECONDS", "5")),
+                reconnect_min_seconds=int(os.environ.get("RECONNECT_MIN_SECONDS", "1")),
+                reconnect_max_seconds=int(os.environ.get("RECONNECT_MAX_SECONDS", "30")),
+                frame_idle_ms=int(os.environ.get("FRAME_IDLE_MS", "250")),
+            ),
+            mqtt=MqttSettings(
+                host=os.environ["MQTT_HOST"].strip(),
+                port=int(os.environ.get("MQTT_PORT", "1883")),
+                username=os.environ.get("MQTT_USERNAME", ""),
+                password=os.environ.get("MQTT_PASSWORD", ""),
+                base_topic=os.environ.get("MQTT_BASE_TOPIC", "vista128").strip("/"),
+                discovery_prefix=os.environ.get(
+                    "MQTT_DISCOVERY_PREFIX", "homeassistant"
+                ).strip("/"),
+            ),
+            sync=SyncSettings(
+                startup_enabled=_bool_env("STARTUP_SYNC_ENABLED", True),
+                initial_delay_ms=int(os.environ.get("STARTUP_SYNC_INITIAL_DELAY_MS", "1000")),
+                command_delay_ms=int(os.environ.get("STARTUP_SYNC_COMMAND_DELAY_MS", "500")),
+                response_timeout_seconds=int(
+                    os.environ.get("STARTUP_SYNC_RESPONSE_TIMEOUT_SECONDS", "5")
+                ),
+                periodic_enabled=_bool_env("PERIODIC_SYNC_ENABLED", True),
+                periodic_interval_seconds=int(
+                    os.environ.get("PERIODIC_SYNC_INTERVAL_SECONDS", "300")
+                ),
+                reconnect_after_failures=int(
+                    os.environ.get("PERIODIC_SYNC_RECONNECT_AFTER_FAILURES", "3")
+                ),
+            ),
+            printer=PrinterSettings(
+                enabled=_bool_env("TRANSPORT_PRINT_ENABLED", False),
+                host=os.environ.get("TRANSPORT_HOST", "").strip(),
+                http_port=int(os.environ.get("TRANSPORT_HTTP_PORT", "9101")),
+                timeout_seconds=int(os.environ.get("TRANSPORT_PRINT_TIMEOUT_SECONDS", "5")),
+                retry_seconds=int(os.environ.get("TRANSPORT_PRINT_RETRY_SECONDS", "10")),
+                queue_max=int(os.environ.get("TRANSPORT_PRINT_QUEUE_MAX", "5000")),
+                width=int(os.environ.get("TRANSPORT_PRINT_WIDTH", "32")),
+                spool_path=os.environ.get(
+                    "TRANSPORT_PRINT_SPOOL_PATH", "/data/vista128_print_queue.sqlite3"
+                ).strip(),
+            ),
+            raw_logging=_bool_env("RAW_LOGGING", True),
+            debug_raw_tx_enabled=_bool_env("DEBUG_RAW_TX_ENABLED", False),
+        )
+        settings.validate()
+        return settings
+
+    def validate(self) -> None:
+        if self.panel.reconnect_max_seconds < self.panel.reconnect_min_seconds:
+            raise ValueError("reconnect_max_seconds must be >= reconnect_min_seconds")
+        if self.sync.periodic_interval_seconds < 60:
+            raise ValueError("periodic_sync_interval_seconds must be >= 60")
+        if self.sync.reconnect_after_failures < 1:
+            raise ValueError("periodic_sync_reconnect_after_failures must be >= 1")
+        if self.printer.enabled and not self.printer.host:
+            raise ValueError("transport_host is required when transport_print_enabled is true")
+        if not 1 <= self.printer.http_port <= 65535:
+            raise ValueError("transport_http_port must be 1..65535")
+        if not 24 <= self.printer.width <= 64:
+            raise ValueError("transport_print_width must be 24..64")
+        if self.printer.queue_max < 1:
+            raise ValueError("transport_print_queue_max must be >= 1")

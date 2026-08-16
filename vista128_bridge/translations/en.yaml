@@ -1,0 +1,67 @@
+configuration:
+  panel_host:
+    name: Serial server host
+    description: IP address or DNS name of the TCP serial server.
+  panel_port:
+    name: Serial server TCP port
+    description: TCP server port that transparently exposes the VISTA RS-232 connection.
+  panel_timezone:
+    name: Panel timezone
+    description: IANA timezone used to interpret the VISTA panel's local event timestamps.
+  mqtt_base_topic:
+    name: MQTT base topic
+    description: Base MQTT topic used by the bridge.
+  mqtt_discovery_prefix:
+    name: MQTT discovery prefix
+    description: Home Assistant MQTT discovery prefix; normally homeassistant.
+  reconnect_min_seconds:
+    name: Minimum reconnect delay
+    description: Initial TCP reconnect delay after a failure.
+  connect_timeout_seconds:
+    name: TCP connect timeout
+    description: Time to wait for the serial server TCP connection before retrying.
+  reconnect_max_seconds:
+    name: Maximum reconnect delay
+    description: Maximum TCP reconnect backoff.
+  frame_idle_ms:
+    name: Frame idle flush
+    description: Flush an unterminated serial chunk after this many milliseconds of inactivity.
+  raw_logging:
+    name: Log raw frames
+    description: Print each received frame in ASCII and hexadecimal form to the App log.
+  startup_sync_enabled:
+    name: Startup synchronization
+    description: Query partition, zone, mapping, and descriptor state after each TCP connection.
+  periodic_sync_enabled:
+    name: Periodic state reconciliation
+    description: Periodically re-query dynamic partition and zone state to correct any drift.
+  periodic_sync_interval_seconds:
+    name: Reconciliation interval
+    description: Seconds between read-only partition and zone state reconciliations.
+  periodic_sync_reconnect_after_failures:
+    name: Failed sync reconnect threshold
+    description: Force a fresh serial-server TCP session after this many consecutive failed reconciliations.
+  transport_print_enabled:
+    name: Print VISTA events to TransPort
+    description: Send every valid unsolicited VISTA system event to the TransPort text event printer.
+  transport_host:
+    name: TransPort host
+    description: IP address or DNS name of the TransPort appliance running the event printer.
+  transport_http_port:
+    name: TransPort event-printer HTTP port
+    description: HTTP port for POST /print; TransPort defaults to 9101.
+  transport_print_timeout_seconds:
+    name: Print timeout
+    description: Connect/response timeout for a TransPort print submission.
+  transport_print_retry_seconds:
+    name: Print retry delay
+    description: Delay before retrying jobs that could not establish a TCP connection to TransPort.
+  transport_print_queue_max:
+    name: Durable print queue limit
+    description: Maximum pending event receipts retained in the add-on's persistent spool.
+  transport_print_width:
+    name: Receipt columns
+    description: Plain-text receipt width. 32 columns fits typical 58 mm printers.
+  debug_raw_tx_enabled:
+    name: Enable guarded raw transmit
+    description: Dangerous diagnostic feature. Keep disabled unless testing panel commands.
