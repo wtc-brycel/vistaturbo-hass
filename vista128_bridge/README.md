@@ -6,7 +6,7 @@ This project has been developed and tested against a **VISTA-128BPT**. Other VIS
 
 The App is designed to reach the panel through a **Lantronix UDS-series serial server or an equivalent transparent serial-to-IP device**. Development and current operation have been tested with a **StarTech NETRS2321POE** in raw TCP Server mode.
 
-Current status: read-only monitoring is operational. Home Assistant arm/disarm commands are not sent to the panel.
+Current status: read-only monitoring is operational, including partition keypad text retrieval. Home Assistant arm/disarm commands are not sent to the panel.
 
 ## Runtime path
 
@@ -57,6 +57,24 @@ The alternate **J9 10-pin header** may be used with a VT-SERCBL adapter for a te
 
 TB4 is RS-232 level signaling. It is not a TTL UART connection.
 
+## Keypad display
+
+The VISTA Turbo RS-232 interface can return the physical 2 x 16 character keypad display for a partition. Partition 1 was physically validated with:
+
+```text
+09KD10077\r\n
+```
+
+and a valid `29kd` response containing both display lines, keypad LED state, and the backlight flag.
+
+The App polls configured keypad partitions every 7 seconds by default and also requests a debounced refresh after valid partition events. The default Home Assistant entity is:
+
+```text
+Partition 1 Keypad
+```
+
+Its state contains a compact version of both display lines. Attributes preserve the exact 16-character lines, Ready/Trouble/Armed LED flags, backlight state, raw LED nibble, raw display bytes, and update timestamp.
+
 ## Zone entities
 
 Each assigned VISTA zone is exposed as four independent Home Assistant binary sensors:
@@ -94,6 +112,7 @@ RF low-battery and sensor-tamper events are not part of the `49ZS` snapshot and 
 - Startup state and metadata synchronization
 - Five-minute state reconciliation by default
 - Partition MQTT Discovery entities
+- Partition keypad display polling with event-triggered refresh
 - Per-zone Fault, Alarm, Check, and Bypass binary sensors
 - Aggregate Fault Zones, Alarm Zones, Check Zones, and Bypass Zones sensors
 - Real-time `1Bnq` event handling
