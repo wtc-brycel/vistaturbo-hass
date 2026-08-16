@@ -13,34 +13,36 @@
   * { box-sizing:border-box; }
   body {
     margin:0;
-    padding:38px;
+    padding:34px;
     font-family:Arial,Helvetica,sans-serif;
-    background:#eceff1;
+    background:linear-gradient(180deg,#eef1f3,#e4e7e9);
     color:#222;
   }
   h1 { margin:0 0 6px; font-size:28px; }
   p { margin:0 0 28px; color:#667; }
   .grid {
     display:grid;
-    grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);
-    gap:42px;
-    align-items:start;
+    grid-template-columns:1fr;
+    gap:34px;
+    max-width:1050px;
+    margin:0 auto;
   }
   .panel {
     background:#fff;
     border-radius:18px;
-    padding:24px;
-    box-shadow:0 10px 30px rgba(0,0,0,.12);
+    padding:24px 34px 20px;
+    box-shadow:0 10px 30px rgba(0,0,0,.11);
   }
-  .panel h2 { margin:0 0 20px; font-size:20px; font-weight:600; }
-  @media(max-width:900px){.grid{grid-template-columns:1fr}}
+  .panel h2 { margin:0 0 18px; font-size:19px; font-weight:600; }
 </style>
 <script src="./vista-keypad-card.js"></script>
 </head>
 <body>
-<h1>Vista Turbo HASS keypad card</h1>
-<p>Read-only preview driven from the current keypad MQTT entity shape.</p>
 <div class="grid">
+  <div>
+    <h1>Vista Turbo HASS keypad card</h1>
+    <p>Read-only development preview using the current keypad entity shape.</p>
+  </div>
   <section class="panel">
     <h2>6160CR-2</h2>
     <vista-keypad-card id="cr2"></vista-keypad-card>
@@ -67,12 +69,29 @@
     }
   };
 
+  const functionKeys = {
+    a: { text: "AWAY" },
+    b: { text: "STAY" },
+    c: { text: "POLICE", background: "#1974ae", color: "#ffffff" },
+    d: { text: "PAGE" }
+  };
+
   const cr2 = document.getElementById("cr2");
-  cr2.setConfig({ entity:"sensor.vista_partition_1_keypad", model:"6160cr2", read_only:true });
+  cr2.setConfig({
+    entity:"sensor.vista_partition_1_keypad",
+    model:"6160cr2",
+    read_only:true,
+    function_keys:functionKeys
+  });
   cr2.hass = hass;
 
   const k6160 = document.getElementById("k6160");
-  k6160.setConfig({ entity:"sensor.vista_partition_1_keypad", model:"6160", read_only:true });
+  k6160.setConfig({
+    entity:"sensor.vista_partition_1_keypad",
+    model:"6160",
+    read_only:true,
+    function_keys:functionKeys
+  });
   k6160.hass = hass;
 </script>
 </body>
