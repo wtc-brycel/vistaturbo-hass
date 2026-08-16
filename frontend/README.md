@@ -72,8 +72,10 @@ Those values are tuning parameters only.
 
 ## Current visual pass
 
-Version 0.3.0 rebuilds the two legacy keypad skins around measured proportions from the supplied physical references rather than generic alarm-keypad styling. The 6160 and 6160CR-2 now share the same front-face proportions and identical key geometry, with no rendered drop-down door.
+Version 0.3.0 rebuilds the two legacy keypad skins around measured proportions from the supplied physical references rather than generic alarm-keypad styling. The 6160 and 6160CR-2 share the same overall face proportions and exact key dimensions, with no rendered drop-down door.
 
-The display hood, speaker slots, control placement, keycap proportions, CR-2 burglary/fire annunciator areas, case notch, embossing, LED lenses, molded-plastic shading and microtexture are all drawn separately. The LCD is rendered as a 5x7 dot matrix from the exact 16-character VISTA display lines.
+The key grid is positioned from the reference hardware: four equal-height rows, larger real-world vertical spacing, a separate recessed programmable-key column, and the wider gap between that column and the numeric keypad. The CR-2 annunciator stack and blue burglary-status label have also been moved to the physical reference positions.
+
+The raised display hood, speaker slots, control placement, keycap proportions, case notch, embossing, LED lenses, molded-plastic shading and microtexture are drawn separately. The LCD is rendered as a 5x7 dot matrix from the exact 16-character VISTA display lines.
 
 No reference photograph is embedded in the card. The physical appearance is produced by CSS, inline SVG and canvas so the keypad remains responsive and interactive.
