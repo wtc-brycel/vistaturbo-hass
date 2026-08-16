@@ -119,6 +119,10 @@ startup_sync_response_timeout_seconds: 5
 periodic_sync_enabled: true
 periodic_sync_interval_seconds: 300
 periodic_sync_reconnect_after_failures: 3
+keypad_display_enabled: true
+keypad_partitions: "1"
+keypad_poll_interval_seconds: 7
+keypad_event_refresh_delay_ms: 250
 transport_print_enabled: false
 transport_host: ""
 transport_http_port: 9101
@@ -130,6 +134,10 @@ debug_raw_tx_enabled: false
 ```
 
 `panel_host` is the IP address or resolvable hostname of the serial-to-IP device. `panel_port` is its raw TCP listener.
+
+`keypad_partitions` is a comma-separated list of partitions whose keypad display should be queried, for example `"1"` or `"1,2"`. A real keypad should exist on each queried partition. Partition 1 is the default.
+
+The keypad display is queried every 7 seconds by default. Valid unsolicited system events also request a debounced keypad refresh for the affected configured partition. All keypad queries share the same serialized transaction lock as startup and periodic synchronization.
 
 ## Startup synchronization
 
@@ -157,6 +165,50 @@ The bridge repeats these dynamic queries every 300 seconds by default:
 
 This catches missed or unknown state transitions without repeatedly requesting static metadata. After repeated failed reconciliations, the bridge closes the panel TCP session and lets the normal reconnect path establish a clean session.
 
+## Keypad display polling
+
+The VISTA Turbo RS-232 automation interface can return the 2 x 16 character keypad display for a partition. This was physically validated on the VISTA-128BPT with the Partition 1 request:
+
+```text
+09KD10077\r\n
+```
+
+The captured panel transaction was:
+
+```text
+0AFVKD0004
+29kd<32 display bytes><LED nibble>00<checksum>
+08OK009E
+```
+
+The captured display decoded to:
+
+```text
+P1   DISARMED   
+BYPAS-RDY TO ARM
+```
+
+The high bit of the first display byte indicates keypad backlight state. That bit is removed before the first display character is decoded. The status nibble currently maps as:
+
+```text
+0x1  Ready LED
+0x2  Trouble LED
+0x4  Armed LED
+```
+
+The raw display bytes and status nibble remain available in Home Assistant attributes for verification.
+
+Keypad display packets do not identify their partition in the response. Vista Turbo RS232 therefore associates a `kd` response with the currently active serialized keypad query. A valid keypad display response and the following valid `08OK` are both required for a successful keypad transaction.
+
+The panel has not been observed to stream keypad text changes unsolicited. The App uses two refresh paths instead:
+
+```text
+configured interval -> KD query -> keypad state
+system event         -> short debounce -> KD query -> keypad state
+```
+
+The periodic query catches display changes caused by physical keypad interaction or other activity that may not produce a decoded system event. The event-driven refresh makes alarm, fault, bypass, trouble, and arming display changes available sooner when the panel also emits a partition event.
+
 ## Home Assistant entities
 
 ### Partitions
@@ -178,6 +230,38 @@ B  armed_custom_bypass
 Alarm events can overlay the partition state as `triggered` until restore or disarm.
 
 The MQTT alarm schema requires a command topic. The bridge publishes one but rejects every normal Home Assistant alarm command while control is disabled.
+
+### Keypad display
+
+Each configured keypad partition is published as one MQTT `sensor`, for example:
+
+```text
+Partition 1 Keypad
+```
+
+The sensor state is a compact representation of both display lines:
+
+```text
+P1   DISARMED | BYPAS-RDY TO ARM
+```
+
+Attributes preserve the exact two 16-character lines and keypad indicators:
+
+```yaml
+partition: 1
+line_1: "P1   DISARMED   "
+line_2: "BYPAS-RDY TO ARM"
+display: |-
+  P1   DISARMED   
+  BYPAS-RDY TO ARM
+ready: true
+trouble: false
+armed: false
+backlight: true
+led_status: "1"
+raw_display_hex: "d0 31 ..."
+updated_at: "2026-08-16T13:22:28-04:00"
+```
 
 ### Zone conditions
 
@@ -303,7 +387,7 @@ Delivery rules:
 {"confirm":"I_UNDERSTAND_RAW_PANEL_TX","ascii":"..."}
 ```
 
-Raw transmit is rejected while the panel is offline or a synchronization transaction is active.
+Raw transmit is rejected while the panel is offline or another serialized synchronization or keypad transaction is active.
 
 ## Design constraints
 
@@ -312,17 +396,18 @@ Raw transmit is rejected while the panel is offline or a synchronization transac
 - No optimistic alarm state.
 - Pending panel commands are discarded on disconnect.
 - Unknown valid events remain visible.
+- Keypad display queries are read-only and serialized with state synchronization.
 - Home Assistant is not required for VISTA alarm operation.
 
 ## Source layout
 
 ```text
 bridge.py             connection and I/O orchestration
-synchronizer.py       startup and periodic protocol transactions
+synchronizer.py       startup, periodic, and keypad protocol transactions
 message_handler.py    decoded packet handling
-protocol.py           packet validation and parsers
+protocol.py           packet validation, queries, and parsers
 event_codes.py        VISTA event code tables
-state.py              partition and zone state
+state.py              partition, keypad, and zone state
 mqtt_client.py        MQTT transport and publication
 mqtt_discovery.py     Home Assistant discovery payloads
 printer.py            receipt formatting and delivery
