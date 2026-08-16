@@ -57,6 +57,7 @@ TB4 carries normal RS-232 signaling, not TTL-level UART signaling. Do not connec
 
 - Partition state in Home Assistant
 - Assigned-zone binary sensors
+- Aggregate Faulted Zones, Zones in Check, Zones in Alarm, and Bypassed Zones sensors
 - VISTA alpha descriptor import
 - Real-time automation event decoding
 - Periodic state reconciliation
@@ -64,6 +65,8 @@ TB4 carries normal RS-232 signaling, not TTL-level UART signaling. Do not connec
 - Panel clock-offset diagnostics
 - Optional continuous event receipts through TransPort
 - Guarded raw transmit for protocol testing
+
+The four aggregate zone-condition sensors are derived from the VISTA `49ZS` snapshot and therefore reconcile with the panel every five minutes by default. Their state is the number of matching assigned zones, with zone number, partition, and descriptor listed in attributes.
 
 ## Install as a Home Assistant App repository
 
