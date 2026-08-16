@@ -4,12 +4,42 @@
 
 Developed and tested against a **VISTA-128BPT**. Other VISTA Turbo models are currently untested and are not claimed as supported. This App depends on the VISTA Turbo RS-232 automation interface and should not be assumed to work with non-Turbo VISTA panels.
 
+## Connection model
+
+Vista Turbo RS232 is designed around a network serial server between Home Assistant and the panel. A **Lantronix UDS-series device** is the intended class of hardware. Equivalent transparent serial-to-IP devices may also be used.
+
+The deployment path is:
+
+```text
+VISTA Turbo panel
+      |
+    RS-232
+      |
+Lantronix UDS or equivalent
+transparent serial-to-IP server
+      |
+     TCP
+      |
+Vista Turbo RS232 App
+      |
+     MQTT
+      |
+Home Assistant
+```
+
+The App expects the serial server to expose the VISTA automation port as a plain TCP byte stream. It connects to `panel_host` and `panel_port`; it does not currently open a local `/dev/tty*` device.
+
+The **StarTech NETRS2321POE** is the serial-to-IP device currently tested with this project. It works when configured in raw TCP Server mode. On the StarTech, do not use COM Port/RFC2217 mode.
+
+A different serial server should work if it provides the same transparent behavior. Avoid modes that add protocol framing, Telnet negotiation, RFC2217 control traffic, or other transformations to the serial data stream.
+
 ## Requirements
 
 - Home Assistant OS or Supervisor
 - MQTT service available to the App
 - VISTA-128BPT automation serial port
-- Transparent TCP serial server
+- Lantronix UDS-series device or equivalent transparent serial-to-IP server
+- Network reachability from the App to the serial server TCP port
 
 Serial settings:
 
@@ -20,10 +50,19 @@ RS-232
 no parity
 1 stop bit
 no flow control
-TCP server mode
 ```
 
-The StarTech NETRS2321POE is known to work when configured as a raw TCP server. Do not use its COM Port/RFC2217 mode.
+Network serial mode:
+
+```text
+transparent raw TCP
+server/listen mode
+no RFC2217
+no Telnet negotiation
+no virtual COM-port dependency
+```
+
+Port numbers are device-specific. Configure a TCP port on the serial server, then set the same value as `panel_port` in the App. The current StarTech installation uses TCP port `10001`, but that port is not required by the VISTA protocol itself.
 
 ## Configuration
 
@@ -54,6 +93,8 @@ transport_print_queue_max: 5000
 transport_print_width: 32
 debug_raw_tx_enabled: false
 ```
+
+`panel_host` is the IP address or resolvable hostname of the Lantronix UDS or equivalent serial-to-IP device. `panel_port` is the raw TCP listener configured on that device.
 
 ## Startup synchronization
 
