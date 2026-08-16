@@ -5,7 +5,7 @@ Home Assistant dashboard card for the keypad-display entities published by Vista
 The card currently implements two physical keypad skins:
 
 - `6160cr2`, modeled after the commercial fire/burglary keypad
-- `6160`, modeled after the standard white alpha keypad
+- `6160`, modeled after the standard alpha keypad
 
 Both skins use the same live VISTA data. The LCD is rendered from the exact 16-character `line_1` and `line_2` attributes from `sensor.vista_partition_1_keypad`.
 
@@ -35,32 +35,59 @@ entity: sensor.vista_partition_1_keypad
 model: 6160
 ```
 
-## 6160CR-2 case colors and theme following
+## Case colors and theme following
 
-`case_color` accepts:
+Both `6160cr2` and `6160` support the same enclosure colors:
 
-- `auto` — follows Home Assistant's current light/dark theme; red in light mode and charcoal/dark gray in dark mode
-- `red` — original commercial red enclosure
-- `white` — white enclosure
-- `dark` — charcoal/dark gray enclosure
+- `red`
+- `white`
+- `dark` — charcoal/dark gray
+- `auto` — chooses a day or night case color from Home Assistant's current theme
 
-The 6160CR-2 defaults to `auto`.
+`case_color: auto` is the default for **both** keypad models, so it may be omitted.
+
+Default AUTO mappings are model-specific:
+
+| Model | Day/light | Night/dark |
+| --- | --- | --- |
+| `6160cr2` | `red` | `dark` |
+| `6160` | `white` | `dark` |
+
+The day and night colors are independently optional and may be overridden with `day_case_color` and `night_case_color`:
 
 ```yaml
 type: custom:vista-keypad-card
 entity: sensor.vista_partition_1_keypad
 model: 6160cr2
 case_color: auto
+day_case_color: red
+night_case_color: dark
 ```
 
-To force the dark version regardless of the dashboard theme:
+For example, this deliberately uses a white CR-2 during the day and a red CR-2 at night:
 
 ```yaml
 type: custom:vista-keypad-card
 entity: sensor.vista_partition_1_keypad
 model: 6160cr2
-case_color: dark
+day_case_color: white
+night_case_color: red
 ```
+
+Explicit `case_color` always wins over day/night AUTO settings:
+
+```yaml
+type: custom:vista-keypad-card
+entity: sensor.vista_partition_1_keypad
+model: 6160
+case_color: red
+```
+
+AUTO first uses Home Assistant's `hass.themes.darkMode`. If that flag is unavailable, the card falls back to the browser's `prefers-color-scheme` setting.
+
+## Responsive sizing
+
+The physical keypad keeps its fixed enclosure aspect ratio as the Lovelace column narrows. There is no forced minimum height that can stretch the enclosure vertically. Button, legend, annunciator-label, border, and spacing dimensions scale from the card container width, with additional narrow-container adjustments below 520 px and 360 px.
 
 ## 6160CR-2 annunciators
 
