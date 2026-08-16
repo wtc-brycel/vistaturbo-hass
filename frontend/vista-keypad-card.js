@@ -1,4 +1,4 @@
-const VISTA_KEYPAD_CARD_VERSION = "0.3.13";
+const VISTA_KEYPAD_CARD_VERSION = "0.3.14";
 
 const MODEL_ALIASES = {
   "6160cr2": "6160cr2",
@@ -109,7 +109,54 @@ class VistaKeypadCard extends HTMLElement {
     this._config = null;
     this._hass = null;
     this._pressTimer = null;
+    this._lastRenderSignature = null;
+    this._resizeObserver = null;
+    this._resizeFrame = 0;
+    this._themeMedia = null;
+    this._themeMediaHandler = null;
     this._audio = new VistaKeypadAudio();
+  }
+
+  connectedCallback() {
+    this._installThemeListener();
+  }
+
+  disconnectedCallback() {
+    this._resizeObserver?.disconnect();
+    this._resizeObserver = null;
+    if (this._resizeFrame) {
+      cancelAnimationFrame(this._resizeFrame);
+      this._resizeFrame = 0;
+    }
+    if (this._themeMedia && this._themeMediaHandler) {
+      if (this._themeMedia.removeEventListener) {
+        this._themeMedia.removeEventListener("change", this._themeMediaHandler);
+      } else {
+        this._themeMedia.removeListener?.(this._themeMediaHandler);
+      }
+    }
+    this._themeMedia = null;
+    this._themeMediaHandler = null;
+    clearTimeout(this._pressTimer);
+  }
+
+  _installThemeListener() {
+    if (this._themeMedia || typeof window === "undefined" || !window.matchMedia) return;
+    this._themeMedia = window.matchMedia("(prefers-color-scheme: dark)");
+    this._themeMediaHandler = () => {
+      if (
+        this._config?.case_color === "auto" &&
+        typeof this._hass?.themes?.darkMode !== "boolean"
+      ) {
+        this._lastRenderSignature = null;
+        this._render();
+      }
+    };
+    if (this._themeMedia.addEventListener) {
+      this._themeMedia.addEventListener("change", this._themeMediaHandler);
+    } else {
+      this._themeMedia.addListener?.(this._themeMediaHandler);
+    }
   }
 
   static getStubConfig() {
@@ -163,16 +210,65 @@ class VistaKeypadCard extends HTMLElement {
       day_case_color: dayCaseColor,
       night_case_color: nightCaseColor,
     };
+    this._lastRenderSignature = null;
     this._render();
+    this._lastRenderSignature = this._renderSignature(this._hass);
   }
 
   set hass(hass) {
     this._hass = hass;
+    const signature = this._renderSignature(hass);
+    if (signature === this._lastRenderSignature) return;
+    this._lastRenderSignature = signature;
     this._render();
   }
 
   getCardSize() {
     return 7;
+  }
+
+  getGridOptions() {
+    return {
+      columns: 12,
+      min_columns: 6,
+      max_columns: 12,
+    };
+  }
+
+  _renderSignature(hass) {
+    const state = this._config?.entity ? hass?.states?.[this._config.entity] : null;
+    const a = state?.attributes ?? {};
+    const externalIndicators = Object.entries(this._config?.indicators ?? {}).map(
+      ([name, entityId]) => [name, entityId, hass?.states?.[entityId]?.state ?? null]
+    );
+    const externalFlashing = Object.entries(this._config?.indicator_flashing ?? {}).map(
+      ([name, raw]) => {
+        const entityId =
+          typeof raw === "string"
+            ? raw
+            : raw && typeof raw === "object" && typeof raw.entity === "string"
+              ? raw.entity
+              : null;
+        return [name, entityId, entityId ? hass?.states?.[entityId]?.state ?? null : raw];
+      }
+    );
+
+    return JSON.stringify([
+      state?.state ?? null,
+      a.line_1 ?? null,
+      a.line_2 ?? null,
+      a.ready ?? null,
+      a.armed ?? null,
+      a.trouble ?? null,
+      a.backlight ?? null,
+      a.power ?? null,
+      a.fire_alarm ?? null,
+      a.silenced ?? null,
+      a.supervisory ?? null,
+      hass?.themes?.darkMode ?? null,
+      externalIndicators,
+      externalFlashing,
+    ]);
   }
 
   _entityState(entityId) {
@@ -1159,6 +1255,21 @@ class VistaKeypadCard extends HTMLElement {
     ctx.fillRect(0, 0, w, h * .42);
   }
 
+  _observeResize() {
+    const shell = this.shadowRoot?.querySelector(".keypad-shell");
+    if (!shell || typeof ResizeObserver === "undefined") return;
+
+    this._resizeObserver ??= new ResizeObserver(() => {
+      if (this._resizeFrame) cancelAnimationFrame(this._resizeFrame);
+      this._resizeFrame = requestAnimationFrame(() => {
+        this._resizeFrame = 0;
+        this._drawLCD();
+      });
+    });
+    this._resizeObserver.disconnect();
+    this._resizeObserver.observe(shell);
+  }
+
   _render() {
     if (!this.shadowRoot || !this._config) return;
 
@@ -1169,12 +1280,18 @@ class VistaKeypadCard extends HTMLElement {
       <div class="read-only-note" id="read-only-note">Read-only monitoring. Keypad control is not enabled.</div>
     </div></ha-card>`;
 
-    requestAnimationFrame(() => this._drawLCD());
+    requestAnimationFrame(() => {
+      this._drawLCD();
+      this._observeResize();
+    });
 
     this.shadowRoot.querySelectorAll("button[data-key]").forEach((button) => {
+      const release = () => button.classList.remove("pressed");
       button.addEventListener("pointerdown", () => button.classList.add("pressed"));
-      button.addEventListener("pointerup", () => button.classList.remove("pressed"));
-      button.addEventListener("pointerleave", () => button.classList.remove("pressed"));
+      button.addEventListener("pointerup", release);
+      button.addEventListener("pointerleave", release);
+      button.addEventListener("pointercancel", release);
+      button.addEventListener("lostpointercapture", release);
       button.addEventListener("click", (event) => this._handleKey(event.currentTarget));
     });
   }
