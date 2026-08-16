@@ -106,13 +106,6 @@ class MessageHandlerTests(unittest.TestCase):
         self.assertEqual(self.sync.descriptor_complete, 1)
 
     def test_captured_bypass_event_refreshes_zone_summaries(self):
-        partitions = ["0"] * 64
-        partitions[33] = "1"
-        body = "49ZP1" + "".join(partitions)
-        checksum = (-sum(body.encode("ascii"))) & 0xFF
-        packet = (body + f"{checksum:02X}").encode("ascii")
-        packet = f"{len(packet) + 2:02X}".encode("ascii") + packet[2:]
-
         self.handler.handle(
             "zone_partition",
             b"49ZP10011110000000000011111111111011011111010111000000000000000000000003E",
