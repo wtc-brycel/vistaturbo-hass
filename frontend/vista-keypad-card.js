@@ -293,7 +293,7 @@ class VistaKeypadCard extends HTMLElement {
       .keypad-shell {
         --case-red:#d71f26; --case-red-hi:#ef3a41; --case-red-lo:#b90f17;
         --case-white:#f0f0ed; --case-white-hi:#fff; --case-white-lo:#d4d4cf;
-        --key-w:9.55cqw; --key-h:5.2cqw; --gap-x:1.72cqw; --gap-y:1.35cqw;
+        --key-w:9.45cqw; --key-h:5.0cqw; --gap-x:3.0cqw; --gap-y:2.45cqw;
         position:relative; width:min(100%,940px); aspect-ratio:1.405/1; min-height:410px;
         overflow:hidden; user-select:none; -webkit-tap-highlight-color:transparent;
         filter:drop-shadow(0 1.05cqw .95cqw rgba(0,0,0,.31));
@@ -329,7 +329,7 @@ class VistaKeypadCard extends HTMLElement {
         box-shadow:0 .9cqw .75cqw rgba(0,0,0,.24), inset 0 .35cqw .25cqw rgba(255,255,255,.21), inset 0 -.23cqw .23cqw rgba(0,0,0,.12);
       }
       .cr2 .display-hood { background:linear-gradient(96deg,#e52b32 0%,#db2028 55%,#c91820 100%); border:.13cqw solid #be151c; }
-      .k6160 .display-hood { background:linear-gradient(96deg,#fff 0%,#f1f1ee 57%,#dadad5 100%); border:.13cqw solid #cfcfca; }
+      .k6160 .display-hood { left:24.8%; width:73.5%; background:linear-gradient(96deg,#fff 0%,#f1f1ee 57%,#dadad5 100%); border:.13cqw solid #cfcfca; }
       .hood-highlight { position:absolute; inset:2% 1% auto 1%; height:1%; border-top:.11cqw solid rgba(255,255,255,.35); border-radius:50%; }
       .lcd-frame {
         position:absolute; left:11.3%; right:10.8%; top:23.2%; height:45.4%; padding:.52cqw;
@@ -337,11 +337,14 @@ class VistaKeypadCard extends HTMLElement {
         box-shadow:inset 0 .16cqw .23cqw rgba(0,0,0,.9), 0 .12cqw .12cqw rgba(255,255,255,.18);
       }
       .matrix-lcd { width:100%; height:100%; display:block; image-rendering:pixelated; background:#95d641; }
-      .controls-well { position:absolute; left:41.2%; top:49.1%; width:52.6%; height:43.5%; }
+      .controls-well { position:absolute; left:40.0%; top:49.0%; width:56.0%; height:43.5%; }
+      .controls-well::before { content:""; position:absolute; left:-2.2cqw; top:-1.05cqw; width:12.4cqw; height:29.7cqw; border-radius:.38cqw; z-index:-1; }
+      .cr2 .controls-well::before { background:linear-gradient(180deg,#d9232a,#cb171f); box-shadow:inset .22cqw .18cqw .22cqw rgba(255,255,255,.16), inset -.2cqw -.18cqw .22cqw rgba(74,0,0,.19), 0 .06cqw .08cqw rgba(0,0,0,.12); }
+      .k6160 .controls-well::before { background:linear-gradient(180deg,#f8f8f5,#e1e1dc); box-shadow:inset .22cqw .18cqw .22cqw rgba(255,255,255,.88), inset -.18cqw -.16cqw .22cqw rgba(70,70,65,.10), 0 .06cqw .08cqw rgba(0,0,0,.08); }
       .key-grid { display:grid; grid-template-columns:repeat(4,var(--key-w)); grid-template-rows:repeat(4,var(--key-h)); column-gap:var(--gap-x); row-gap:var(--gap-y); width:max-content; height:max-content; }
       .grid-slot { width:var(--key-w); height:var(--key-h); }
       .slot-r1{grid-row:1}.slot-r2{grid-row:2}.slot-r3{grid-row:3}.slot-r4{grid-row:4}
-      .function-slot{grid-column:1}.slot-c2{grid-column:2}.slot-c3{grid-column:3}.slot-c4{grid-column:4}
+      .function-slot{grid-column:1;transform:translateX(-1.4cqw)}.slot-c2{grid-column:2}.slot-c3{grid-column:3}.slot-c4{grid-column:4}
       .physical-key {
         width:100%; height:100%; margin:0; padding:0 .55cqw; position:relative; overflow:hidden;
         border:.14cqw solid #595955; border-radius:.36cqw; color:var(--key-custom-color,#171717);
@@ -356,7 +359,7 @@ class VistaKeypadCard extends HTMLElement {
       .number-key { display:flex; align-items:center; justify-content:center; gap:.55cqw; }
       .number-main { font-family:"Arial Narrow","Roboto Condensed",Arial,sans-serif; font-stretch:condensed; font-size:clamp(19px,3.05cqw,34px); font-weight:400; line-height:.9; transform:scaleX(.76); transform-origin:center; }
       .number-legend { font-family:"Arial Narrow","Roboto Condensed",Arial,sans-serif; font-size:clamp(7px,1.22cqw,13px); font-weight:700; font-style:italic; line-height:1; white-space:nowrap; }
-      .status-cr2 { position:absolute; left:5.2%; top:53.1%; width:27.4%; height:39.8%; color:#f1e7e7; font-family:"Arial Narrow",Arial,sans-serif; }
+      .status-cr2 { position:absolute; left:5.2%; top:50.0%; width:27.4%; height:39.8%; color:#f1e7e7; font-family:"Arial Narrow",Arial,sans-serif; }
       .burg-sticker { position:absolute; left:2%; top:0; width:69%; height:31%; padding:1.05cqw 1.55cqw; background:linear-gradient(180deg,#1974ad,#135c92); border-radius:.85cqw; box-shadow:inset 0 .12cqw .16cqw rgba(255,255,255,.17),0 .08cqw .12cqw rgba(0,0,0,.12); color:#edf2f4; }
       .burg-icon { position:absolute; right:4%; top:16%; width:18%; height:68%; color:#f0f6f8; opacity:.9; }
       .fire-annunciators { position:absolute; left:0; top:33%; width:78%; height:67%; padding-left:1.6cqw; }
