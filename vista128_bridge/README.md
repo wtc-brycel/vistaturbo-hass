@@ -2,13 +2,14 @@
 
 Home Assistant App for the native RS-232 automation interface on Honeywell/Resideo VISTA Turbo alarm panels.
 
-> **Release candidate status:** 0.2.5 is read-only. It has been developed and tested on a VISTA-128BPT. Keypad display polling is enabled. Arm, disarm, and keypad-control commands are not sent to the panel.
+> **Release candidate status:** 0.2.6-rc.1 is read-only. It has been developed and tested on a VISTA-128BPT. Keypad display polling is enabled. Arm, disarm, and keypad-control commands are not sent to the panel.
 
 ## What you get in Home Assistant
 
 - Partition alarm state
 - Exact 2 x 16 partition keypad display
 - Keypad Ready, Trouble, Armed, and backlight state
+- 6160CR-2 Power, Fire Alarm, Silenced, and Supervisory annunciator state on the keypad entity
 - Four binary sensors per assigned zone: **Fault, Alarm, Check, Bypass**
 - Aggregate Fault Zones, Alarm Zones, Check Zones, and Bypass Zones sensors
 - Programmed zone alpha descriptors
@@ -51,7 +52,22 @@ P1   DISARMED
 BYPAS-RDY TO ARM
 ```
 
-Home Assistant receives a **Partition 1 Keypad** sensor. Its attributes preserve the exact two 16-character lines plus Ready, Trouble, Armed, backlight, raw LED state, raw display bytes, and the last update time.
+Home Assistant receives a **Partition 1 Keypad** sensor. Its attributes preserve the exact two 16-character lines plus Ready, Trouble, Armed, Power, Fire Alarm, Silenced, Supervisory, backlight, raw LED state, raw display bytes, and the last update time.
+
+The dedicated Power, Fire Alarm, Silenced, and Supervisory attributes are reconstructed from validated VISTA real-time events plus keypad-display reconciliation. Unknown reconstructed state is published as JSON `null` rather than guessed.
+
+## Dashboard keypad card
+
+The matching read-only 6160CR-2 and 6160 Lovelace card ships with this release as `vista-keypad-card.js`. See the repository `frontend/README.md` for installation and theme options.
+
+The card supports red, white, and dark enclosure colors for either model. `case_color: auto` is the default. AUTO follows the Home Assistant light/dark theme and defaults to:
+
+```text
+6160CR-2: red by day, dark at night
+6160:     white by day, dark at night
+```
+
+Optional `day_case_color` and `night_case_color` settings can override either side of AUTO mode.
 
 ## Zone state
 
