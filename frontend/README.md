@@ -11,15 +11,27 @@ Both skins use the same live VISTA data. The LCD is rendered from the exact 16-c
 
 The card is **read-only** while Vista Turbo RS232 remains read-only. The keys depress visually, but no panel command is sent.
 
-## Install for development
+## Install in Home Assistant
 
-Copy `vista-keypad-card.js` to Home Assistant's `/config/www/` directory and add it as a Lovelace JavaScript module:
+The release attaches `vista-keypad-card.js` as a standalone asset.
 
-```text
-/local/vista-keypad-card.js
+From the Home Assistant Terminal or SSH add-on:
+
+```sh
+mkdir -p /config/www
+curl -fL "https://github.com/wtc-brycel/vistaturbo-hass/releases/download/v0.2.6-rc.1/vista-keypad-card.js" \
+  -o /config/www/vista-keypad-card.js
 ```
 
-Then add the card:
+Then add the card as a Lovelace JavaScript module under **Settings -> Dashboards -> Resources**:
+
+```text
+/local/vista-keypad-card.js?v=0.3.13
+```
+
+If an older version of the card was already loaded, keeping the `?v=0.3.13` suffix forces Home Assistant/browser cache invalidation after the file is replaced.
+
+A minimal 6160CR-2 card is:
 
 ```yaml
 type: custom:vista-keypad-card
@@ -41,8 +53,8 @@ Both `6160cr2` and `6160` support the same enclosure colors:
 
 - `red`
 - `white`
-- `dark` — charcoal/dark gray
-- `auto` — chooses a day or night case color from Home Assistant's current theme
+- `dark` for charcoal/dark gray
+- `auto` to choose a day or night case color from Home Assistant's current theme
 
 `case_color: auto` is the default for **both** keypad models, so it may be omitted.
 
@@ -93,13 +105,13 @@ The physical keypad keeps its fixed enclosure aspect ratio as the Lovelace colum
 
 Vista Turbo RS232 publishes the CR-2 annunciator state directly on the keypad entity:
 
-- `armed` — native KD LED bit
-- `ready` — native KD LED bit
-- `trouble` — native KD LED bit
-- `power` — reconstructed from AC-loss/restore events and keypad reconciliation
-- `fire_alarm` — latched fire/smoke/waterflow state, cleared after keypad reset/normalization
-- `silenced` — reconstructed from the keypad display while a fire alarm is latched
-- `supervisory` — reconstructed from supervisory start/restore events and keypad display reconciliation
+- `armed` from the native KD LED bit
+- `ready` from the native KD LED bit
+- `trouble` from the native KD LED bit
+- `power` reconstructed from AC-loss/restore events and keypad reconciliation
+- `fire_alarm` latched from fire/smoke/waterflow state and cleared after keypad reset/normalization
+- `silenced` reconstructed from the keypad display while a fire alarm is latched
+- `supervisory` reconstructed from supervisory start/restore events and keypad display reconciliation
 
 Unknown reconstructed states are published as JSON `null` until the bridge has authoritative evidence. The card renders those lamps as unknown rather than inventing a state.
 
