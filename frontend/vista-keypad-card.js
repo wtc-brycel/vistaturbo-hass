@@ -1,10 +1,16 @@
-const VISTA_KEYPAD_CARD_VERSION = "0.3.12";
+const VISTA_KEYPAD_CARD_VERSION = "0.3.13";
 
 const MODEL_ALIASES = {
   "6160cr2": "6160cr2",
   "6160cr-2": "6160cr2",
   "cr2": "6160cr2",
   "6160": "6160",
+};
+
+const CASE_COLORS = new Set(["red", "white", "dark"]);
+const AUTO_CASE_DEFAULTS = {
+  "6160cr2": { day: "red", night: "dark" },
+  "6160": { day: "white", night: "dark" },
 };
 
 const NUMBER_KEYS = [
@@ -110,6 +116,7 @@ class VistaKeypadCard extends HTMLElement {
     return {
       entity: "sensor.vista_partition_1_keypad",
       model: "6160cr2",
+      case_color: "auto",
       read_only: true,
     };
   }
@@ -120,16 +127,29 @@ class VistaKeypadCard extends HTMLElement {
     const model = MODEL_ALIASES[String(config.model ?? "6160cr2").toLowerCase()];
     if (!model) throw new Error("model must be 6160cr2 or 6160");
 
-    const defaultCaseColor = model === "6160cr2" ? "auto" : "white";
-    const caseColor = String(config.case_color ?? defaultCaseColor).toLowerCase();
-    if (!["auto", "red", "white", "dark"].includes(caseColor)) {
+    const caseColor = String(config.case_color ?? "auto").toLowerCase();
+    if (caseColor !== "auto" && !CASE_COLORS.has(caseColor)) {
       throw new Error("case_color must be auto, red, white, or dark");
     }
+
+    const normalizeOptionalCaseColor = (value, name) => {
+      if (value === undefined || value === null || value === "") return null;
+      const normalized = String(value).toLowerCase();
+      if (!CASE_COLORS.has(normalized)) {
+        throw new Error(`${name} must be red, white, or dark`);
+      }
+      return normalized;
+    };
+
+    const dayCaseColor = normalizeOptionalCaseColor(config.day_case_color, "day_case_color");
+    const nightCaseColor = normalizeOptionalCaseColor(config.night_case_color, "night_case_color");
 
     this._config = {
       title: "",
       model,
-      case_color: defaultCaseColor,
+      case_color: "auto",
+      day_case_color: null,
+      night_case_color: null,
       read_only: true,
       show_card_background: false,
       function_keys: {},
@@ -140,6 +160,8 @@ class VistaKeypadCard extends HTMLElement {
       ...config,
       model,
       case_color: caseColor,
+      day_case_color: dayCaseColor,
+      night_case_color: nightCaseColor,
     };
     this._render();
   }
@@ -185,15 +207,19 @@ class VistaKeypadCard extends HTMLElement {
   }
 
   _resolvedCaseColor(model) {
-    const configured = this._config?.case_color ?? (model === "6160cr2" ? "auto" : "white");
+    const configured = this._config?.case_color ?? "auto";
     if (configured !== "auto") return configured;
+
+    const defaults = AUTO_CASE_DEFAULTS[model] ?? AUTO_CASE_DEFAULTS["6160cr2"];
+    const dayColor = this._config?.day_case_color ?? defaults.day;
+    const nightColor = this._config?.night_case_color ?? defaults.night;
 
     const hassDarkMode = this._hass?.themes?.darkMode;
     const systemDarkMode = typeof window !== "undefined" && window.matchMedia
       ? window.matchMedia("(prefers-color-scheme: dark)").matches
       : false;
     const darkMode = typeof hassDarkMode === "boolean" ? hassDarkMode : systemDarkMode;
-    return darkMode ? "dark" : (model === "6160cr2" ? "red" : "white");
+    return darkMode ? nightColor : dayColor;
   }
 
   _displayState() {
@@ -440,7 +466,7 @@ class VistaKeypadCard extends HTMLElement {
         position:relative;
         width:min(100%,940px);
         aspect-ratio:1.405/1;
-        min-height:410px;
+        min-width:0;
         overflow:hidden;
         user-select:none;
         -webkit-tap-highlight-color:transparent;
@@ -652,7 +678,7 @@ class VistaKeypadCard extends HTMLElement {
       }
 
       .function-label {
-        font-size:clamp(8px,1.42cqw,16px);
+        font-size:clamp(5px,1.42cqw,16px);
         line-height:1;
         font-weight:800;
         letter-spacing:-.02em;
@@ -668,7 +694,7 @@ class VistaKeypadCard extends HTMLElement {
 
       .number-main {
         font-family:"Arial Narrow","Roboto Condensed",Arial,sans-serif;
-        font-size:clamp(19px,3.05cqw,34px);
+        font-size:clamp(9px,3.05cqw,34px);
         font-weight:400;
         line-height:.9;
         transform:scaleX(.76);
@@ -677,7 +703,7 @@ class VistaKeypadCard extends HTMLElement {
 
       .number-legend {
         font-family:"Arial Narrow","Roboto Condensed",Arial,sans-serif;
-        font-size:clamp(7px,1.22cqw,13px);
+        font-size:clamp(4px,1.22cqw,13px);
         font-weight:700;
         font-style:italic;
         line-height:1;
@@ -762,14 +788,14 @@ class VistaKeypadCard extends HTMLElement {
         align-items:center;
         column-gap:.38cqw;
         min-height:4.18cqw;
-        font-size:clamp(9px,1.72cqw,18px);
+        font-size:clamp(6px,1.72cqw,18px);
         font-weight:700;
         line-height:1;
       }
 
       .burg-rows .led-row {
         min-height:4.18cqw;
-        font-size:clamp(9px,1.48cqw,16px);
+        font-size:clamp(6px,1.48cqw,16px);
       }
 
       .led-label {
@@ -1008,11 +1034,20 @@ class VistaKeypadCard extends HTMLElement {
         font-family:"Arial Narrow","Roboto Condensed",Arial,sans-serif;
       }
 
+      .k6160.case-red .status-6160,
+      .k6160.case-dark .status-6160 {
+        color:#f0f1ef;
+      }
+
+      .k6160.case-white .status-6160 {
+        color:#171717;
+      }
+
       .status-6160 .led-row {
         --ann-led-width:2.7cqw;
         grid-template-columns:1fr var(--ann-led-width);
         min-height:6.6cqw;
-        font-size:clamp(8px,1.35cqw,15px);
+        font-size:clamp(5px,1.35cqw,15px);
         font-weight:500;
       }
 
@@ -1027,8 +1062,19 @@ class VistaKeypadCard extends HTMLElement {
       .read-only-note.show { opacity:1; }
 
       @media(max-width:650px) {
-        .keypad-shell { min-height:300px; }
         .wrap { gap:4px; }
+      }
+
+      @container (max-width:520px) {
+        .physical-key { padding:0 .28cqw; }
+        .number-key { gap:.26cqw; }
+        .function-slot { transform:translateX(-1.0cqw); }
+      }
+
+      @container (max-width:360px) {
+        .physical-key { padding:0 .12cqw; }
+        .number-key { gap:.12cqw; }
+        .function-slot { transform:translateX(-.72cqw); }
       }
 
       @media(prefers-reduced-motion:reduce) {
