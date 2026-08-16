@@ -7,25 +7,29 @@ from .version import VERSION
 
 TopicFn = Callable[[str], str]
 
-ZONE_SUMMARY_SPECS = {
-    "faulted": {
+ZONE_CONDITION_SPECS = {
+    "fault": {
         "attribute": "faulted",
-        "name": "Faulted Zones",
+        "label": "Fault",
+        "summary_name": "Fault Zones",
         "icon": "mdi:door-open",
-    },
-    "check": {
-        "attribute": "trouble",
-        "name": "Zones in Check",
-        "icon": "mdi:alert-circle-outline",
     },
     "alarm": {
         "attribute": "alarm",
-        "name": "Zones in Alarm",
+        "label": "Alarm",
+        "summary_name": "Alarm Zones",
         "icon": "mdi:alarm-light-outline",
     },
-    "bypassed": {
+    "check": {
+        "attribute": "trouble",
+        "label": "Check",
+        "summary_name": "Check Zones",
+        "icon": "mdi:alert-circle-outline",
+    },
+    "bypass": {
         "attribute": "bypassed",
-        "name": "Bypassed Zones",
+        "label": "Bypass",
+        "summary_name": "Bypass Zones",
         "icon": "mdi:shield-off-outline",
     },
 }
@@ -202,13 +206,13 @@ def diagnostic_entities(topic: TopicFn) -> dict[str, tuple[str, dict]]:
 def zone_summary_entities(topic: TopicFn) -> dict[str, dict]:
     return {
         f"{key}_zones": {
-            "name": spec["name"],
+            "name": spec["summary_name"],
             "unique_id": f"vista128_{key}_zones",
             "state_topic": topic(f"zone_summary/{key}/count"),
             "json_attributes_topic": topic(f"zone_summary/{key}/attributes"),
             "icon": spec["icon"],
         }
-        for key, spec in ZONE_SUMMARY_SPECS.items()
+        for key, spec in ZONE_CONDITION_SPECS.items()
     }
 
 
@@ -230,21 +234,25 @@ def partition_config(partition: int, topic: TopicFn) -> dict:
     }
 
 
-def zone_config(zone: ZoneState, topic: TopicFn) -> dict:
-    display_name = (
+def zone_condition_configs(zone: ZoneState, topic: TopicFn) -> dict[str, dict]:
+    base_name = (
         f"{zone.zone:03d} {zone.descriptor}"
         if zone.descriptor
         else f"Zone {zone.zone:03d}"
     )
     return {
-        "name": display_name,
-        "unique_id": f"vista128_zone_{zone.zone:03d}",
-        "state_topic": topic(f"zone/{zone.zone:03d}/state"),
-        "payload_on": "ON",
-        "payload_off": "OFF",
-        "json_attributes_topic": topic(f"zone/{zone.zone:03d}/attributes"),
-        "availability_topic": topic("panel/connected"),
-        "payload_available": "ON",
-        "payload_not_available": "OFF",
-        "device": device_info(),
+        key: {
+            "name": f"{base_name} {spec['label']}",
+            "unique_id": f"vista128_zone_{zone.zone:03d}_{key}",
+            "state_topic": topic(f"zone/{zone.zone:03d}/{key}"),
+            "payload_on": "ON",
+            "payload_off": "OFF",
+            "json_attributes_topic": topic(f"zone/{zone.zone:03d}/attributes"),
+            "availability_topic": topic("panel/connected"),
+            "payload_available": "ON",
+            "payload_not_available": "OFF",
+            "icon": spec["icon"],
+            "device": device_info(),
+        }
+        for key, spec in ZONE_CONDITION_SPECS.items()
     }

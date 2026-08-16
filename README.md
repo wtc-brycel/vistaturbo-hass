@@ -56,8 +56,8 @@ TB4 carries normal RS-232 signaling, not TTL-level UART signaling. Do not connec
 ## Features
 
 - Partition state in Home Assistant
-- Assigned-zone binary sensors
-- Aggregate Faulted Zones, Zones in Check, Zones in Alarm, and Bypassed Zones sensors
+- Four binary sensors per assigned zone: Fault, Alarm, Check, and Bypass
+- Aggregate Fault Zones, Alarm Zones, Check Zones, and Bypass Zones sensors
 - VISTA alpha descriptor import
 - Real-time automation event decoding
 - Periodic state reconciliation
@@ -66,7 +66,7 @@ TB4 carries normal RS-232 signaling, not TTL-level UART signaling. Do not connec
 - Optional continuous event receipts through TransPort
 - Guarded raw transmit for protocol testing
 
-The four aggregate zone-condition sensors are derived from the VISTA `49ZS` snapshot and therefore reconcile with the panel every five minutes by default. Their state is the number of matching assigned zones, with zone number, partition, and descriptor listed in attributes.
+The four per-zone binary sensors and four aggregate sensors are derived from the VISTA `49ZS` snapshot. They reconcile with the panel every five minutes by default and also update from relevant unsolicited events.
 
 ## Install as a Home Assistant App repository
 
@@ -97,6 +97,6 @@ See [`vista128_bridge/DOCS.md`](vista128_bridge/DOCS.md) for configuration and p
 
 This App was made with the use of AI - ChatGPT Codex, specifically - to understand how the RS232 automation protocol exposed by the Vista works. Much of the information surrounding the Vista Turbo panels was not easily available to me and buried in manufacturer-specific documentation that was not provided by Honeywell. Much of this reverse-engineering was assisted by Crestron's documentation for their integration with the Vista Turbo panels.
 
-Despite my reservations, this would not have been possible without the use of AI. I encourage you to review the source code for yourself to understand how it works. I have taken effort to ensure modularity and optimization in the code to the best I am able to for a project of this size that will only ever likely be used by me. 
+Despite my reservations, this would not have been possible without the use of AI. I encourage you to review the source code for yourself to understand how it works. I have taken effort to ensure modularity and optimization in the code to the best I am able to for a project of this size that will only ever likely be used by me.
 
 I will report back with my experiences as I use this. So far, it is a substantial improvement over the cloud-based TotalConnect 2.0 integration.
