@@ -8,11 +8,11 @@ import paho.mqtt.client as mqtt
 
 from .config import Settings
 from .mqtt_discovery import (
-    ZONE_SUMMARY_SPECS,
+    ZONE_CONDITION_SPECS,
     device_info,
     diagnostic_entities,
     partition_config,
-    zone_config,
+    zone_condition_configs,
     zone_summary_entities,
 )
 from .protocol import SystemEvent
@@ -85,6 +85,7 @@ class MqttPublisher:
         self.publish(suffix, encoded, retain=retain, qos=qos)
 
     def publish_discovery(self) -> None:
+        self._clear_legacy_discovery()
         availability = {
             "availability_topic": self.topic("bridge/availability"),
             "payload_available": "online",
@@ -122,18 +123,22 @@ class MqttPublisher:
         )
 
     def publish_zone_discovery(self, zone: ZoneState) -> None:
-        if zone.partition:
+        if not zone.partition:
+            return
+        for key, config in zone_condition_configs(zone, self.topic).items():
             self._publish_discovery_config(
                 "binary_sensor",
-                f"zone_{zone.zone:03d}",
-                zone_config(zone, self.topic),
+                f"zone_{zone.zone:03d}_{key}",
+                config,
             )
 
     def publish_zone_state(self, zone: ZoneState) -> None:
         if not zone.partition:
             return
         prefix = f"zone/{zone.zone:03d}"
-        self.publish(f"{prefix}/state", "ON" if zone.active else "OFF", retain=True, qos=1)
+        for key, spec in ZONE_CONDITION_SPECS.items():
+            active = bool(getattr(zone, spec["attribute"]))
+            self.publish(f"{prefix}/{key}", "ON" if active else "OFF", retain=True, qos=1)
         self.publish_json(
             f"{prefix}/attributes",
             zone.attributes(),
@@ -142,7 +147,7 @@ class MqttPublisher:
         )
 
     def publish_zone_summaries(self, state: VistaState) -> None:
-        for key, spec in ZONE_SUMMARY_SPECS.items():
+        for key, spec in ZONE_CONDITION_SPECS.items():
             zones = state.assigned_zones_with(spec["attribute"])
             prefix = f"zone_summary/{key}"
             self.publish(f"{prefix}/count", len(zones), retain=True, qos=1)
@@ -211,6 +216,24 @@ class MqttPublisher:
         )
         payload = json.dumps(config, separators=(",", ":"))
         self._client.publish(topic, payload, qos=1, retain=True)
+
+    def _clear_discovery_config(self, component: str, object_id: str) -> None:
+        topic = (
+            f"{self.mqtt.discovery_prefix}/{component}/"
+            f"vista128_bridge/{object_id}/config"
+        )
+        self._client.publish(topic, "", qos=1, retain=True)
+
+    def _clear_legacy_discovery(self) -> None:
+        for zone in range(1, 129):
+            self._clear_discovery_config("binary_sensor", f"zone_{zone:03d}")
+        for object_id in (
+            "faulted_zones",
+            "alarm_zones",
+            "check_zones",
+            "bypassed_zones",
+        ):
+            self._clear_discovery_config("sensor", object_id)
 
     def _on_connect(self, client, userdata, flags, reason_code, properties) -> None:
         if reason_code != 0:
