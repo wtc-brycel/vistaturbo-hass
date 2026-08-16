@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.5
+
+- Add native VISTA Turbo keypad display polling over the existing RS-232 automation connection.
+- Add the physically validated Partition 1 `09KD10077` request and `29kd` response parser.
+- Decode both 16-character keypad lines, Ready/Trouble/Armed LED flags, and keypad backlight state.
+- Publish one Home Assistant keypad sensor per configured partition with exact display text and raw protocol attributes.
+- Poll configured keypad partitions every 7 seconds by default and request a debounced refresh after valid partition events.
+- Serialize keypad queries with startup, periodic, and resynchronization traffic so only one panel transaction is active at a time.
+- Require both valid keypad display data and a valid Ready-for-Next response before a keypad transaction succeeds.
+- Keep keypad polling read-only. Home Assistant arm/disarm control remains disabled.
+
 ## 0.2.4
 
 - Replace the combined per-zone binary sensor with four explicit binary sensors: Fault, Alarm, Check, and Bypass.
