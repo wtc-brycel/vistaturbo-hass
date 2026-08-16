@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.4
+
+- Replace the combined per-zone binary sensor with four explicit binary sensors: Fault, Alarm, Check, and Bypass.
+- Use the authoritative `49ZS` bitmask for all four per-zone condition entities.
+- Rename aggregate sensors to Fault Zones, Alarm Zones, Check Zones, and Bypass Zones.
+- Remove the old combined zone discovery entries and old aggregate discovery names during MQTT reconnect.
+- Keep RF low-battery and sensor-tamper data separate because those conditions are not present in the `49ZS` snapshot.
+
 ## 0.2.3
 
 - Add aggregate Home Assistant sensors for faulted zones, zones in CHECK, zones in alarm, and bypassed zones.
