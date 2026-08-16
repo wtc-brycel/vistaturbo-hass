@@ -7,6 +7,29 @@ from .version import VERSION
 
 TopicFn = Callable[[str], str]
 
+ZONE_SUMMARY_SPECS = {
+    "faulted": {
+        "attribute": "faulted",
+        "name": "Faulted Zones",
+        "icon": "mdi:door-open",
+    },
+    "check": {
+        "attribute": "trouble",
+        "name": "Zones in Check",
+        "icon": "mdi:alert-circle-outline",
+    },
+    "alarm": {
+        "attribute": "alarm",
+        "name": "Zones in Alarm",
+        "icon": "mdi:alarm-light-outline",
+    },
+    "bypassed": {
+        "attribute": "bypassed",
+        "name": "Bypassed Zones",
+        "icon": "mdi:shield-off-outline",
+    },
+}
+
 
 def device_info() -> dict:
     return {
@@ -173,6 +196,19 @@ def diagnostic_entities(topic: TopicFn) -> dict[str, tuple[str, dict]]:
                 "icon": "mdi:shield-alert-outline",
             },
         ),
+    }
+
+
+def zone_summary_entities(topic: TopicFn) -> dict[str, dict]:
+    return {
+        f"{key}_zones": {
+            "name": spec["name"],
+            "unique_id": f"vista128_{key}_zones",
+            "state_topic": topic(f"zone_summary/{key}/count"),
+            "json_attributes_topic": topic(f"zone_summary/{key}/attributes"),
+            "icon": spec["icon"],
+        }
+        for key, spec in ZONE_SUMMARY_SPECS.items()
     }
 
 
