@@ -2,94 +2,33 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>Vista Keypad Card Preview</title>
+<title>Vista Keypad Card v0.3.0</title>
 <style>
-  :root {
-    --primary-text-color:#1f1f1f;
-    --secondary-text-color:#646464;
-    --card-background-color:#fff;
-    --ha-card-background:#fff;
-  }
-  * { box-sizing:border-box; }
-  body {
-    margin:0;
-    padding:42px;
-    font-family:Arial,Helvetica,sans-serif;
-    background:linear-gradient(180deg,#eef1f3,#e2e6e8);
-    color:#222;
-  }
-  h1 { margin:0 0 6px; font-size:28px; }
-  p { margin:0 0 30px; color:#667; }
-  .grid { display:grid; grid-template-columns:1fr; gap:44px; }
-  .panel {
-    background:#fff;
-    border-radius:18px;
-    padding:28px;
-    box-shadow:0 12px 36px rgba(0,0,0,.12);
-  }
-  .panel h2 { margin:0 0 22px; font-size:20px; font-weight:600; }
+  :root{--primary-text-color:#111;--secondary-text-color:#667;--ha-card-background:#fff;--card-background-color:#fff}
+  *{box-sizing:border-box}
+  body{margin:0;padding:30px 36px 44px;background:#e8ebed;font-family:Arial,Helvetica,sans-serif;color:#171717}
+  h1{margin:0 0 4px;font-size:24px} p{margin:0 0 26px;color:#687078}
+  .stack{display:grid;gap:32px;max-width:1050px;margin:auto}
+  .panel{background:white;border-radius:18px;padding:22px 26px 28px;box-shadow:0 10px 28px rgba(0,0,0,.11)}
+  .panel h2{margin:0 0 16px;font-size:18px;font-weight:600;color:#34383c}
 </style>
 <script src="./vista-keypad-card.js"></script>
 </head>
 <body>
-<h1>Vista Turbo HASS keypad card v0.2.0</h1>
-<p>Read-only hardware-style preview using the live keypad entity shape.</p>
-<div class="grid">
-  <section class="panel">
-    <h2>6160CR-2</h2>
-    <vista-keypad-card id="cr2"></vista-keypad-card>
-  </section>
-  <section class="panel">
-    <h2>6160</h2>
-    <vista-keypad-card id="k6160"></vista-keypad-card>
-  </section>
+<div class="stack">
+  <div><h1>Vista Turbo HASS physical keypad skins</h1><p>CSS, SVG and canvas render from the actual card code. No product photo is used.</p></div>
+  <section class="panel"><h2>6160CR-2</h2><vista-keypad-card id="cr2"></vista-keypad-card></section>
+  <section class="panel"><h2>6160</h2><vista-keypad-card id="k6160"></vista-keypad-card></section>
 </div>
 <script>
-  const hass = {
-    states: {
-      "sensor.vista_partition_1_keypad": {
-        state: "P1 DISARMED / BYPAS-RDY TO ARM",
-        attributes: {
-          line_1: "P1   DISARMED   ",
-          line_2: "BYPAS-RDY TO ARM",
-          ready: true,
-          armed: false,
-          trouble: false,
-          backlight: true
-        }
-      }
-    }
-  };
-
-  const functionKeys = {
-    a:{text:"STAY"},
-    b:{text:"AWAY"},
-    c:{text:"POLICE",background:"#168bc3",color:"#fff"},
-    d:{text:"PAGE"}
-  };
-
-  const cr2 = document.getElementById("cr2");
-  cr2.setConfig({
-    entity:"sensor.vista_partition_1_keypad",
-    model:"6160cr2",
-    read_only:true,
-    function_keys:{
-      a:{text:"AWAY"},
-      b:{text:"STAY"},
-      c:{text:"POLICE",background:"#168bc3",color:"#fff"},
-      d:{text:"PAGE"}
-    }
-  });
-  cr2.hass = hass;
-
-  const k6160 = document.getElementById("k6160");
-  k6160.setConfig({
-    entity:"sensor.vista_partition_1_keypad",
-    model:"6160",
-    read_only:true,
-    function_keys:functionKeys
-  });
-  k6160.hass = hass;
+  const hass={states:{
+    "sensor.vista_partition_1_keypad":{state:"Disarmed",attributes:{line_1:"*****DISARMED****",line_2:"READY TO ARM    ",ready:true,armed:false,trouble:false,backlight:true}},
+    "binary_sensor.demo_power":{state:"on"}
+  }};
+  const cr2=document.getElementById("cr2");
+  cr2.setConfig({entity:"sensor.vista_partition_1_keypad",model:"6160cr2",read_only:true,indicators:{power:"binary_sensor.demo_power"},function_keys:{a:{text:"AWAY"},b:{text:"STAY"},c:{text:"POLICE"},d:{text:"PAGE"}}}); cr2.hass=hass;
+  const k=document.getElementById("k6160");
+  k.setConfig({entity:"sensor.vista_partition_1_keypad",model:"6160",read_only:true,function_keys:{a:{text:""},b:{text:""},c:{text:""},d:{text:""}}}); k.hass=hass;
 </script>
 </body>
 </html>
