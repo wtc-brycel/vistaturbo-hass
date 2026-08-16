@@ -41,6 +41,22 @@ no flow control
 
 On devices that offer several network modes, use a plain raw TCP server mode. RFC2217, virtual COM-port drivers, and vendor-specific framing are not required. The StarTech NETRS2321POE should be configured in raw TCP Server mode rather than COM Port/RFC2217 mode.
 
+## Panel connection
+
+For a permanent VISTA-128BPT installation, connect the serial server to the panel's **TB4** RS-232 terminal block:
+
+```text
+TB4 TXD  -> serial server RX
+TB4 RXD  -> serial server TX
+TB4 GND  -> serial server signal ground
+```
+
+Leave `RTS/DTR` and `CTS/DSR` unconnected for this App. Check the serial server documentation for its DB9 DTE/DCE pinout rather than assuming a cable pin mapping.
+
+The alternate **J9 10-pin header** may be used with a VT-SERCBL adapter for a temporary serial connection. Do not use TB4 and J9 simultaneously. This project uses TB4 for the permanent connection.
+
+TB4 is RS-232 level signaling. It is not a TTL UART connection.
+
 ## Current features
 
 - Raw VISTA frame capture with length and checksum validation
