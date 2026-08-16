@@ -14,6 +14,28 @@ from vista_bridge.protocol import (  # noqa: E402
 from vista_bridge.state import VistaState  # noqa: E402
 
 
+def keypad_report(
+    line_1: str = "P1   DISARMED   ",
+    line_2: str = "READY TO ARM    ",
+    *,
+    backlight: bool = True,
+    ready: bool = True,
+    trouble: bool = False,
+    armed: bool = False,
+) -> KeypadDisplayReport:
+    led_status = (1 if ready else 0) | (2 if trouble else 0) | (4 if armed else 0)
+    return KeypadDisplayReport(
+        line_1=line_1,
+        line_2=line_2,
+        backlight=backlight,
+        ready_led=ready,
+        trouble_led=trouble,
+        armed_led=armed,
+        led_status=led_status,
+        raw_display=(line_1 + line_2).encode("ascii", errors="replace"),
+    )
+
+
 class StateTests(unittest.TestCase):
     def test_arming_status_maps_stay_and_not_ready(self):
         state = VistaState()
@@ -43,6 +65,69 @@ class StateTests(unittest.TestCase):
         self.assertTrue(keypad.backlight)
         self.assertTrue(keypad.ready_led)
         self.assertEqual(keypad.attributes()["led_status"], "1")
+        self.assertTrue(keypad.attributes()["power"])
+        self.assertFalse(keypad.attributes()["fire_alarm"])
+        self.assertFalse(keypad.attributes()["silenced"])
+        self.assertFalse(keypad.attributes()["supervisory"])
+
+    def test_keypad_trouble_does_not_guess_power_without_ac_evidence(self):
+        state = VistaState()
+        keypad = state.apply_keypad_display(
+            1,
+            keypad_report("TROUBLE         ", "CHECK ZONE 005  ", ready=False, trouble=True),
+            "2026-08-16T13:22:28-04:00",
+        )
+        self.assertIsNone(keypad.power_led)
+
+    def test_ac_loss_restore_drives_cr2_power_annunciator(self):
+        state = VistaState()
+        keypad = state.apply_keypad_display(1, keypad_report(), "2026-08-16T13:22:28-04:00")
+        self.assertTrue(keypad.power_led)
+
+        state.apply_system_event(SystemEvent("1B", "AC Loss", 0, 0, 0, 0, 0, 15, 8, 26))
+        self.assertFalse(keypad.power_led)
+        state.apply_system_event(SystemEvent("1C", "AC Restore", 0, 0, 0, 0, 0, 15, 8, 26))
+        self.assertTrue(keypad.power_led)
+
+    def test_fire_alarm_latches_until_normal_keypad_reset_state(self):
+        state = VistaState()
+        keypad = state.apply_keypad_display(1, keypad_report(), "2026-08-16T13:22:28-04:00")
+        self.assertFalse(keypad.fire_alarm_led)
+
+        state.apply_system_event(SystemEvent("C1", "Smoke Alarm", 5, 0, 1, 0, 0, 15, 8, 26))
+        self.assertTrue(keypad.fire_alarm_led)
+        state.apply_system_event(SystemEvent("C2", "Smoke Alarm Restore", 5, 0, 1, 0, 0, 15, 8, 26))
+        self.assertTrue(keypad.fire_alarm_led)
+
+        state.apply_keypad_display(1, keypad_report(), "2026-08-16T13:23:00-04:00")
+        self.assertFalse(keypad.fire_alarm_led)
+        self.assertFalse(keypad.silenced_led)
+
+    def test_fire_alarm_silenced_is_reconstructed_from_keypad_display(self):
+        state = VistaState()
+        keypad = state.apply_keypad_display(1, keypad_report(), "2026-08-16T13:22:28-04:00")
+        state.apply_system_event(SystemEvent("01", "Fire Alarm", 5, 0, 1, 0, 0, 15, 8, 26))
+        state.apply_keypad_display(
+            1,
+            keypad_report(
+                "FIRE ALARM      ",
+                "SILENCED        ",
+                ready=False,
+                trouble=True,
+            ),
+            "2026-08-16T13:22:40-04:00",
+        )
+        self.assertTrue(keypad.fire_alarm_led)
+        self.assertTrue(keypad.silenced_led)
+        self.assertTrue(state.partitions[1].fire_silenced)
+
+    def test_supervisory_start_restore_drives_cr2_annunciator(self):
+        state = VistaState()
+        keypad = state.apply_keypad_display(1, keypad_report(), "2026-08-16T13:22:28-04:00")
+        state.apply_system_event(SystemEvent("43", "Supervisory Alarm", 12, 0, 1, 0, 0, 15, 8, 26))
+        self.assertTrue(keypad.supervisory_led)
+        state.apply_system_event(SystemEvent("44", "Supervisory Alarm Restore", 12, 0, 1, 0, 0, 15, 8, 26))
+        self.assertFalse(keypad.supervisory_led)
 
     def test_zone_snapshot_bitmask(self):
         state = VistaState()
