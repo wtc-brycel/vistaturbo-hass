@@ -2,7 +2,7 @@
 
 Experimental Home Assistant dashboard card for the keypad-display entities published by Vista Turbo RS232.
 
-The first pass implements two physical keypad skins:
+The current physical skins are:
 
 - `6160cr2`, modeled after the red commercial fire/burglary keypad
 - `6160`, modeled after the standard white alpha keypad
@@ -35,14 +35,37 @@ entity: sensor.vista_partition_1_keypad
 model: 6160
 ```
 
-Optional title and card background:
+Both physical skins use the same chassis proportions and the same exact key dimensions. The 6160 does not render the removable keypad door.
+
+## Programmable A-D keys
+
+The four vertical programmable keys are exposed as A, B, C, and D internally. Their text and colors are configurable without changing the physical layout.
 
 ```yaml
 type: custom:vista-keypad-card
 entity: sensor.vista_partition_1_keypad
 model: 6160cr2
-title: Partition 1
-show_card_background: true
+function_keys:
+  a:
+    text: AWAY
+  b:
+    text: STAY
+  c:
+    text: POLICE
+    background: "#1974ae"
+    color: "#ffffff"
+  d:
+    text: PAGE
+```
+
+A plain string is also accepted when only the label needs to change:
+
+```yaml
+function_keys:
+  a: FIRE
+  b: MEDICAL
+  c: POLICE
+  d: PAGE
 ```
 
 ## 6160CR-2 annunciators
@@ -52,9 +75,6 @@ The RS-232 keypad-display packet currently gives us Armed, Ready, Trouble and LC
 Additional authoritative Home Assistant entities can be mapped when we have them:
 
 ```yaml
-type: custom:vista-keypad-card
-entity: sensor.vista_partition_1_keypad
-model: 6160cr2
 indicators:
   power: binary_sensor.vista_power
   fire_alarm: binary_sensor.vista_fire_alarm
@@ -63,20 +83,8 @@ indicators:
   fire_trouble: binary_sensor.vista_fire_trouble
 ```
 
-Unmapped annunciators remain visibly unlit/unknown.
-
-## Function-key labels
-
-The four left-side keys can be relabeled without changing the card layout:
-
-```yaml
-function_keys:
-  "1": AWAY
-  "2": STAY
-  "3": POLICE
-  "4": PAGE
-```
+Unmapped fire annunciators remain visibly unlit/unknown.
 
 ## Next models
 
-The next skins planned are the newer First Alert/Resideo physical keypads shown during development, followed by a purpose-built touch UI influenced by the newer keypad and Tuxedo-family interfaces rather than trying to mimic a historical physical unit.
+The next physical skins planned are the newer First Alert/Resideo keypads shown during development, followed by a purpose-built touch UI influenced by those units and the Tuxedo-family interfaces.
