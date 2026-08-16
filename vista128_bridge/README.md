@@ -4,16 +4,21 @@ Home Assistant App for the RS-232 automation interface used by Honeywell/Resideo
 
 This project has been developed and tested against a **VISTA-128BPT**. Other VISTA Turbo models are currently untested and are not claimed as supported. It is not a general VISTA integration.
 
+The App is designed to reach the panel through a **Lantronix UDS-series serial server or an equivalent transparent serial-to-IP device**. Development and current operation have been tested with a **StarTech NETRS2321POE** in raw TCP Server mode.
+
 Current status: read-only monitoring is operational. The bridge publishes partition state, assigned zones, VISTA alpha descriptors, decoded events, health metrics, and optional TransPort receipt output through MQTT Discovery. Home Assistant arm/disarm commands are not sent to the panel.
 
 ## Runtime path
 
 ```text
-VISTA-128BPT
+VISTA Turbo panel
     |
   RS-232
     |
-TCP serial server
+Lantronix UDS or equivalent
+serial-to-IP device
+    |
+ raw TCP
     |
 Vista Turbo RS232
     |
@@ -21,6 +26,20 @@ Vista Turbo RS232
     |
 Home Assistant
 ```
+
+The serial-to-IP device must present the panel data as a transparent TCP stream. The App connects to a configured host and TCP port and does not currently open a local `/dev/tty*` serial device directly.
+
+Use these serial settings:
+
+```text
+9600 baud
+8 data bits
+no parity
+1 stop bit
+no flow control
+```
+
+On devices that offer several network modes, use a plain raw TCP server mode. RFC2217, virtual COM-port drivers, and vendor-specific framing are not required. The StarTech NETRS2321POE should be configured in raw TCP Server mode rather than COM Port/RFC2217 mode.
 
 ## Current features
 
