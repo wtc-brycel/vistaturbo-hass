@@ -1,5 +1,5 @@
 name: "Vista Turbo RS232"
-version: "0.2.5"
+version: "0.2.6-rc.1"
 slug: "vista128_bridge"
 description: >-
   Local TCP/MQTT bridge for the VISTA Turbo RS-232 automation interface.
