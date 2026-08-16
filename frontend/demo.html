@@ -4,115 +4,43 @@
 <meta charset="utf-8">
 <title>Vista Keypad Card Preview</title>
 <style>
-  :root {
-    --primary-text-color:#1f1f1f;
-    --secondary-text-color:#646464;
-    --card-background-color:#fff;
-    --ha-card-background:#fff;
-  }
-  * { box-sizing:border-box; }
-  body {
-    margin:0;
-    padding:38px;
-    font-family:Arial,Helvetica,sans-serif;
-    background:#eceff1;
-    color:#222;
-  }
-  body.dark {
-    --primary-text-color:#f1f3f4;
-    --secondary-text-color:#aab0b5;
-    --card-background-color:#202124;
-    --ha-card-background:#202124;
-    background:#111315;
-    color:#f1f3f4;
-  }
-  h1 { margin:0 0 6px; font-size:28px; }
-  p { margin:0 0 18px; color:var(--secondary-text-color); }
-  .toolbar { display:flex; gap:8px; margin:0 0 28px; }
-  .toolbar button { padding:8px 12px; cursor:pointer; }
-  .grid {
-    display:grid;
-    grid-template-columns:repeat(auto-fit,minmax(360px,1fr));
-    gap:32px;
-    align-items:start;
-  }
-  .panel {
-    background:var(--card-background-color);
-    border-radius:18px;
-    padding:24px;
-    box-shadow:0 10px 30px rgba(0,0,0,.18);
-  }
-  .panel h2 { margin:0 0 20px; font-size:20px; font-weight:600; }
+  :root{--primary-text-color:#1f1f1f;--secondary-text-color:#646464;--card-background-color:#fff;--ha-card-background:#fff}
+  *{box-sizing:border-box} body{margin:0;padding:30px;font-family:Arial,Helvetica,sans-serif;background:#eceff1;color:#222}
+  body.dark{--primary-text-color:#f1f3f4;--secondary-text-color:#aab0b5;--card-background-color:#202124;--ha-card-background:#202124;background:#111315;color:#f1f3f4}
+  h1{margin:0 0 6px;font-size:28px} p{margin:0 0 18px;color:var(--secondary-text-color)}
+  .toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:0 0 22px}.toolbar button{padding:8px 12px;cursor:pointer}.toolbar label{display:flex;align-items:center;gap:8px}.toolbar input{width:240px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(280px,100%),1fr));gap:20px;align-items:start}
+  .panel{min-width:0;background:var(--card-background-color);border-radius:16px;padding:16px;box-shadow:0 8px 24px rgba(0,0,0,.16);overflow:hidden}
+  .panel h2{margin:0 0 4px;font-size:16px}.panel p{font-size:12px;margin-bottom:12px}.demo-card{width:min(100%,var(--demo-width,420px));margin:auto}
 </style>
 <script>if(!customElements.get("ha-card"))customElements.define("ha-card",class extends HTMLElement{});</script>
 <script src="./vista-keypad-card.js"></script>
 </head>
 <body>
 <h1>Vista Turbo HASS keypad card</h1>
-<p>Production component demo. AUTO follows the simulated Home Assistant dark-mode flag.</p>
+<p>Production component demo: theme-aware case colors and narrow-card geometry.</p>
 <div class="toolbar">
-  <button id="light">Simulate HA light theme</button>
-  <button id="dark">Simulate HA dark theme</button>
+  <button id="light">Simulate HA day/light</button><button id="dark">Simulate HA night/dark</button>
+  <label>Card width <input id="width" type="range" min="260" max="940" value="420" step="10"><span id="width-value">420px</span></label>
 </div>
 <div class="grid">
-  <section class="panel">
-    <h2>6160CR-2 — AUTO</h2>
-    <vista-keypad-card id="cr2-auto"></vista-keypad-card>
-  </section>
-  <section class="panel">
-    <h2>6160CR-2 — explicit red</h2>
-    <vista-keypad-card id="cr2-red"></vista-keypad-card>
-  </section>
-  <section class="panel">
-    <h2>6160CR-2 — explicit dark</h2>
-    <vista-keypad-card id="cr2-dark"></vista-keypad-card>
-  </section>
-  <section class="panel">
-    <h2>6160</h2>
-    <vista-keypad-card id="k6160"></vista-keypad-card>
-  </section>
+  <section class="panel"><h2>6160CR-2 — AUTO default</h2><p>day red / night dark</p><div class="demo-card"><vista-keypad-card id="cr2-auto"></vista-keypad-card></div></section>
+  <section class="panel"><h2>6160 — AUTO default</h2><p>day white / night dark</p><div class="demo-card"><vista-keypad-card id="k6160-auto"></vista-keypad-card></div></section>
+  <section class="panel"><h2>6160CR-2 — custom AUTO</h2><p>day white / night red</p><div class="demo-card"><vista-keypad-card id="cr2-custom"></vista-keypad-card></div></section>
+  <section class="panel"><h2>6160 — explicit red</h2><p>proves all case colors are valid on both models</p><div class="demo-card"><vista-keypad-card id="k6160-red"></vista-keypad-card></div></section>
 </div>
 <script>
-  const hass = {
-    themes: { darkMode: false },
-    states: {
-      "sensor.vista_partition_1_keypad": {
-        state: "P1 DISARMED / READY TO ARM",
-        attributes: {
-          line_1: "P1   DISARMED   ",
-          line_2: "READY TO ARM    ",
-          ready: true,
-          armed: false,
-          trouble: false,
-          power: true,
-          fire_alarm: false,
-          silenced: false,
-          supervisory: false,
-          backlight: true
-        }
-      }
-    }
-  };
-
-  const cards = [
-    ["cr2-auto", {model:"6160cr2", case_color:"auto"}],
-    ["cr2-red", {model:"6160cr2", case_color:"red"}],
-    ["cr2-dark", {model:"6160cr2", case_color:"dark"}],
-    ["k6160", {model:"6160", case_color:"white"}],
-  ].map(([id, config]) => {
-    const card = document.getElementById(id);
-    card.setConfig({entity:"sensor.vista_partition_1_keypad", read_only:true, ...config});
-    card.hass = hass;
-    return card;
-  });
-
-  function setTheme(dark) {
-    hass.themes.darkMode = dark;
-    document.body.classList.toggle("dark", dark);
-    cards.forEach(card => card.hass = hass);
-  }
-  document.getElementById("light").onclick = () => setTheme(false);
-  document.getElementById("dark").onclick = () => setTheme(true);
+const hass={themes:{darkMode:false},states:{"sensor.vista_partition_1_keypad":{state:"P1 DISARMED / READY TO ARM",attributes:{line_1:"P1   DISARMED   ",line_2:"READY TO ARM    ",ready:true,armed:false,trouble:false,power:true,fire_alarm:false,silenced:false,supervisory:false,backlight:true}}}};
+const configs=[
+ ["cr2-auto",{model:"6160cr2"}],
+ ["k6160-auto",{model:"6160"}],
+ ["cr2-custom",{model:"6160cr2",case_color:"auto",day_case_color:"white",night_case_color:"red"}],
+ ["k6160-red",{model:"6160",case_color:"red"}],
+];
+const cards=configs.map(([id,config])=>{const card=document.getElementById(id);card.setConfig({entity:"sensor.vista_partition_1_keypad",read_only:true,...config});card.hass=hass;return card});
+function setTheme(dark){hass.themes.darkMode=dark;document.body.classList.toggle("dark",dark);cards.forEach(card=>card.hass=hass)}
+document.getElementById("light").onclick=()=>setTheme(false);document.getElementById("dark").onclick=()=>setTheme(true);
+const width=document.getElementById("width"),wv=document.getElementById("width-value");function setWidth(){const v=`${width.value}px`;document.documentElement.style.setProperty("--demo-width",v);wv.textContent=v}width.oninput=setWidth;setWidth();
 </script>
 </body>
 </html>
