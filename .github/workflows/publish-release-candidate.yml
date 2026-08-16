@@ -1,0 +1,40 @@
+name: Publish release candidate
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - release/rc.json
+      - release/*.md
+      - .github/workflows/publish-release-candidate.yml
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Publish prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          tag="$(jq -r '.tag' release/rc.json)"
+          title="$(jq -r '.name' release/rc.json)"
+          notes="$(jq -r '.notes' release/rc.json)"
+
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release $tag already exists"
+            exit 0
+          fi
+
+          gh release create "$tag" \
+            --target "$GITHUB_SHA" \
+            --title "$title" \
+            --notes-file "$notes" \
+            --prerelease
