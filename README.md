@@ -29,6 +29,30 @@ A **Lantronix UDS-series serial server** is the intended type of transport. An e
 
 The App expects a TCP host and port for the panel connection. It does not currently open a local `/dev/tty*` serial device directly.
 
+## Panel-side RS-232 wiring
+
+For permanent automation wiring on the VISTA-128BPT, use terminal block **TB4** on the control board. The terminals are labeled:
+
+```text
+TXD   RXD   RTS/DTR   CTS/DSR   GND
+```
+
+Vista Turbo RS232 only requires three signals:
+
+```text
+VISTA TB4 TXD  -> serial server receive input
+VISTA TB4 RXD  -> serial server transmit output
+VISTA TB4 GND  -> serial server signal ground
+RTS/DTR        -> not connected
+CTS/DSR        -> not connected
+```
+
+Wire by signal function, not by DB9 pin number alone. Serial servers may present their DB9 connector as DTE or DCE, which changes whether a straight-through or crossover connection is appropriate.
+
+The panel also exposes the serial port on the **J9 10-pin header** for use with a VT-SERCBL adapter. J9 is useful for temporary or service connections. **Do not use TB4 and J9 at the same time.** This project uses TB4 for the permanent serial-server connection.
+
+TB4 carries normal RS-232 signaling, not TTL-level UART signaling. Do not connect TB4 directly to a 3.3 V or 5 V UART without an RS-232 transceiver.
+
 ## Features
 
 - Partition state in Home Assistant
