@@ -39,7 +39,7 @@ function_keys:
     text: PAGE
 ```
 
-All sixteen physical keys use the same dimensions in both legacy keypad skins.
+All sixteen physical keys use the same dimensions in both keypad skins.
 
 ## Annunciators
 
@@ -58,17 +58,22 @@ Unmapped annunciators remain dark/unknown.
 
 ## Key sounds
 
-The card includes an optional Web Audio square-wave key beep. It is disabled by default because the 6160 frequency and timing have not yet been measured from hardware.
+The card includes optional Web Audio square-wave key feedback. It is disabled by default until the physical 6160 frequency and timing are measured.
 
 ```yaml
-sound: true
-sound_frequency_hz: 1400
-sound_duration_ms: 65
-sound_volume: 0.035
+sound:
+  enabled: true
+  frequency: 1400
+  duration_ms: 45
+  volume: 0.035
 ```
 
-Those values are tuning parameters, not a claim that the current defaults match a physical 6160.
+Those values are tuning parameters only.
 
 ## Current visual pass
 
-Version 0.2.0 removes the 6160 drop-down door from the rendered view, shares exact key geometry across both skins, adds configurable A-D key styling, uses a drawn 5x7 dot-matrix LCD, and increases plastic, bezel, key, LED and shadow detail.
+Version 0.3.0 rebuilds the two legacy keypad skins around measured proportions from the supplied physical references rather than generic alarm-keypad styling. The 6160 and 6160CR-2 now share the same front-face proportions and identical key geometry, with no rendered drop-down door.
+
+The display hood, speaker slots, control placement, keycap proportions, CR-2 burglary/fire annunciator areas, case notch, embossing, LED lenses, molded-plastic shading and microtexture are all drawn separately. The LCD is rendered as a 5x7 dot matrix from the exact 16-character VISTA display lines.
+
+No reference photograph is embedded in the card. The physical appearance is produced by CSS, inline SVG and canvas so the keypad remains responsive and interactive.
