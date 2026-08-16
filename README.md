@@ -1,10 +1,33 @@
 # Vista Turbo HASS
 
-Vista Turbo HASS is a local Home Assistant App for the RS-232 automation interface used by Honeywell/Resideo VISTA Turbo alarm panels. It connects to the panel automation serial port through a transparent TCP serial server and publishes panel state through MQTT Discovery.
+Vista Turbo HASS is a local Home Assistant App for the RS-232 automation interface used by Honeywell/Resideo VISTA Turbo alarm panels. It is intended to connect to the panel through a transparent serial-to-IP device, such as a Lantronix UDS-series device or an equivalent serial server, and publishes panel state through MQTT Discovery.
 
 The project has been developed and tested against a **VISTA-128BPT**. Other VISTA Turbo models are currently untested and are not claimed as supported. This project is not intended for non-Turbo VISTA panels unless their compatibility is specifically established.
 
 Read-only monitoring is the current stable baseline. Home Assistant arm/disarm commands are intentionally not sent to the panel yet.
+
+## Intended hardware path
+
+```text
+VISTA Turbo panel
+      |
+    RS-232
+      |
+Lantronix UDS or equivalent
+transparent serial-to-IP server
+      |
+     TCP
+      |
+Vista Turbo RS232
+      |
+     MQTT
+      |
+Home Assistant
+```
+
+A **Lantronix UDS-series serial server** is the intended type of transport. An equivalent device is also suitable if it can expose the VISTA serial stream as a plain TCP socket without altering the data. Development and current operation have been tested with a **StarTech NETRS2321POE** configured in raw TCP Server mode.
+
+The App expects a TCP host and port for the panel connection. It does not currently open a local `/dev/tty*` serial device directly.
 
 ## Features
 
@@ -26,9 +49,9 @@ Add this repository to the Home Assistant App Store:
 https://github.com/wtc-brycel/vistaturbo-hass
 ```
 
-Then install **Vista Turbo RS232** from the repository and configure the panel TCP serial server address.
+Then install **Vista Turbo RS232** from the repository and configure the serial-to-IP server address and TCP port.
 
-The verified serial settings are:
+The serial side should be configured as:
 
 ```text
 RS-232
@@ -37,10 +60,9 @@ RS-232
 no parity
 1 stop bit
 no flow control
-TCP server mode
 ```
 
-The StarTech NETRS2321POE is known to work in raw TCP Server mode. Its COM Port/RFC2217 mode should not be used with this App.
+The network side should provide a transparent raw TCP server connection. RFC2217, virtual COM-port drivers, and device-specific encapsulation are not required. On the StarTech NETRS2321POE, use raw TCP Server mode rather than COM Port/RFC2217 mode.
 
 See [`vista128_bridge/DOCS.md`](vista128_bridge/DOCS.md) for configuration and protocol details.
 
