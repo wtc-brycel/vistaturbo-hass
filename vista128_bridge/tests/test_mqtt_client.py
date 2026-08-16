@@ -12,7 +12,7 @@ install_fake_paho()
 
 from helpers import make_settings  # noqa: E402
 from vista_bridge.mqtt_client import MqttPublisher  # noqa: E402
-from vista_bridge.state import VistaState, ZoneState  # noqa: E402
+from vista_bridge.state import KeypadState, VistaState, ZoneState  # noqa: E402
 from vista_bridge.version import VERSION  # noqa: E402
 
 
@@ -29,6 +29,42 @@ class MqttPublisherTests(unittest.TestCase):
         ]
         self.assertTrue(payloads)
         self.assertTrue(all(item["origin"]["sw_version"] == VERSION for item in payloads))
+
+    def test_keypad_discovery_and_state(self):
+        self.publisher.publish_discovery()
+        topic = "homeassistant/sensor/vista128_bridge/keypad_1/config"
+        match = next(item for item in self.publisher._client.published if item[0] == topic)
+        config = json.loads(match[1])
+        self.assertEqual(config["name"], "Partition 1 Keypad")
+        self.assertEqual(config["state_topic"], "vista128/keypad/1/state")
+        self.assertEqual(
+            config["json_attributes_topic"],
+            "vista128/keypad/1/attributes",
+        )
+
+        keypad = KeypadState(
+            partition=1,
+            initialized=True,
+            line_1="P1   DISARMED   ",
+            line_2="BYPAS-RDY TO ARM",
+            backlight=True,
+            ready_led=True,
+            led_status=1,
+            raw_display=b"\xd01   DISARMED   BYPAS-RDY TO ARM",
+            updated_at="2026-08-16T13:22:28-04:00",
+        )
+        self.publisher.publish_keypad_state(keypad)
+        published = {item[0]: item[1] for item in self.publisher._client.published}
+        self.assertEqual(
+            published["vista128/keypad/1/state"],
+            "P1   DISARMED | BYPAS-RDY TO ARM",
+        )
+        attributes = json.loads(published["vista128/keypad/1/attributes"])
+        self.assertEqual(attributes["line_1"], "P1   DISARMED   ")
+        self.assertEqual(attributes["line_2"], "BYPAS-RDY TO ARM")
+        self.assertTrue(attributes["backlight"])
+        self.assertTrue(attributes["ready"])
+        self.assertEqual(attributes["raw_display_hex"].split()[0], "d0")
 
     def test_zone_discovery_publishes_four_literal_conditions(self):
         zone = ZoneState(21, partition=1, descriptor="FRONT DOOR")

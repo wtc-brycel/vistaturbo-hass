@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+
 from .event_codes import (
     ALARM_RESTORE_TO_START,
     ALARM_START_CODES,
@@ -11,6 +12,7 @@ from .protocol import (
     ARMING_STATUS_NAMES,
     ARMING_STATUS_TO_HA,
     ArmingStatusReport,
+    KeypadDisplayReport,
     SystemEvent,
     ZonePartitionReport,
     ZoneStatusReport,
@@ -101,11 +103,47 @@ class PartitionState:
         }
 
 
+@dataclass
+class KeypadState:
+    partition: int
+    initialized: bool = False
+    line_1: str = ""
+    line_2: str = ""
+    backlight: bool = False
+    ready_led: bool = False
+    trouble_led: bool = False
+    armed_led: bool = False
+    led_status: int = 0
+    raw_display: bytes = b""
+    updated_at: str = ""
+
+    @property
+    def ha_state(self) -> str:
+        lines = [line.rstrip() for line in (self.line_1, self.line_2)]
+        return " | ".join(line for line in lines if line) or "blank"
+
+    def attributes(self) -> dict:
+        return {
+            "partition": self.partition,
+            "line_1": self.line_1,
+            "line_2": self.line_2,
+            "display": f"{self.line_1}\n{self.line_2}",
+            "ready": self.ready_led,
+            "trouble": self.trouble_led,
+            "armed": self.armed_led,
+            "backlight": self.backlight,
+            "led_status": f"{self.led_status:X}",
+            "raw_display_hex": self.raw_display.hex(" "),
+            "updated_at": self.updated_at,
+        }
+
+
 class VistaState:
     def __init__(self) -> None:
         self.partitions = {
             partition: PartitionState(partition) for partition in range(1, 9)
         }
+        self.keypads = {partition: KeypadState(partition) for partition in range(1, 9)}
         self.zones = {zone: ZoneState(zone) for zone in range(1, 129)}
         self.last_event: SystemEvent | None = None
         self.arming_initialized = False
@@ -133,6 +171,27 @@ class VistaState:
                 partition.active_alarm_tokens.clear()
                 changed.add(partition_number)
         return changed
+
+    def apply_keypad_display(
+        self,
+        partition: int,
+        report: KeypadDisplayReport,
+        received_at: str,
+    ) -> KeypadState | None:
+        keypad = self.keypads.get(partition)
+        if keypad is None:
+            return None
+        keypad.initialized = True
+        keypad.line_1 = report.line_1
+        keypad.line_2 = report.line_2
+        keypad.backlight = report.backlight
+        keypad.ready_led = report.ready_led
+        keypad.trouble_led = report.trouble_led
+        keypad.armed_led = report.armed_led
+        keypad.led_status = report.led_status
+        keypad.raw_display = report.raw_display
+        keypad.updated_at = received_at
+        return keypad
 
     def apply_zone_status(self, report: ZoneStatusReport) -> set[int]:
         self.zone_status_initialized = True

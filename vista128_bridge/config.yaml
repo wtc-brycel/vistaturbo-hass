@@ -1,5 +1,5 @@
 name: "Vista Turbo RS232"
-version: "0.2.4"
+version: "0.2.5"
 slug: "vista128_bridge"
 description: >-
   Local TCP/MQTT bridge for the VISTA Turbo RS-232 automation interface.
@@ -31,6 +31,10 @@ options:
   periodic_sync_enabled: true
   periodic_sync_interval_seconds: 300
   periodic_sync_reconnect_after_failures: 3
+  keypad_display_enabled: true
+  keypad_partitions: "1"
+  keypad_poll_interval_seconds: 7
+  keypad_event_refresh_delay_ms: 250
   transport_print_enabled: false
   transport_host: ""
   transport_http_port: 9101
@@ -57,6 +61,10 @@ schema:
   periodic_sync_enabled: bool
   periodic_sync_interval_seconds: int(60,86400)
   periodic_sync_reconnect_after_failures: int(1,20)
+  keypad_display_enabled: bool
+  keypad_partitions: str
+  keypad_poll_interval_seconds: int(2,300)
+  keypad_event_refresh_delay_ms: int(0,5000)
   transport_print_enabled: bool
   transport_host: str
   transport_http_port: port

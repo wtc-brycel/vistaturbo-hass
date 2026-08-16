@@ -11,12 +11,13 @@ from .mqtt_discovery import (
     ZONE_CONDITION_SPECS,
     device_info,
     diagnostic_entities,
+    keypad_config,
     partition_config,
     zone_condition_configs,
     zone_summary_entities,
 )
 from .protocol import SystemEvent
-from .state import PartitionState, VistaState, ZoneState
+from .state import KeypadState, PartitionState, VistaState, ZoneState
 from .version import VERSION
 
 LOG = logging.getLogger(__name__)
@@ -104,6 +105,9 @@ class MqttPublisher:
                 object_id,
                 {**config, **availability},
             )
+        if self.settings.keypad.enabled:
+            for partition in self.settings.keypad.partitions:
+                self.publish_keypad_discovery(partition)
 
     def publish_partition_discovery(self, partition: int) -> None:
         self._publish_discovery_config(
@@ -118,6 +122,25 @@ class MqttPublisher:
         self.publish_json(
             f"{prefix}/attributes",
             partition.attributes(),
+            retain=True,
+            qos=1,
+        )
+
+    def publish_keypad_discovery(self, partition: int) -> None:
+        self._publish_discovery_config(
+            "sensor",
+            f"keypad_{partition}",
+            keypad_config(partition, self.topic),
+        )
+
+    def publish_keypad_state(self, keypad: KeypadState) -> None:
+        if not keypad.initialized:
+            return
+        prefix = f"keypad/{keypad.partition}"
+        self.publish(f"{prefix}/state", keypad.ha_state, retain=True, qos=1)
+        self.publish_json(
+            f"{prefix}/attributes",
+            keypad.attributes(),
             retain=True,
             qos=1,
         )

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import logging
 import queue
 import threading
+
 from .config import Settings
 from .framing import RawFrame, VistaStreamFramer
 from .message_handler import ProtocolMessageHandler
@@ -42,6 +43,7 @@ class VistaBridge:
         self._panel_connected = threading.Event()
         self.synchronizer = VistaSynchronizer(
             settings.sync,
+            settings.keypad,
             self._is_connected,
             self._send_sync_query,
             self._force_reconnect,
@@ -94,6 +96,13 @@ class VistaBridge:
                         asyncio.create_task(
                             self.synchronizer.periodic_loop(),
                             name="periodic-sync",
+                        )
+                    )
+                if self.settings.keypad.enabled:
+                    tasks.add(
+                        asyncio.create_task(
+                            self.synchronizer.keypad_loop(),
+                            name="keypad-display",
                         )
                     )
 
@@ -334,6 +343,13 @@ class VistaBridge:
                 if include_discovery:
                     self.mqtt.publish_partition_discovery(partition.partition)
                 self.mqtt.publish_partition_state(partition)
+
+        for keypad in self.state.keypads.values():
+            if not keypad.initialized:
+                continue
+            if include_discovery:
+                self.mqtt.publish_keypad_discovery(keypad.partition)
+            self.mqtt.publish_keypad_state(keypad)
 
         if self.state.zone_partition_initialized:
             for zone in self.state.zones.values():

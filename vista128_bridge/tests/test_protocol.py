@@ -7,8 +7,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "app"))
 from vista_bridge.protocol import (  # noqa: E402
     STARTUP_QUERIES,
     STATE_SYNC_QUERIES,
+    build_keypad_display_query,
     identify_message,
     parse_arming_status,
+    parse_keypad_display,
     parse_system_event,
     parse_zone_descriptor,
     parse_zone_partition,
@@ -45,6 +47,10 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(identify_message(b"69ZS0000"), "zone_status")
         self.assertEqual(identify_message(b"49ZP1100"), "zone_partition")
         self.assertEqual(identify_message(b'0DZD000""00BA'), "zone_descriptor")
+        self.assertEqual(
+            identify_message(b"29kd\xd01   DISARMED   BYPAS-RDY TO ARM100CD"),
+            "keypad_display",
+        )
         self.assertEqual(identify_message(b"1BnqSOMETHING"), "system_event")
 
     def test_unknown_data_is_preserved_as_unknown(self):
@@ -57,6 +63,7 @@ class ProtocolTests(unittest.TestCase):
             b"1BnqB7000002121031508260086",
             b"49ZS100000000000000000000800000000000800000000880000000000000000000000035",
             b"49ZP10011110000000000011111111111011011111010111000000000000000000000003E",
+            b"29kd\xd01   DISARMED   BYPAS-RDY TO ARM100CD",
         ):
             with self.subTest(packet=packet):
                 validation = validate_packet(packet)
@@ -69,6 +76,27 @@ class ProtocolTests(unittest.TestCase):
         self.assertFalse(validation.valid)
         self.assertTrue(validation.length_ok)
         self.assertFalse(validation.checksum_ok)
+
+    def test_build_keypad_display_query_matches_captured_request(self):
+        query = build_keypad_display_query(1)
+        self.assertEqual(query.name, "keypad_display_p1")
+        self.assertEqual(query.partition, 1)
+        self.assertEqual(query.data, b"09KD10077\r\n")
+        with self.assertRaises(ValueError):
+            build_keypad_display_query(0)
+
+    def test_parse_captured_keypad_display(self):
+        packet = b"29kd\xd01   DISARMED   BYPAS-RDY TO ARM100CD"
+        report = parse_keypad_display(packet)
+        self.assertIsNotNone(report)
+        self.assertEqual(report.line_1, "P1   DISARMED   ")
+        self.assertEqual(report.line_2, "BYPAS-RDY TO ARM")
+        self.assertTrue(report.backlight)
+        self.assertTrue(report.ready_led)
+        self.assertFalse(report.trouble_led)
+        self.assertFalse(report.armed_led)
+        self.assertEqual(report.led_status, 0x1)
+        self.assertEqual(report.raw_display[0], 0xD0)
 
     def test_parse_arming_status(self):
         report = parse_arming_status(b"10ASDDDDDDDD008B")

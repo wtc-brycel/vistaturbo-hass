@@ -6,6 +6,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "app"))
 
 from vista_bridge.protocol import (  # noqa: E402
     ArmingStatusReport,
+    KeypadDisplayReport,
     SystemEvent,
     ZonePartitionReport,
     ZoneStatusReport,
@@ -20,6 +21,28 @@ class StateTests(unittest.TestCase):
         self.assertEqual(state.partitions[1].ha_state, "armed_home")
         self.assertEqual(state.partitions[2].ha_state, "disarmed")
         self.assertFalse(state.partitions[2].ready)
+
+    def test_keypad_display_preserves_exact_lines_and_status(self):
+        state = VistaState()
+        report = KeypadDisplayReport(
+            line_1="P1   DISARMED   ",
+            line_2="BYPAS-RDY TO ARM",
+            backlight=True,
+            ready_led=True,
+            trouble_led=False,
+            armed_led=False,
+            led_status=1,
+            raw_display=b"\xd01   DISARMED   BYPAS-RDY TO ARM",
+        )
+        keypad = state.apply_keypad_display(1, report, "2026-08-16T13:22:28-04:00")
+        self.assertIsNotNone(keypad)
+        self.assertTrue(keypad.initialized)
+        self.assertEqual(keypad.line_1, "P1   DISARMED   ")
+        self.assertEqual(keypad.line_2, "BYPAS-RDY TO ARM")
+        self.assertEqual(keypad.ha_state, "P1   DISARMED | BYPAS-RDY TO ARM")
+        self.assertTrue(keypad.backlight)
+        self.assertTrue(keypad.ready_led)
+        self.assertEqual(keypad.attributes()["led_status"], "1")
 
     def test_zone_snapshot_bitmask(self):
         state = VistaState()

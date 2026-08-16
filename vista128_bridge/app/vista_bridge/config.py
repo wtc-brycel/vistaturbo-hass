@@ -11,6 +11,15 @@ def _bool_env(name: str, default: bool = False) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _partition_list(value: str) -> tuple[int, ...]:
+    partitions = tuple(
+        sorted({int(item.strip()) for item in value.split(",") if item.strip()})
+    )
+    if not partitions or any(partition < 1 or partition > 8 for partition in partitions):
+        raise ValueError("keypad_partitions must contain partition numbers 1..8")
+    return partitions
+
+
 @dataclass(frozen=True)
 class PanelSettings:
     host: str
@@ -44,6 +53,14 @@ class SyncSettings:
 
 
 @dataclass(frozen=True)
+class KeypadSettings:
+    enabled: bool
+    partitions: tuple[int, ...]
+    poll_interval_seconds: int
+    event_refresh_delay_ms: int
+
+
+@dataclass(frozen=True)
 class PrinterSettings:
     enabled: bool
     host: str
@@ -60,6 +77,7 @@ class Settings:
     panel: PanelSettings
     mqtt: MqttSettings
     sync: SyncSettings
+    keypad: KeypadSettings
     printer: PrinterSettings
     raw_logging: bool
     debug_raw_tx_enabled: bool
@@ -101,6 +119,16 @@ class Settings:
                     os.environ.get("PERIODIC_SYNC_RECONNECT_AFTER_FAILURES", "3")
                 ),
             ),
+            keypad=KeypadSettings(
+                enabled=_bool_env("KEYPAD_DISPLAY_ENABLED", True),
+                partitions=_partition_list(os.environ.get("KEYPAD_PARTITIONS", "1")),
+                poll_interval_seconds=int(
+                    os.environ.get("KEYPAD_POLL_INTERVAL_SECONDS", "7")
+                ),
+                event_refresh_delay_ms=int(
+                    os.environ.get("KEYPAD_EVENT_REFRESH_DELAY_MS", "250")
+                ),
+            ),
             printer=PrinterSettings(
                 enabled=_bool_env("TRANSPORT_PRINT_ENABLED", False),
                 host=os.environ.get("TRANSPORT_HOST", "").strip(),
@@ -126,6 +154,10 @@ class Settings:
             raise ValueError("periodic_sync_interval_seconds must be >= 60")
         if self.sync.reconnect_after_failures < 1:
             raise ValueError("periodic_sync_reconnect_after_failures must be >= 1")
+        if self.keypad.poll_interval_seconds < 2:
+            raise ValueError("keypad_poll_interval_seconds must be >= 2")
+        if not 0 <= self.keypad.event_refresh_delay_ms <= 5000:
+            raise ValueError("keypad_event_refresh_delay_ms must be 0..5000")
         if self.printer.enabled and not self.printer.host:
             raise ValueError("transport_host is required when transport_print_enabled is true")
         if not 1 <= self.printer.http_port <= 65535:

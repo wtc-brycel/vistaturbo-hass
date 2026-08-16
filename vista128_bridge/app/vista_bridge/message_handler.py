@@ -7,6 +7,7 @@ from .mqtt_client import MqttPublisher
 from .printer import TransPortEventPrinter, panel_clock_offset_seconds
 from .protocol import (
     parse_arming_status,
+    parse_keypad_display,
     parse_system_event,
     parse_zone_descriptor,
     parse_zone_partition,
@@ -40,6 +41,7 @@ class ProtocolMessageHandler:
             "zone_status": self._handle_zone_status,
             "zone_partition": self._handle_zone_partition,
             "zone_descriptor": self._handle_zone_descriptor,
+            "keypad_display": self._handle_keypad_display,
             "system_event": self._handle_system_event,
         }
 
@@ -127,6 +129,29 @@ class ProtocolMessageHandler:
         self.mqtt.publish_zone_discovery(zone)
         self.mqtt.publish_zone_state(zone)
 
+    def _handle_keypad_display(self, data: bytes, received_at: str) -> None:
+        report = parse_keypad_display(data)
+        if report is None:
+            return
+        partition = self.synchronizer.active_keypad_partition()
+        if partition is None:
+            LOG.warning("Received keypad display without an active keypad query")
+            return
+        keypad = self.state.apply_keypad_display(partition, report, received_at)
+        if keypad is None:
+            return
+        self.synchronizer.mark_keypad_response()
+        LOG.info(
+            "Decoded keypad display P%d: %r / %r LEDs=%X backlight=%s",
+            partition,
+            report.line_1,
+            report.line_2,
+            report.led_status,
+            report.backlight,
+        )
+        self.mqtt.publish_keypad_discovery(partition)
+        self.mqtt.publish_keypad_state(keypad)
+
     def _handle_system_event(self, data: bytes, received_at: str) -> None:
         event = parse_system_event(data)
         if event is None:
@@ -154,6 +179,7 @@ class ProtocolMessageHandler:
             panel_clock_offset_seconds=self.last_panel_clock_offset_seconds,
         )
         self._handle_system_event_side_effects(event.code)
+        self.synchronizer.request_keypad_refresh(event.partition)
 
         descriptor = ""
         if event.zone in self.state.zones:

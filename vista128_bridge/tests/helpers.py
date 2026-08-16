@@ -1,4 +1,5 @@
 from vista_bridge.config import (
+    KeypadSettings,
     MqttSettings,
     PanelSettings,
     PrinterSettings,
@@ -40,6 +41,12 @@ def make_settings(
             periodic_enabled=True,
             periodic_interval_seconds=300,
             reconnect_after_failures=3,
+        ),
+        keypad=KeypadSettings(
+            enabled=True,
+            partitions=(1,),
+            poll_interval_seconds=7,
+            event_refresh_delay_ms=250,
         ),
         printer=PrinterSettings(
             enabled=printer_enabled,

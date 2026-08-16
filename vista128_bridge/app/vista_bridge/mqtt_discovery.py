@@ -234,6 +234,20 @@ def partition_config(partition: int, topic: TopicFn) -> dict:
     }
 
 
+def keypad_config(partition: int, topic: TopicFn) -> dict:
+    return {
+        "name": f"Partition {partition} Keypad",
+        "unique_id": f"vista128_keypad_{partition}",
+        "state_topic": topic(f"keypad/{partition}/state"),
+        "json_attributes_topic": topic(f"keypad/{partition}/attributes"),
+        "availability_topic": topic("panel/connected"),
+        "payload_available": "ON",
+        "payload_not_available": "OFF",
+        "icon": "mdi:alarm-panel-outline",
+        "device": device_info(),
+    }
+
+
 def zone_condition_configs(zone: ZoneState, topic: TopicFn) -> dict[str, dict]:
     base_name = (
         f"{zone.zone:03d} {zone.descriptor}"

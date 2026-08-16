@@ -4,7 +4,7 @@ Vista Turbo HASS is a local Home Assistant App for the RS-232 automation interfa
 
 The project has been developed and tested against a **VISTA-128BPT**. Other VISTA Turbo models are currently untested and are not claimed as supported. This project is not intended for non-Turbo VISTA panels unless their compatibility is specifically established.
 
-Read-only monitoring is the current stable baseline. Home Assistant arm/disarm commands are intentionally not sent to the panel yet.
+Read-only monitoring is the current stable baseline. This includes querying the partition keypad display over the native Turbo RS-232 automation interface. Home Assistant arm/disarm commands are intentionally not sent to the panel yet.
 
 ## Intended hardware path
 
@@ -56,6 +56,8 @@ TB4 carries normal RS-232 signaling, not TTL-level UART signaling. Do not connec
 ## Features
 
 - Partition state in Home Assistant
+- Partition 2 x 16 keypad display retrieval over RS-232
+- Event-triggered and periodic keypad refresh
 - Four binary sensors per assigned zone: Fault, Alarm, Check, and Bypass
 - Aggregate Fault Zones, Alarm Zones, Check Zones, and Bypass Zones sensors
 - VISTA alpha descriptor import
@@ -67,6 +69,8 @@ TB4 carries normal RS-232 signaling, not TTL-level UART signaling. Do not connec
 - Guarded raw transmit for protocol testing
 
 The four per-zone binary sensors and four aggregate sensors are derived from the VISTA `49ZS` snapshot. They reconcile with the panel every five minutes by default and also update from relevant unsolicited events.
+
+Keypad display support uses the VISTA Turbo `KD` request. Partition 1 polling is enabled by default at a 7-second interval. A valid system event for a configured partition also requests a debounced keypad refresh.
 
 ## Install as a Home Assistant App repository
 

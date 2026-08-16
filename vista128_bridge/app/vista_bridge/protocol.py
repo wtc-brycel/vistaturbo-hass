@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+
 from .event_codes import EVENT_DESCRIPTIONS
 
 
@@ -11,6 +12,7 @@ class ProtocolQuery:
     data: bytes
     timeout_seconds: int | None = None
     required: bool = True
+    partition: int | None = None
 
 
 STARTUP_QUERIES: tuple[ProtocolQuery, ...] = (
@@ -79,6 +81,18 @@ class ZoneDescriptorReport:
 
 
 @dataclass(frozen=True)
+class KeypadDisplayReport:
+    line_1: str
+    line_2: str
+    backlight: bool
+    ready_led: bool
+    trouble_led: bool
+    armed_led: bool
+    led_status: int
+    raw_display: bytes
+
+
+@dataclass(frozen=True)
 class SystemEvent:
     code: str
     description: str
@@ -98,6 +112,19 @@ class SystemEvent:
         except ValueError:
             return None
         return value.isoformat(timespec="minutes")
+
+
+def build_keypad_display_query(partition: int) -> ProtocolQuery:
+    if partition < 1 or partition > 8:
+        raise ValueError("keypad partition must be 1..8")
+    prefix = f"09KD{partition}00".encode("ascii")
+    checksum = (-sum(prefix)) & 0xFF
+    data = prefix + f"{checksum:02X}\r\n".encode("ascii")
+    return ProtocolQuery(
+        name=f"keypad_display_p{partition}",
+        data=data,
+        partition=partition,
+    )
 
 
 def validate_packet(data: bytes) -> PacketValidation:
@@ -149,6 +176,8 @@ def identify_message(data: bytes) -> str:
         return "zone_partition"
     if len(data) >= 4 and data[2:4].lower() == b"zd":
         return "zone_descriptor"
+    if len(data) >= 4 and data[2:4].lower() == b"kd":
+        return "keypad_display"
     if data.startswith((b"1Bnq", b"14NQ")):
         return "system_event"
     if data.startswith(b"0AFV"):
@@ -220,6 +249,33 @@ def parse_zone_descriptor(data: bytes) -> ZoneDescriptorReport | None:
         zone=zone,
         descriptor=descriptor,
         end=zone == 0 and not descriptor,
+    )
+
+
+def parse_keypad_display(data: bytes) -> KeypadDisplayReport | None:
+    if len(data) != 41 or data[2:4].lower() != b"kd":
+        return None
+
+    raw_display = data[4:36]
+    display = bytearray(raw_display)
+    backlight = bool(display[0] & 0x80)
+    display[0] &= 0x7F
+    try:
+        led_status = int(chr(data[36]), 16)
+        line_1 = bytes(display[:16]).decode("ascii", errors="strict")
+        line_2 = bytes(display[16:32]).decode("ascii", errors="strict")
+    except (ValueError, UnicodeDecodeError):
+        return None
+
+    return KeypadDisplayReport(
+        line_1=line_1,
+        line_2=line_2,
+        backlight=backlight,
+        ready_led=bool(led_status & 0x1),
+        trouble_led=bool(led_status & 0x2),
+        armed_led=bool(led_status & 0x4),
+        led_status=led_status,
+        raw_display=raw_display,
     )
 
 
