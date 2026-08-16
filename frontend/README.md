@@ -58,7 +58,7 @@ Unmapped annunciators remain dark/unknown.
 
 ## Key sounds
 
-The card includes optional Web Audio square-wave key feedback. It is disabled by default until the physical 6160 frequency and timing are measured.
+The card includes optional Web Audio square-wave key feedback. It is disabled by default until the physical keypad frequency and timing are measured.
 
 ```yaml
 sound:
@@ -72,10 +72,12 @@ Those values are tuning parameters only.
 
 ## Current visual pass
 
-Version 0.3.0 rebuilds the two legacy keypad skins around measured proportions from the supplied physical references rather than generic alarm-keypad styling. The 6160 and 6160CR-2 share the same overall face proportions and exact key dimensions, with no rendered drop-down door.
+Version 0.3.1 keeps the two keypad skins aligned to the supplied physical references while removing decorative branding and the artificial case notch from the rendered graphics.
 
-The key grid is positioned from the reference hardware: four equal-height rows, larger real-world vertical spacing, a separate recessed programmable-key column, and the wider gap between that column and the numeric keypad. The CR-2 annunciator stack and blue burglary-status label have also been moved to the physical reference positions.
+The 6160 and 6160CR-2 share the same overall face proportions and exact key dimensions, with no rendered drop-down door. The key grid uses four equal-height rows, the separate recessed programmable-key column, and the wider gap between that column and the numeric keypad.
 
-The raised display hood, speaker slots, control placement, keycap proportions, case notch, embossing, LED lenses, molded-plastic shading and microtexture are drawn separately. The LCD is rendered as a 5x7 dot matrix from the exact 16-character VISTA display lines.
+The CR-2 burglary-status block reserves a separate area for the shield graphic so it does not overlap the Armed and Ready LED lenses. The LED lenses now use layered smoked-plastic surfaces, specular highlights, inner reflections, lens rims and multi-stage light bloom when illuminated.
 
-No reference photograph is embedded in the card. The physical appearance is produced by CSS, inline SVG and canvas so the keypad remains responsive and interactive.
+The raised display hood, speaker slots, control placement, keycap proportions, molded-plastic shading and microtexture are drawn separately. The LCD is rendered as a 5x7 dot matrix from the exact 16-character VISTA display lines.
+
+No reference photograph or manufacturer logo is embedded in the card. The physical appearance is produced by CSS, inline SVG and canvas so the keypad remains responsive and interactive.
