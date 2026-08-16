@@ -33,6 +33,67 @@ The **StarTech NETRS2321POE** is the serial-to-IP device currently tested with t
 
 A different serial server should work if it provides the same transparent behavior. Avoid modes that add protocol framing, Telnet negotiation, RFC2217 control traffic, or other transformations to the serial data stream.
 
+## Panel-side RS-232 connection
+
+The VISTA-128BPT exposes the printer/automation serial port at two connection points on the control board:
+
+- **TB4**, a terminal block intended for permanent field wiring
+- **J9**, a 10-pin header used with the Honeywell/Resideo VT-SERCBL adapter
+
+This project uses **TB4** for the permanent connection to the serial-to-IP device.
+
+### TB4
+
+The TB4 terminals are labeled:
+
+```text
+TXD   RXD   RTS/DTR   CTS/DSR   GND
+```
+
+Only three signals are required for Vista Turbo RS232:
+
+```text
+VISTA TB4 TXD  -> serial server receive input
+VISTA TB4 RXD  -> serial server transmit output
+VISTA TB4 GND  -> serial server signal ground
+RTS/DTR        -> not connected
+CTS/DSR        -> not connected
+```
+
+The `TXD` and `RXD` labels above are from the VISTA panel's point of view. The panel transmit signal must reach the serial server's receive input, and the serial server transmit signal must reach the panel receive input.
+
+Do not assume that DB9 pin numbers alone identify signal direction. Serial devices may present themselves as DTE or DCE and may therefore require a straight-through or crossover wiring arrangement. Check the serial server documentation and wire by signal function.
+
+TB4 is an RS-232 electrical interface, not a TTL UART. Do not connect the panel directly to a 3.3 V or 5 V UART without an RS-232 transceiver.
+
+Power down the panel and serial interface before changing field wiring.
+
+### J9 and VT-SERCBL
+
+J9 is the alternate 10-pin serial header. A VT-SERCBL adapter converts J9 to a standard serial connector and is useful for temporary service or programming connections.
+
+**TB4 and J9 are two access points to the same panel serial interface and should not be connected to separate serial devices at the same time.** Disconnect one before using the other.
+
+For a permanent Home Assistant installation, TB4 is preferred because it supports direct field wiring to the serial server without leaving a service cable attached to the board.
+
+### Physical path used by this project
+
+```text
+VISTA-128BPT TB4
+   TXD -----------------> serial server RX
+   RXD <----------------- serial server TX
+   GND ------------------ signal ground
+
+serial server
+   9600 8N1, no flow control
+        |
+        | raw TCP
+        v
+Vista Turbo RS232 App
+```
+
+The current installation uses a StarTech NETRS2321POE. A Lantronix UDS or another transparent RS-232-to-IP device can be wired the same way at the signal level.
+
 ## Requirements
 
 - Home Assistant OS or Supervisor
