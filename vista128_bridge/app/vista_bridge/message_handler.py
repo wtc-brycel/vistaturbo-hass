@@ -181,6 +181,11 @@ class ProtocolMessageHandler:
         self._handle_system_event_side_effects(event.code)
         self.synchronizer.request_keypad_refresh(event.partition)
 
+        # Supplemental 6160CR-2 annunciators are reconstructed from nq events.
+        # Publish initialized keypad entities immediately so AC/fire/supervisory
+        # changes are visible without waiting for the next KD polling interval.
+        self._publish_initialized_keypads()
+
         descriptor = ""
         if event.zone in self.state.zones:
             descriptor = self.state.zones[event.zone].descriptor
@@ -207,6 +212,11 @@ class ProtocolMessageHandler:
             self.synchronizer.request_full_resync("program mode exit")
         elif code in {"0E", "3E"}:
             self.synchronizer.request_full_resync("panel power-up")
+
+    def _publish_initialized_keypads(self) -> None:
+        for keypad in self.state.keypads.values():
+            if keypad.initialized:
+                self.mqtt.publish_keypad_state(keypad)
 
     def _publish_zone(self, zone_number: int) -> None:
         zone = self.state.zones.get(zone_number)
