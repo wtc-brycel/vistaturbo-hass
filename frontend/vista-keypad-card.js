@@ -1,4 +1,4 @@
-const VISTA_KEYPAD_CARD_VERSION = "0.3.0";
+const VISTA_KEYPAD_CARD_VERSION = "0.3.1";
 
 const MODEL_ALIASES = {
   "6160cr2": "6160cr2",
@@ -66,9 +66,7 @@ function safeCssColor(value, fallback = "") {
 }
 
 class VistaKeypadAudio {
-  constructor() {
-    this.ctx = null;
-  }
+  constructor() { this.ctx = null; }
 
   async beep(config = {}) {
     if (!config.enabled) return;
@@ -76,7 +74,6 @@ class VistaKeypadAudio {
     if (!AudioCtx) return;
     this.ctx ??= new AudioCtx();
     if (this.ctx.state === "suspended") await this.ctx.resume();
-
     const frequency = Number(config.frequency ?? 1400);
     const duration = Number(config.duration_ms ?? 45) / 1000;
     const volume = Math.max(0, Math.min(1, Number(config.volume ?? 0.035)));
@@ -106,11 +103,7 @@ class VistaKeypadCard extends HTMLElement {
   }
 
   static getStubConfig() {
-    return {
-      entity: "sensor.vista_partition_1_keypad",
-      model: "6160cr2",
-      read_only: true,
-    };
+    return { entity: "sensor.vista_partition_1_keypad", model: "6160cr2", read_only: true };
   }
 
   setConfig(config) {
@@ -131,11 +124,7 @@ class VistaKeypadCard extends HTMLElement {
     this._render();
   }
 
-  set hass(hass) {
-    this._hass = hass;
-    this._render();
-  }
-
+  set hass(hass) { this._hass = hass; this._render(); }
   getCardSize() { return 7; }
 
   _entityState(entityId) {
@@ -152,18 +141,9 @@ class VistaKeypadCard extends HTMLElement {
     const state = this._entityState(this._config?.entity);
     if (!state) {
       return {
-        available: false,
-        line1: exactLine("VISTA TURBO"),
-        line2: exactLine("ENTITY MISSING"),
-        ready: false,
-        armed: false,
-        trouble: false,
-        backlight: false,
-        power: null,
-        fireAlarm: null,
-        silenced: null,
-        supervisory: null,
-        fireTrouble: null,
+        available: false, line1: exactLine("VISTA TURBO"), line2: exactLine("ENTITY MISSING"),
+        ready: false, armed: false, trouble: false, backlight: false,
+        power: null, fireAlarm: null, silenced: null, supervisory: null, fireTrouble: null,
       };
     }
     const a = state.attributes ?? {};
@@ -172,14 +152,10 @@ class VistaKeypadCard extends HTMLElement {
       available: !unavailable,
       line1: exactLine(a.line_1 ?? (unavailable ? "VISTA OFFLINE" : state.state)),
       line2: exactLine(a.line_2 ?? ""),
-      ready: boolValue(a.ready),
-      armed: boolValue(a.armed),
-      trouble: boolValue(a.trouble),
+      ready: boolValue(a.ready), armed: boolValue(a.armed), trouble: boolValue(a.trouble),
       backlight: boolValue(a.backlight, true),
-      power: this._indicatorState("power", null),
-      fireAlarm: this._indicatorState("fire_alarm", null),
-      silenced: this._indicatorState("silenced", null),
-      supervisory: this._indicatorState("supervisory", null),
+      power: this._indicatorState("power", null), fireAlarm: this._indicatorState("fire_alarm", null),
+      silenced: this._indicatorState("silenced", null), supervisory: this._indicatorState("supervisory", null),
       fireTrouble: this._indicatorState("fire_trouble", null),
     };
   }
@@ -259,7 +235,6 @@ class VistaKeypadCard extends HTMLElement {
 
   _renderPhysical(model, display) {
     const isCR2 = model === "6160cr2";
-    const brand = isCR2 ? "FIRST ALERT" : "Honeywell";
     return `<div class="keypad-shell ${isCR2 ? "cr2" : "k6160"}" data-model="${model}">
       <div class="microtexture"></div>
       <div class="top-lip"></div>
@@ -270,8 +245,6 @@ class VistaKeypadCard extends HTMLElement {
       </div>
       ${isCR2 ? this._statusCR2(display) : this._status6160(display)}
       <div class="controls-well">${this._controls(model)}</div>
-      <div class="brand-emboss ${isCR2 ? "brand-firstalert" : "brand-honeywell"}">${escapeHtml(brand)}</div>
-      <div class="case-notch"></div>
     </div>`;
   }
 
@@ -360,24 +333,56 @@ class VistaKeypadCard extends HTMLElement {
       .number-main { font-family:"Arial Narrow","Roboto Condensed",Arial,sans-serif; font-stretch:condensed; font-size:clamp(19px,3.05cqw,34px); font-weight:400; line-height:.9; transform:scaleX(.76); transform-origin:center; }
       .number-legend { font-family:"Arial Narrow","Roboto Condensed",Arial,sans-serif; font-size:clamp(7px,1.22cqw,13px); font-weight:700; font-style:italic; line-height:1; white-space:nowrap; }
       .status-cr2 { position:absolute; left:5.2%; top:50.0%; width:27.4%; height:39.8%; color:#f1e7e7; font-family:"Arial Narrow",Arial,sans-serif; }
-      .burg-sticker { position:absolute; left:2%; top:0; width:69%; height:31%; padding:1.05cqw 1.55cqw; background:linear-gradient(180deg,#1974ad,#135c92); border-radius:.85cqw; box-shadow:inset 0 .12cqw .16cqw rgba(255,255,255,.17),0 .08cqw .12cqw rgba(0,0,0,.12); color:#edf2f4; }
-      .burg-icon { position:absolute; right:4%; top:16%; width:18%; height:68%; color:#f0f6f8; opacity:.9; }
+      .burg-sticker { position:absolute; left:2%; top:0; width:69%; height:31%; padding:1.05cqw 5.2cqw 1.05cqw 1.55cqw; background:linear-gradient(180deg,#1974ad,#135c92); border-radius:.85cqw; box-shadow:inset 0 .12cqw .16cqw rgba(255,255,255,.17),0 .08cqw .12cqw rgba(0,0,0,.12); color:#edf2f4; }
+      .burg-sticker .led-row { grid-template-columns:1fr 2.75cqw; min-height:3.15cqw; font-size:clamp(9px,1.55cqw,17px); }
+      .burg-icon { position:absolute; right:5.5%; top:16%; width:16%; height:68%; color:#f0f6f8; opacity:.94; }
       .fire-annunciators { position:absolute; left:0; top:33%; width:78%; height:67%; padding-left:1.6cqw; }
       .fire-bracket { position:absolute; right:-7%; top:2%; bottom:3%; width:26%; border-right:.15cqw solid #f3e7e7; border-top:.15cqw solid #f3e7e7; border-bottom:.15cqw solid #f3e7e7; border-radius:0 .7cqw .7cqw 0; opacity:.86; }
       .fire-icon { position:absolute; right:-25%; top:31%; width:18%; height:32%; color:#f5eeee; }
       .led-row { display:grid; grid-template-columns:1fr 3.25cqw; align-items:center; column-gap:.45cqw; min-height:3.25cqw; font-size:clamp(9px,1.75cqw,19px); font-weight:700; line-height:1; }
-      .burg-sticker .led-row { grid-template-columns:1fr 3cqw; min-height:3.15cqw; font-size:clamp(9px,1.55cqw,17px); }
       .led-label { white-space:nowrap; text-shadow:0 .05cqw .04cqw rgba(0,0,0,.14); }
-      .led { display:block; width:2.7cqw; height:1.18cqw; border-radius:50%; background:linear-gradient(180deg,#585752,#2d2e2a); box-shadow:inset .18cqw .12cqw .23cqw rgba(0,0,0,.8),inset -.09cqw -.07cqw .1cqw rgba(255,255,255,.2),0 .04cqw .04cqw rgba(255,255,255,.11); }
-      .led.on { background:radial-gradient(ellipse at 36% 28%,#f4ffad 0%,#b7eb39 35%,#79a92b 71%,#496b1e 100%); box-shadow:0 0 .65cqw rgba(180,237,53,.85),inset .12cqw .08cqw .15cqw rgba(255,255,255,.72); }
-      .led.unknown { opacity:.86; }
+      .led {
+        position:relative; display:block; width:2.72cqw; height:1.2cqw; justify-self:center; overflow:visible;
+        border-radius:52% 48% 50% 50% / 58% 56% 44% 42%;
+        background:
+          radial-gradient(ellipse at 39% 23%,rgba(255,255,255,.20) 0 8%,rgba(255,255,255,0) 24%),
+          linear-gradient(180deg,#5c5b56 0%,#373733 46%,#242522 100%);
+        border:.075cqw solid rgba(24,24,22,.72);
+        box-shadow:
+          inset .18cqw .15cqw .24cqw rgba(0,0,0,.78),
+          inset -.11cqw -.08cqw .12cqw rgba(255,255,255,.12),
+          0 .07cqw .08cqw rgba(255,255,255,.15),
+          0 -.055cqw .07cqw rgba(0,0,0,.42);
+      }
+      .led::before {
+        content:""; position:absolute; inset:.09cqw .14cqw .16cqw .16cqw; border-radius:50%; pointer-events:none;
+        background:linear-gradient(155deg,rgba(255,255,255,.20),rgba(255,255,255,0) 45%);
+        opacity:.68;
+      }
+      .led::after {
+        content:""; position:absolute; left:18%; top:10%; width:35%; height:23%; border-radius:50%; pointer-events:none;
+        background:radial-gradient(ellipse,rgba(255,255,255,.42),rgba(255,255,255,0) 72%);
+        filter:blur(.035cqw); opacity:.45;
+      }
+      .led.on {
+        background:
+          radial-gradient(ellipse at 34% 24%,#f6ffd1 0 8%,#d8ff79 15%,rgba(216,255,121,.35) 27%,transparent 38%),
+          radial-gradient(ellipse at 51% 55%,#b9ec43 0%,#91c532 55%,#5c821e 83%,#344912 100%);
+        border-color:rgba(66,94,19,.78);
+        box-shadow:
+          0 0 .2cqw rgba(194,245,75,.95),
+          0 0 .65cqw rgba(157,221,48,.82),
+          0 0 1.25cqw rgba(139,201,39,.22),
+          inset .08cqw .07cqw .14cqw rgba(255,255,255,.78),
+          inset -.12cqw -.1cqw .14cqw rgba(47,74,10,.42),
+          0 -.045cqw .06cqw rgba(0,0,0,.34);
+      }
+      .led.on::before { background:linear-gradient(155deg,rgba(255,255,255,.82),rgba(255,255,255,.08) 46%,transparent 62%); opacity:.9; }
+      .led.on::after { background:radial-gradient(ellipse,rgba(255,255,255,.98),rgba(255,255,255,.28) 42%,transparent 74%); opacity:.9; }
+      .led.unknown { filter:saturate(.55) brightness(.91); opacity:.92; }
       .status-6160 { position:absolute; left:6.5%; top:55.7%; width:23.2%; color:#171717; font-family:"Arial Narrow",Arial,sans-serif; }
       .status-6160 .led-row { grid-template-columns:1fr 3.2cqw; min-height:6.6cqw; font-size:clamp(8px,1.35cqw,15px); font-weight:500; }
       .status-6160 .led { width:2.65cqw; height:1.08cqw; }
-      .brand-emboss { position:absolute; right:8.6%; bottom:3.35%; height:5%; display:flex; align-items:center; justify-content:center; user-select:none; }
-      .brand-firstalert { padding:.25cqw 1.25cqw; border:.12cqw solid rgba(255,255,255,.12); color:rgba(255,255,255,.16); font:700 clamp(11px,1.75cqw,20px)/1 Georgia,serif; text-shadow:0 -.08cqw .1cqw rgba(93,0,0,.48),0 .08cqw .08cqw rgba(255,255,255,.08); }
-      .brand-honeywell { color:rgba(92,92,88,.19); font:700 clamp(12px,1.85cqw,21px)/1 Georgia,serif; text-shadow:0 1px rgba(255,255,255,.62),0 -.05cqw .06cqw rgba(80,80,75,.12); }
-      .case-notch { position:absolute; left:28.4%; bottom:-.1%; width:2.15%; height:5.5%; background:var(--ha-card-background,#fff); border-radius:.18cqw .18cqw 0 0; box-shadow:inset 0 .08cqw .13cqw rgba(0,0,0,.19); }
       .read-only-note { min-height:18px; opacity:0; color:var(--secondary-text-color); font:500 12px/18px sans-serif; transition:opacity .18s ease; }
       .read-only-note.show{opacity:1}
       @media(max-width:650px){.keypad-shell{min-height:300px}.wrap{gap:4px}}
@@ -397,18 +402,15 @@ class VistaKeypadCard extends HTMLElement {
     const w = rect.width;
     const h = rect.height;
     const lit = canvas.dataset.lit === "1";
-
     const bg = ctx.createLinearGradient(0, 0, 0, h);
     if (lit) { bg.addColorStop(0, "#b2ed54"); bg.addColorStop(.5, "#9ee247"); bg.addColorStop(1, "#88cb38"); }
     else { bg.addColorStop(0, "#7f9570"); bg.addColorStop(1, "#687a5e"); }
     ctx.fillStyle = bg;
     ctx.fillRect(0, 0, w, h);
-
     ctx.fillStyle = lit ? "rgba(33,80,23,.055)" : "rgba(25,42,24,.065)";
     const grid = Math.max(2.5, w / 120);
     for (let x = 0; x < w; x += grid) ctx.fillRect(x, 0, 1, h);
     for (let y = 0; y < h; y += grid) ctx.fillRect(0, y, w, 1);
-
     const lines = [exactLine(canvas.dataset.line1), exactLine(canvas.dataset.line2)];
     const marginX = w * .018;
     const marginY = h * .105;
@@ -418,11 +420,9 @@ class VistaKeypadCard extends HTMLElement {
     const gap = dot * .19;
     const px = dot - gap;
     ctx.fillStyle = lit ? "#17341a" : "#253126";
-
     lines.forEach((line, rowIndex) => {
       [...line].forEach((rawChar, charIndex) => {
-        const char = rawChar.toUpperCase();
-        const glyph = MATRIX_5X7[char] ?? MATRIX_5X7["?"];
+        const glyph = MATRIX_5X7[rawChar.toUpperCase()] ?? MATRIX_5X7["?"];
         const baseX = marginX + charIndex * charW + (charW - dot * 5) / 2;
         const baseY = marginY + rowIndex * lineH + (lineH - dot * 7) / 2;
         for (let gx = 0; gx < 5; gx++) {
@@ -435,7 +435,6 @@ class VistaKeypadCard extends HTMLElement {
         }
       });
     });
-
     const glare = ctx.createLinearGradient(0, 0, w, h);
     glare.addColorStop(0, "rgba(255,255,255,.10)");
     glare.addColorStop(.32, "rgba(255,255,255,.015)");
@@ -452,7 +451,6 @@ class VistaKeypadCard extends HTMLElement {
       ${this._renderPhysical(this._config.model, display)}
       <div class="read-only-note" id="read-only-note">Read-only monitoring. Keypad control is not enabled.</div>
     </div></ha-card>`;
-
     requestAnimationFrame(() => this._drawLCD());
     this.shadowRoot.querySelectorAll("button[data-key]").forEach(button => {
       button.addEventListener("pointerdown", () => button.classList.add("pressed"));
@@ -476,8 +474,7 @@ class VistaKeypadCard extends HTMLElement {
       return;
     }
     this.dispatchEvent(new CustomEvent("vista-keypad-key", {
-      bubbles:true,
-      composed:true,
+      bubbles:true, composed:true,
       detail:{ key, entity:this._config.entity, model:this._config.model },
     }));
   }
