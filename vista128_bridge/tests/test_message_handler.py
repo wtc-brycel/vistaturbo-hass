@@ -17,6 +17,7 @@ from vista_bridge.state import VistaState  # noqa: E402
 class FakeMqtt:
     def __init__(self):
         self.events = []
+        self.summary_calls = 0
 
     def publish_partition_discovery(self, partition):
         pass
@@ -29,6 +30,9 @@ class FakeMqtt:
 
     def publish_zone_state(self, zone):
         pass
+
+    def publish_zone_summaries(self, state):
+        self.summary_calls += 1
 
     def publish_event(self, event, **kwargs):
         self.events.append((event, kwargs))
@@ -97,8 +101,24 @@ class MessageHandlerTests(unittest.TestCase):
         self.assertEqual(self.state.zones[27].descriptor, "GLASS BREAK KITCHEN")
         self.assertTrue(self.state.zones[27].faulted)
         self.assertEqual(len(self.mqtt.events), 1)
+        self.assertGreaterEqual(self.mqtt.summary_calls, 3)
         self.assertEqual(len(self.printer.events), 1)
         self.assertEqual(self.sync.descriptor_complete, 1)
+
+    def test_captured_bypass_event_refreshes_zone_summaries(self):
+        self.handler.handle(
+            "zone_partition",
+            b"49ZP10011110000000000011111111111011011111010111000000000000000000000003E",
+            "2026-08-16T01:27:44+00:00",
+        )
+        before = self.mqtt.summary_calls
+        self.handler.handle(
+            "system_event",
+            b"1Bnq0503400214423150826008C",
+            "2026-08-16T01:50:02+00:00",
+        )
+        self.assertTrue(self.state.zones[34].bypassed)
+        self.assertEqual(self.mqtt.summary_calls, before + 1)
 
 
 if __name__ == "__main__":

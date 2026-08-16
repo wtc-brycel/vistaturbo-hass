@@ -6,7 +6,7 @@ This project has been developed and tested against a **VISTA-128BPT**. Other VIS
 
 The App is designed to reach the panel through a **Lantronix UDS-series serial server or an equivalent transparent serial-to-IP device**. Development and current operation have been tested with a **StarTech NETRS2321POE** in raw TCP Server mode.
 
-Current status: read-only monitoring is operational. The bridge publishes partition state, assigned zones, VISTA alpha descriptors, decoded events, health metrics, and optional TransPort receipt output through MQTT Discovery. Home Assistant arm/disarm commands are not sent to the panel.
+Current status: read-only monitoring is operational. The bridge publishes partition state, assigned zones, aggregate zone-condition sensors, VISTA alpha descriptors, decoded events, health metrics, and optional TransPort receipt output through MQTT Discovery. Home Assistant arm/disarm commands are not sent to the panel.
 
 ## Runtime path
 
@@ -63,11 +63,14 @@ TB4 is RS-232 level signaling. It is not a TTL UART connection.
 - Startup state and metadata synchronization
 - Five-minute state reconciliation by default
 - Partition and assigned-zone MQTT Discovery entities
+- Aggregate Faulted Zones, Zones in Check, Zones in Alarm, and Bypassed Zones sensors
 - Real-time `1Bnq` event handling
 - Zone alpha descriptor import
 - Panel clock-offset diagnostics
 - Optional continuous event receipts through TransPort
 - Guarded raw transmit for protocol testing
+
+The aggregate zone-condition sensors use only the four conditions available in the `49ZS` snapshot. Their state is a count and their attributes contain the matching assigned zones. RF low-battery and sensor-tamper events remain event-derived and are not presented as snapshot-backed aggregate sensors.
 
 See `DOCS.md` for configuration and protocol behavior.
 

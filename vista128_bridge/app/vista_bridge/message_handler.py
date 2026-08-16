@@ -85,6 +85,7 @@ class ProtocolMessageHandler:
             self._publish_zone(zone_number)
         for partition in self.state.partitions.values():
             self.mqtt.publish_partition_state(partition)
+        self.mqtt.publish_zone_summaries(self.state)
 
     def _handle_zone_partition(self, data: bytes, received_at: str) -> None:
         report = parse_zone_partition(data)
@@ -106,6 +107,7 @@ class ProtocolMessageHandler:
         for zone in assigned:
             self.mqtt.publish_zone_discovery(zone)
             self.mqtt.publish_zone_state(zone)
+        self.mqtt.publish_zone_summaries(self.state)
 
     def _handle_zone_descriptor(self, data: bytes, received_at: str) -> None:
         report = parse_zone_descriptor(data)
@@ -113,6 +115,7 @@ class ProtocolMessageHandler:
             return
         if report.end:
             LOG.info("Zone descriptor synchronization complete")
+            self.mqtt.publish_zone_summaries(self.state)
             self.synchronizer.mark_descriptor_complete()
             return
         if not self.state.set_descriptor(report.zone, report.descriptor):
@@ -163,6 +166,8 @@ class ProtocolMessageHandler:
 
         for zone_number in changed_zones:
             self._publish_zone(zone_number)
+        if changed_zones:
+            self.mqtt.publish_zone_summaries(self.state)
         for partition_number in changed_partitions:
             partition = self.state.partitions.get(partition_number)
             if partition is not None:

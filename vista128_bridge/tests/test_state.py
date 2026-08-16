@@ -32,6 +32,20 @@ class StateTests(unittest.TestCase):
         self.assertTrue(zone.bypassed)
         self.assertTrue(zone.active)
 
+    def test_zone_summaries_only_use_snapshot_conditions_and_assigned_zones(self):
+        state = VistaState()
+        partitions = [1, 1] + [0] * 62
+        statuses = [0xB, 0x4, 0x8] + [0] * 61
+        state.apply_zone_partition(ZonePartitionReport(1, tuple(partitions)))
+        state.apply_zone_status(ZoneStatusReport(1, tuple(statuses)))
+
+        self.assertEqual([zone.zone for zone in state.assigned_zones_with("faulted")], [1])
+        self.assertEqual([zone.zone for zone in state.assigned_zones_with("trouble")], [1])
+        self.assertEqual([zone.zone for zone in state.assigned_zones_with("alarm")], [2])
+        self.assertEqual([zone.zone for zone in state.assigned_zones_with("bypassed")], [1])
+        with self.assertRaises(ValueError):
+            state.assigned_zones_with("low_battery")
+
     def test_arm_stay_event_updates_partition(self):
         state = VistaState()
         event = SystemEvent("B7", "Arm STAY", 0, 2, 1, 21, 3, 15, 8, 26)
@@ -65,7 +79,7 @@ class StateTests(unittest.TestCase):
     def test_captured_bypass_event_updates_zone_attribute(self):
         state = VistaState()
         partitions = [0] * 64
-        partitions[33] = 1  # zone 34
+        partitions[33] = 1
         state.apply_zone_partition(ZonePartitionReport(1, tuple(partitions)))
         bypass = SystemEvent("05", "Bypass", 34, 2, 1, 44, 23, 15, 8, 26)
         changed, _ = state.apply_system_event(bypass)
@@ -73,7 +87,6 @@ class StateTests(unittest.TestCase):
         self.assertTrue(state.zones[34].bypassed)
         self.assertEqual(state.zones[34].raw_status & 0x8, 0x8)
         self.assertFalse(state.zones[34].active)
-
 
 
 if __name__ == "__main__":

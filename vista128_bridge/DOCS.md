@@ -226,6 +226,52 @@ raw_status: "8"
 
 Zone names come directly from the VISTA alpha descriptor stream.
 
+### Aggregate zone conditions
+
+Four Home Assistant sensors summarize the per-zone conditions available in the authoritative `49ZS` zone-status snapshot:
+
+```text
+Faulted Zones
+Zones in Check
+Zones in Alarm
+Bypassed Zones
+```
+
+The sensor state is the number of matching assigned zones. The attributes include the zone number, partition, and current VISTA alpha descriptor for each matching zone.
+
+Example:
+
+```yaml
+state: 2
+attributes:
+  count: 2
+  zone_numbers:
+    - 21
+    - 34
+  zones:
+    - zone: 21
+      partition: 1
+      descriptor: FRONT DOOR
+    - zone: 34
+      partition: 1
+      descriptor: MAIN BEDROOM WINDOW
+```
+
+The four snapshot bits are interpreted as:
+
+```text
+0x1  faulted
+0x2  trouble / CHECK
+0x4  alarm
+0x8  bypassed
+```
+
+`Zones in Check` is the Home Assistant display name for the VISTA trouble bit because CHECK is the operator-facing terminology used by the panel.
+
+The aggregate sensors are refreshed from `49ZS` during startup and every periodic reconciliation. They are also updated immediately when an unsolicited event changes one of these tracked zone conditions.
+
+RF low-battery and sensor-tamper conditions are currently learned from unsolicited event codes rather than the `49ZS` snapshot. They remain available in zone attributes and event data, but are not exposed as snapshot-backed aggregate sensors.
+
 ### Events
 
 Decoded `1Bnq` events are published to:

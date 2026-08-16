@@ -8,13 +8,15 @@ import paho.mqtt.client as mqtt
 
 from .config import Settings
 from .mqtt_discovery import (
+    ZONE_SUMMARY_SPECS,
     device_info,
     diagnostic_entities,
     partition_config,
     zone_config,
+    zone_summary_entities,
 )
 from .protocol import SystemEvent
-from .state import PartitionState, ZoneState
+from .state import PartitionState, VistaState, ZoneState
 from .version import VERSION
 
 LOG = logging.getLogger(__name__)
@@ -95,6 +97,12 @@ class MqttPublisher:
                 object_id,
                 {**config, **availability},
             )
+        for object_id, config in zone_summary_entities(self.topic).items():
+            self._publish_discovery_config(
+                "sensor",
+                object_id,
+                {**config, **availability},
+            )
 
     def publish_partition_discovery(self, partition: int) -> None:
         self._publish_discovery_config(
@@ -132,6 +140,29 @@ class MqttPublisher:
             retain=True,
             qos=1,
         )
+
+    def publish_zone_summaries(self, state: VistaState) -> None:
+        for key, spec in ZONE_SUMMARY_SPECS.items():
+            zones = state.assigned_zones_with(spec["attribute"])
+            prefix = f"zone_summary/{key}"
+            self.publish(f"{prefix}/count", len(zones), retain=True, qos=1)
+            self.publish_json(
+                f"{prefix}/attributes",
+                {
+                    "count": len(zones),
+                    "zone_numbers": [zone.zone for zone in zones],
+                    "zones": [
+                        {
+                            "zone": zone.zone,
+                            "partition": zone.partition,
+                            "descriptor": zone.descriptor,
+                        }
+                        for zone in zones
+                    ],
+                },
+                retain=True,
+                qos=1,
+            )
 
     def publish_event(
         self,

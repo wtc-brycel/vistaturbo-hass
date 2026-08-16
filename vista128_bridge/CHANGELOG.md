@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.3
+
+- Add aggregate Home Assistant sensors for faulted zones, zones in CHECK, zones in alarm, and bypassed zones.
+- Use the authoritative `49ZS` zone-status bitmask for all four aggregate sensors.
+- Publish the number of matching assigned zones as sensor state and include zone number, partition, and descriptor in attributes.
+- Refresh aggregate sensors after zone snapshots, partition mapping, descriptor synchronization, and relevant unsolicited zone events.
+- Do not infer aggregate low-battery or tamper state from event-only data.
+
 ## 0.2.2
 
 - Rename the public repository to `vistaturbo-hass` and the App to Vista Turbo RS232.

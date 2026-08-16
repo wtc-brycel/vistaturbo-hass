@@ -112,6 +112,15 @@ class VistaState:
         self.zone_status_initialized = False
         self.zone_partition_initialized = False
 
+    def assigned_zones_with(self, attribute: str) -> list[ZoneState]:
+        if attribute not in ZONE_STATUS_BITS:
+            raise ValueError(f"{attribute} is not a zone-status condition")
+        return [
+            zone
+            for zone in self.zones.values()
+            if zone.partition and getattr(zone, attribute)
+        ]
+
     def apply_arming_status(self, report: ArmingStatusReport) -> set[int]:
         self.arming_initialized = True
         changed: set[int] = set()
