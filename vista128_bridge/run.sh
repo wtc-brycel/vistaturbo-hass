@@ -29,6 +29,10 @@ export STARTUP_SYNC_RESPONSE_TIMEOUT_SECONDS="$(bashio::config 'startup_sync_res
 export PERIODIC_SYNC_ENABLED="$(config_or_default 'periodic_sync_enabled' 'true')"
 export PERIODIC_SYNC_INTERVAL_SECONDS="$(config_or_default 'periodic_sync_interval_seconds' '300')"
 export PERIODIC_SYNC_RECONNECT_AFTER_FAILURES="$(config_or_default 'periodic_sync_reconnect_after_failures' '3')"
+export KEYPAD_DISPLAY_ENABLED="$(config_or_default 'keypad_display_enabled' 'true')"
+export KEYPAD_PARTITIONS="$(config_or_default 'keypad_partitions' '1')"
+export KEYPAD_POLL_INTERVAL_SECONDS="$(config_or_default 'keypad_poll_interval_seconds' '7')"
+export KEYPAD_EVENT_REFRESH_DELAY_MS="$(config_or_default 'keypad_event_refresh_delay_ms' '250')"
 export TRANSPORT_PRINT_ENABLED="$(config_or_default 'transport_print_enabled' 'false')"
 export TRANSPORT_HOST="$(config_or_default 'transport_host' '')"
 export TRANSPORT_HTTP_PORT="$(config_or_default 'transport_http_port' '9101')"
@@ -49,6 +53,9 @@ bashio::log.info "Serial server: ${PANEL_HOST}:${PANEL_PORT}"
 bashio::log.info "MQTT broker: ${MQTT_HOST}:${MQTT_PORT}"
 if bashio::var.true "${PERIODIC_SYNC_ENABLED}"; then
   bashio::log.info "Periodic state reconciliation: every ${PERIODIC_SYNC_INTERVAL_SECONDS}s"
+fi
+if bashio::var.true "${KEYPAD_DISPLAY_ENABLED}"; then
+  bashio::log.info "Keypad display polling: partitions ${KEYPAD_PARTITIONS}, every ${KEYPAD_POLL_INTERVAL_SECONDS}s"
 fi
 if bashio::var.true "${TRANSPORT_PRINT_ENABLED}"; then
   bashio::log.info "TransPort event receipts: http://${TRANSPORT_HOST}:${TRANSPORT_HTTP_PORT}/print"
