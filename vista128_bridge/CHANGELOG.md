@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.2.6-rc.1
+
+- Add production 6160CR-2 and 6160 Home Assistant keypad cards.
+- Add CR-2 Power, Fire Alarm, Silenced, Supervisory, and Trouble annunciator state to the keypad entity.
+- Keep Fire Alarm latched across detector restore until keypad reset/normalization clears the condition.
+- Reconstruct Power from AC loss/restore events and Supervisory from supervisory start/restore events.
+- Republish initialized keypad entities immediately after relevant real-time panel events.
+- Add red, white, and dark enclosure colors to both keypad models.
+- Make `case_color: auto` the default for both keypad models and follow Home Assistant light/dark mode.
+- Add optional `day_case_color` and `night_case_color` overrides for AUTO mode.
+- Use model defaults of red/dark for 6160CR-2 and white/dark for 6160.
+- Remove forced keypad minimum heights so Lovelace cards preserve physical aspect ratio in narrow columns.
+- Add narrow-container control scaling for key padding, legends, and function-key positioning.
+- Keep all keypad controls read-only.
+
 ## 0.2.5
 
 - Add native VISTA Turbo keypad display polling over the existing RS-232 automation connection.
