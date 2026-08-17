@@ -1,0 +1,155 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+import { test, expect } from "@playwright/test";
+
+const here = dirname(fileURLToPath(import.meta.url));
+const cardSource = readFileSync(join(here, "..", "vista-keypad-card.js"), "utf8");
+const ENTITY = "sensor.vista_partition_1_keypad";
+
+async function mountCard(page, { width, model = "6160cr2", layout = "auto", dark = false } = {}) {
+  await page.setViewportSize({ width: Math.max(360, width + 40), height: 1000 });
+  await page.setContent(`<!doctype html><html><head><meta charset="utf-8"><style>
+    html,body{margin:0;padding:0;background:#eee}
+    #stage{width:${width}px;margin:0 auto}
+    vista-keypad-card{display:block;width:100%}
+  </style></head><body><div id="stage"><vista-keypad-card id="card"></vista-keypad-card></div></body></html>`);
+
+  await page.evaluate(() => {
+    if (!customElements.get("ha-card")) customElements.define("ha-card", class extends HTMLElement {});
+  });
+  await page.addScriptTag({ content: cardSource });
+
+  await page.evaluate(({ entity, model, layout, dark }) => {
+    const card = document.getElementById("card");
+    card.setConfig({
+      entity,
+      model,
+      layout,
+      case_color: "auto",
+      read_only: true,
+    });
+    card.hass = {
+      themes: { darkMode: dark },
+      states: {
+        [entity]: {
+          state: "P1 DISARMED / READY TO ARM",
+          attributes: {
+            line_1: "P1   DISARMED   ",
+            line_2: "READY TO ARM    ",
+            ready: true,
+            armed: false,
+            trouble: false,
+            backlight: true,
+            power: true,
+            fire_alarm: false,
+            silenced: false,
+            supervisory: false,
+          },
+        },
+      },
+    };
+  }, { entity: ENTITY, model, layout, dark });
+
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+}
+
+async function renderedState(page) {
+  return page.evaluate(() => {
+    const card = document.getElementById("card");
+    const root = card.shadowRoot;
+    const physicalView = root.querySelector(".layout-physical-view");
+    const compactView = root.querySelector(".layout-compact-view");
+    const physicalShell = root.querySelector(".keypad-shell");
+    const compactShell = root.querySelector(".compact-shell");
+    const visible = (el) => el && getComputedStyle(el).display !== "none" && el.getBoundingClientRect().width > 0;
+    const buttons = [...root.querySelectorAll(".layout-compact-view button.physical-key")];
+    const buttonRects = buttons.map((button) => {
+      const r = button.getBoundingClientRect();
+      return { width: r.width, height: r.height };
+    });
+    return {
+      physicalVisible: visible(physicalView),
+      compactVisible: visible(compactView),
+      physicalCase: physicalShell?.dataset.caseColor ?? null,
+      compactCase: compactShell?.dataset.caseColor ?? null,
+      compactIndicators: root.querySelectorAll(".layout-compact-view .compact-indicator").length,
+      buttonRects,
+      grid: card.getGridOptions(),
+    };
+  });
+}
+
+test("AUTO keeps physical facsimile on a wide Lovelace card", async ({ page }) => {
+  await mountCard(page, { width: 700, model: "6160cr2" });
+  const state = await renderedState(page);
+  expect(state.physicalVisible).toBe(true);
+  expect(state.compactVisible).toBe(false);
+});
+
+test("AUTO switches CR-2 to compact layout at phone width", async ({ page }) => {
+  await mountCard(page, { width: 390, model: "6160cr2" });
+  const state = await renderedState(page);
+  expect(state.physicalVisible).toBe(false);
+  expect(state.compactVisible).toBe(true);
+  expect(state.compactIndicators).toBe(7);
+  expect(state.buttonRects).toHaveLength(16);
+  for (const rect of state.buttonRects) {
+    expect(rect.width).toBeGreaterThanOrEqual(75);
+    expect(rect.height).toBeGreaterThanOrEqual(48);
+  }
+});
+
+test("AUTO remains touchable at a 320px card width", async ({ page }) => {
+  await mountCard(page, { width: 320, model: "6160cr2" });
+  const state = await renderedState(page);
+  expect(state.compactVisible).toBe(true);
+  for (const rect of state.buttonRects) {
+    expect(rect.width).toBeGreaterThanOrEqual(60);
+    expect(rect.height).toBeGreaterThanOrEqual(48);
+  }
+});
+
+test("standard 6160 uses the same compact framework with its own profile", async ({ page }) => {
+  await mountCard(page, { width: 390, model: "6160" });
+  const state = await renderedState(page);
+  expect(state.compactVisible).toBe(true);
+  expect(state.compactIndicators).toBe(2);
+  expect(state.buttonRects).toHaveLength(16);
+});
+
+test("layout override can force physical or compact mode", async ({ page }) => {
+  await mountCard(page, { width: 390, model: "6160cr2", layout: "physical" });
+  let state = await renderedState(page);
+  expect(state.physicalVisible).toBe(true);
+  expect(state.compactVisible).toBe(false);
+
+  await mountCard(page, { width: 700, model: "6160cr2", layout: "compact" });
+  state = await renderedState(page);
+  expect(state.physicalVisible).toBe(false);
+  expect(state.compactVisible).toBe(true);
+});
+
+test("AUTO case colors follow model and Home Assistant theme", async ({ page }) => {
+  await mountCard(page, { width: 390, model: "6160cr2", dark: false });
+  let state = await renderedState(page);
+  expect(state.compactCase).toBe("red");
+
+  await mountCard(page, { width: 390, model: "6160cr2", dark: true });
+  state = await renderedState(page);
+  expect(state.compactCase).toBe("dark");
+
+  await mountCard(page, { width: 390, model: "6160", dark: false });
+  state = await renderedState(page);
+  expect(state.compactCase).toBe("white");
+
+  await mountCard(page, { width: 390, model: "6160", dark: true });
+  state = await renderedState(page);
+  expect(state.compactCase).toBe("dark");
+});
+
+test("Lovelace grid contract permits four-column compact placement", async ({ page }) => {
+  await mountCard(page, { width: 390, model: "6160cr2" });
+  const state = await renderedState(page);
+  expect(state.grid).toEqual({ columns: 12, min_columns: 4, max_columns: 12 });
+});
