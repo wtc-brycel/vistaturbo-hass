@@ -75,6 +75,28 @@ class ControlCoordinatorTests(unittest.IsolatedAsyncioTestCase):
         control.reset_session()
         return control
 
+    async def test_successful_transaction_can_infer_availability_but_xf_latches_blocked(self):
+        control = self.make_control()
+        self.assertEqual(control.automation_availability_source(), "unknown")
+        self.assertTrue(control.infer_automation_available())
+        self.assertTrue(control.automation_available())
+        self.assertEqual(control.automation_availability_source(), "inferred")
+
+        control.set_automation_available(False)
+        self.assertFalse(control.automation_available())
+        self.assertEqual(control.automation_availability_source(), "communication_off")
+        self.assertFalse(control.infer_automation_available())
+        self.assertFalse(control.automation_available())
+
+        control.set_automation_available(True, source="explicit")
+        self.assertTrue(control.automation_available())
+        self.assertEqual(control.automation_availability_source(), "explicit")
+
+        control.reset_session()
+        self.assertFalse(control.automation_available())
+        self.assertEqual(control.automation_availability_source(), "unknown")
+        self.assertTrue(control.infer_automation_available())
+
     async def test_keypad_requires_automation_on_and_never_echoes_key(self):
         control = self.make_control()
         ok, reason = control.enqueue_keypad(1, "1")

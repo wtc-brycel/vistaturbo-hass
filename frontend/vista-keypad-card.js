@@ -2552,7 +2552,7 @@ class VistaKeypadCard extends HTMLElement {
       await this._hass.callService("mqtt", "publish", {
         topic: display.commandTopic,
         payload: key,
-        qos: 1,
+        qos: 0,
         retain: false,
       });
     } catch (_) {
@@ -2564,7 +2564,7 @@ class VistaKeypadCard extends HTMLElement {
       bubbles: true,
       composed: true,
       detail: {
-        key,
+        action: "keypress",
         entity: this._config.entity,
         model: this._config.model,
       },

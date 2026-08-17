@@ -89,6 +89,16 @@ def diagnostic_entities(topic: TopicFn) -> dict[str, tuple[str, dict]]:
                 "entity_category": "diagnostic",
             },
         ),
+        "automation_availability_source": (
+            "sensor",
+            {
+                "name": "Automation Availability Source",
+                "unique_id": "vista128_automation_availability_source",
+                "state_topic": topic("panel/automation_availability_source"),
+                "entity_category": "diagnostic",
+                "icon": "mdi:connection",
+            },
+        ),
         "rx_frames": (
             "sensor",
             {

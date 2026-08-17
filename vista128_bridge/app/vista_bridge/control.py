@@ -71,6 +71,9 @@ class VistaControlCoordinator:
         self.publish_result = publish_result
         self._queue: queue.Queue[ControlRequest] = queue.Queue(maxsize=64)
         self._automation_available = threading.Event()
+        self._automation_state_lock = threading.Lock()
+        self._automation_source = "unknown"
+        self._automation_blocked = False
         self._generation_lock = threading.Lock()
         self._generation = 0
         self._request_ids = itertools.count(1)
@@ -78,18 +81,48 @@ class VistaControlCoordinator:
     def automation_available(self) -> bool:
         return self._automation_available.is_set()
 
-    def set_automation_available(self, available: bool) -> None:
-        if available:
+    def automation_availability_source(self) -> str:
+        with self._automation_state_lock:
+            return self._automation_source
+
+    def infer_automation_available(self) -> bool:
+        """Infer automation availability from a successful structured transaction.
+
+        An explicit XF Communication Off latches the session blocked and cannot be
+        overridden by ordinary OK replies. A new TCP session clears the latch.
+        """
+        with self._automation_state_lock:
+            if self._automation_blocked or self._automation_available.is_set():
+                return False
             self._automation_available.set()
-        else:
-            self._automation_available.clear()
+            self._automation_source = "inferred"
+            return True
+
+    def set_automation_available(self, available: bool, *, source: str = "explicit") -> bool:
+        with self._automation_state_lock:
+            before = self._automation_available.is_set()
+            before_source = self._automation_source
+            if available:
+                self._automation_blocked = False
+                self._automation_available.set()
+                self._automation_source = source
+            else:
+                self._automation_blocked = True
+                self._automation_available.clear()
+                self._automation_source = "communication_off"
+            changed = (before != self._automation_available.is_set()) or (before_source != self._automation_source)
+        if not available:
             self.discard_pending("automation_unavailable")
+        return changed
 
     def reset_session(self) -> int:
         with self._generation_lock:
             self._generation += 1
             generation = self._generation
-        self._automation_available.clear()
+        with self._automation_state_lock:
+            self._automation_available.clear()
+            self._automation_blocked = False
+            self._automation_source = "unknown"
         self.discard_pending("panel_session_reset")
         return generation
 

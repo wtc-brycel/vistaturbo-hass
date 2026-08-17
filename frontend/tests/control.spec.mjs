@@ -56,9 +56,22 @@ test("enabled keypad publishes non-retained numeric command through Home Assista
   expect(calls).toEqual([["mqtt", "publish", {
     topic: "vista128/keypad/1/command",
     payload: "1",
-    qos: 1,
+    qos: 0,
     retain: false,
   }]]);
+});
+
+test("keypress DOM event does not expose the entered digit", async ({ page }) => {
+  await mount(page);
+  await page.evaluate(() => {
+    window.keyEvents = [];
+    document.getElementById("card").addEventListener("vista-keypad-key", (event) => window.keyEvents.push(event.detail));
+  });
+  await clickKey(page, "7");
+  const events = await page.evaluate(() => window.keyEvents);
+  expect(events).toHaveLength(1);
+  expect(events[0].action).toBe("keypress");
+  expect(events[0].key).toBeUndefined();
 });
 
 test("star and pound publish their literal keypad symbols", async ({ page }) => {

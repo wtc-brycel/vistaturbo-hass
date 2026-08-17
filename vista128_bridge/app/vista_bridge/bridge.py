@@ -198,6 +198,7 @@ class VistaBridge:
         LOG.info("Panel TCP connection established")
         self.mqtt.publish("panel/connected", "ON", retain=True)
         self.mqtt.publish("panel/automation_available", "OFF", retain=True)
+        self.mqtt.publish("panel/automation_availability_source", "unknown", retain=True)
         self.handler.publish_event_history_snapshot()
 
     async def _stop_session(self, tasks: set[asyncio.Task]) -> None:
@@ -215,6 +216,7 @@ class VistaBridge:
             LOG.warning("Discarded %d pending TX request(s)", discarded)
         self.mqtt.publish("panel/connected", "OFF", retain=True)
         self.mqtt.publish("panel/automation_available", "OFF", retain=True)
+        self.mqtt.publish("panel/automation_availability_source", "offline", retain=True)
 
         if self._writer is not None:
             self._writer.close()
@@ -340,6 +342,11 @@ class VistaBridge:
             return
         if message_type == "ready":
             self.synchronizer.mark_ready()
+            control = getattr(self, "control", None)
+            if control is not None and control.infer_automation_available():
+                LOG.info("VISTA automation interface inferred available from successful transaction")
+                self.mqtt.publish("panel/automation_available", "ON", retain=True, qos=1)
+                self.mqtt.publish("panel/automation_availability_source", "inferred", retain=True, qos=1)
         self.handler.handle(message_type, frame.data, frame.received_at)
 
     def _log_invalid_frame(self, validation) -> None:

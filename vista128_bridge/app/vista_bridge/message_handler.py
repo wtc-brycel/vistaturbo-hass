@@ -67,13 +67,15 @@ class ProtocolMessageHandler:
     def _handle_communication_on(self, data: bytes, received_at: str) -> None:
         LOG.info("VISTA reported Communication On")
         self.mqtt.publish("panel/automation_available", "ON", retain=True, qos=1)
+        self.mqtt.publish("panel/automation_availability_source", "explicit", retain=True, qos=1)
         if self.control is not None:
-            self.control.set_automation_available(True)
+            self.control.set_automation_available(True, source="explicit")
         self.synchronizer.request_full_resync("communication_on")
 
     def _handle_communication_off(self, data: bytes, received_at: str) -> None:
         LOG.info("VISTA reported Communication Off")
         self.mqtt.publish("panel/automation_available", "OFF", retain=True, qos=1)
+        self.mqtt.publish("panel/automation_availability_source", "communication_off", retain=True, qos=1)
         if self.control is not None:
             self.control.set_automation_available(False)
 
