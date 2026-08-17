@@ -99,18 +99,36 @@ AUTO first uses Home Assistant's `hass.themes.darkMode`. If that flag is unavail
 
 ## Responsive and mobile behavior
 
-The physical keypad keeps its fixed enclosure aspect ratio as the Lovelace column narrows. There is no forced minimum height that can stretch the enclosure vertically. Button, legend, annunciator-label, border, and spacing dimensions scale from the card container width, with narrow-container adjustments below 520 px and 360 px.
+Development card `0.3.15` adds a separate Lovelace-oriented compact composition instead of shrinking the physical keypad until its keys become unusable.
 
-Card `0.3.14` adds several mobile-specific protections:
+`mobile_layout: auto` is the default. At card widths above 480 px, the realistic physical keypad composition is preserved. At 480 px and below, AUTO switches to compact mode.
 
-- the LCD canvas is redrawn with a `ResizeObserver` when its rendered size changes
-- orientation changes and Lovelace column resizing no longer leave a stretched LCD bitmap
-- `pointercancel` clears pressed-key feedback when a touch becomes a page scroll or gesture
-- unrelated Home Assistant state changes are filtered out so they do not rebuild the full Shadow DOM and canvas
-- browser-level light/dark changes are observed when Home Assistant does not provide an explicit theme mode
-- Home Assistant grid layout hints prefer a 6-column minimum and allow a full 12-column keypad
+Compact mode:
 
-The current narrow layout remains a scaled physical keypad. The full CR-2 annunciator label stack is intentionally preserved for the first real-device test. A later compact mode can render the same seven states as abbreviated lamps or icons without changing the backend.
+- gives the LCD the full card width
+- hides decorative speaker, bracket, shield, and flame artwork
+- keeps all CR-2 annunciator states in a compact status strip
+- uses the full card width for the 4 x 4 keypad
+- keeps key rows approximately 52 to 60 px tall instead of scaling them with the physical enclosure
+- stacks the small numeric legends under the number
+- changes the CR-2 status strip from four columns to three below 320 px
+
+The available modes are:
+
+- `auto` - physical layout when wide, compact at 480 px and below
+- `compact` - always use the Lovelace/mobile composition
+- `physical` - always preserve the realistic physical composition
+
+Example:
+
+```yaml
+type: custom:vista-keypad-card
+entity: sensor.vista_partition_1_keypad
+model: 6160cr2
+mobile_layout: auto
+```
+
+The card advertises 12 columns by default with an 8-column minimum in Home Assistant Sections view. LCD resize observation, touch cancellation handling, filtered Home Assistant rerenders, and automatic light/dark case switching apply to both physical and compact layouts.
 
 ## 6160CR-2 annunciators
 
