@@ -110,6 +110,34 @@ async function updateStates(page, { keypad = {}, alarm = "disarmed", aux = "off"
   }, { entity: ENTITY, alarmEntity: ALARM, auxEntity: AUX, keypad, alarm, aux });
 }
 
+test("retained chime sequence establishes a baseline without replaying a stale chime", async ({ page }) => {
+  await mountAudioCard(page);
+  await installAudioSpies(page);
+  await page.evaluate(({ entity, alarmEntity, auxEntity }) => {
+    const card = document.getElementById("card");
+    card._feedbackSnapshot = null;
+    card.hass = {
+      themes: { darkMode: false },
+      states: {
+        [entity]: {
+          state: "FAULT 027 / FRONT DOOR",
+          attributes: {
+            ...card._hass.states[entity].attributes,
+            ready: false,
+            chime_sequence: 9,
+            chime_zone: 27,
+            chime_descriptor: "FRONT DOOR",
+          },
+        },
+        [alarmEntity]: { state: "disarmed", attributes: {} },
+        [auxEntity]: { state: "off", attributes: {} },
+      },
+    };
+  }, { entity: ENTITY, alarmEntity: ALARM, auxEntity: AUX });
+  const calls = await page.evaluate(() => window.__audioCalls.play);
+  expect(calls).toEqual([]);
+});
+
 test("configured chime sequence change produces one chime profile", async ({ page }) => {
   await mountAudioCard(page);
   await installAudioSpies(page);

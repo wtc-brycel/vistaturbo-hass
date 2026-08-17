@@ -456,7 +456,7 @@ class VistaKeypadCard extends HTMLElement {
     };
     this._feedbackSnapshot = null;
     this._lastRenderSignature = null;
-    this._syncFeedback();
+    if (this._hass) this._syncFeedback(true);
     this._render();
     this._lastRenderSignature = this._renderSignature(this._hass);
   }
@@ -570,7 +570,7 @@ class VistaKeypadCard extends HTMLElement {
     };
   }
 
-  _syncFeedback() {
+  _syncFeedback(suppressOneShots = false) {
     const sound = this._config?.sound ?? {};
     const display = this._config ? this._displayState() : null;
     if (!display) return;
@@ -590,7 +590,7 @@ class VistaKeypadCard extends HTMLElement {
     const current = this._feedbackState(display);
     const previous = this._feedbackSnapshot;
     this._feedbackSnapshot = current;
-    if (!previous || !sound.enabled || !sound.state_sounds || loop) return;
+    if (suppressOneShots || !previous || !sound.enabled || !sound.state_sounds || loop) return;
 
     if (sound.chime !== false && current.chimeSequence !== previous.chimeSequence) {
       this._audio.play("chime", sound).catch(() => {});
