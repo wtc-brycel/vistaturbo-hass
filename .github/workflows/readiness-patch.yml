@@ -1,0 +1,213 @@
+name: Apply focused readiness patch
+
+on:
+  push:
+    branches:
+      - fix/mobile-readiness
+    paths:
+      - .github/workflows/readiness-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/mobile-readiness
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Apply source fixes
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new, label):
+              p = Path(path)
+              s = p.read_text()
+              if old not in s:
+                  raise SystemExit(f"missing anchor: {label}")
+              p.write_text(s.replace(old, new, 1))
+
+          # Only explicit AC loss/restore is authoritative from nq.
+          replace_once(
+              "vista128_bridge/app/vista_bridge/state.py",
+              '    "0E": True,   # power-up report\n    "3E": True,   # power-up report\n',
+              '',
+              'AC power-up inference',
+          )
+
+          # Supplemental CR-2 states reconstructed from events cannot safely span a TCP gap.
+          replace_once(
+              "vista128_bridge/app/vista_bridge/state.py",
+              '    def assigned_zones_with(self, attribute: str) -> list[ZoneState]:\n',
+              '''    def reset_connection_derived_annunciators(self) -> None:\n        self.ac_power = None\n        for partition in self.partitions.values():\n            partition.active_fire_tokens.clear()\n            partition.active_supervisory_tokens.clear()\n            partition.fire_silenced = False\n        for keypad in self.keypads.values():\n            keypad.power_led = None\n            keypad.fire_alarm_led = None\n            keypad.silenced_led = None\n            keypad.supervisory_led = None\n\n    def assigned_zones_with(self, attribute: str) -> list[ZoneState]:\n''',
+              'connection-derived reset',
+          )
+
+          # A post-restore non-fire KD clears the fire latch even if burglary READY is false.
+          replace_once(
+              "vista128_bridge/app/vista_bridge/state.py",
+              '''        if partition_state.fire_alarm_active or explicit_fire:\n            keypad.fire_alarm_led = True\n        elif normal_ready:\n            # FIRE ALARM intentionally remains latched across detector restores and\n            # clears only when the keypad itself has returned to a normal/reset state.\n            keypad.fire_alarm_led = False\n            partition_state.fire_silenced = False\n''',
+              '''        if partition_state.fire_alarm_active or explicit_fire:\n            keypad.fire_alarm_led = True\n        elif keypad.fire_alarm_led is True:\n            # With all initiating fire events restored, a later non-fire KD is reset/\n            # normalization evidence. Burglary READY is intentionally not required.\n            keypad.fire_alarm_led = False\n            partition_state.fire_silenced = False\n        elif normal_ready:\n            keypad.fire_alarm_led = False\n            partition_state.fire_silenced = False\n''',
+              'fire latch clear',
+          )
+
+          replace_once(
+              "vista128_bridge/app/vista_bridge/bridge.py",
+              '''        self.synchronizer.reset_connection_state()\n        self._panel_connected.set()\n        LOG.info("Panel TCP connection established")\n''',
+              '''        self.synchronizer.reset_connection_state()\n        self.state.reset_connection_derived_annunciators()\n        for keypad in self.state.keypads.values():\n            if keypad.initialized:\n                self.mqtt.publish_keypad_state(keypad)\n        self._panel_connected.set()\n        LOG.info("Panel TCP connection established")\n''',
+              'session reset',
+          )
+
+          # MQTT entities require both the app process and panel TCP session to be alive.
+          p = Path("vista128_bridge/app/vista_bridge/mqtt_discovery.py")
+          s = p.read_text()
+          marker = '\n\ndef diagnostic_entities(topic: TopicFn) -> dict[str, tuple[str, dict]]:\n'
+          helper = '''\n\ndef panel_entity_availability(topic: TopicFn) -> dict:\n    return {\n        "availability": [\n            {\n                "topic": topic("bridge/availability"),\n                "payload_available": "online",\n                "payload_not_available": "offline",\n            },\n            {\n                "topic": topic("panel/connected"),\n                "payload_available": "ON",\n                "payload_not_available": "OFF",\n            },\n        ],\n        "availability_mode": "all",\n    }\n\n\ndef diagnostic_entities(topic: TopicFn) -> dict[str, tuple[str, dict]]:\n'''
+          if marker not in s:
+              raise SystemExit('missing anchor: availability helper')
+          s = s.replace(marker, helper, 1)
+          s = s.replace(
+              '            "icon": spec["icon"],\n        }\n        for key, spec in ZONE_CONDITION_SPECS.items()\n    }\n\n\ndef partition_config',
+              '            "icon": spec["icon"],\n            "device": device_info(),\n            **panel_entity_availability(topic),\n        }\n        for key, spec in ZONE_CONDITION_SPECS.items()\n    }\n\n\ndef partition_config',
+              1,
+          )
+          availability_block = '        "availability_topic": topic("panel/connected"),\n        "payload_available": "ON",\n        "payload_not_available": "OFF",\n'
+          if s.count(availability_block) < 2:
+              raise SystemExit('missing anchor: entity availability')
+          s = s.replace(availability_block, '        **panel_entity_availability(topic),\n', 2)
+          zone_availability = '            "availability_topic": topic("panel/connected"),\n            "payload_available": "ON",\n            "payload_not_available": "OFF",\n'
+          if zone_availability not in s:
+              raise SystemExit('missing anchor: zone availability')
+          s = s.replace(zone_availability, '            **panel_entity_availability(topic),\n', 1)
+          p.write_text(s)
+
+          replace_once(
+              "vista128_bridge/app/vista_bridge/mqtt_client.py",
+              '''        for object_id, config in zone_summary_entities(self.topic).items():\n            self._publish_discovery_config(\n                "sensor",\n                object_id,\n                {**config, **availability},\n            )\n''',
+              '''        for object_id, config in zone_summary_entities(self.topic).items():\n            self._publish_discovery_config("sensor", object_id, config)\n''',
+              'zone summary availability',
+          )
+          PY
+
+          cat > vista128_bridge/tests/test_readiness.py <<'PY'
+          import os
+          import sys
+          import unittest
+
+          sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "app"))
+
+          from vista_bridge.mqtt_discovery import keypad_config, partition_config, zone_summary_entities
+          from vista_bridge.protocol import KeypadDisplayReport, SystemEvent
+          from vista_bridge.state import VistaState
+
+
+          def topic(suffix: str) -> str:
+              return f"vista128/{suffix}"
+
+
+          def keypad_report(line1="P1   DISARMED   ", line2="READY TO ARM    ", *, ready=True, trouble=False):
+              return KeypadDisplayReport(
+                  line_1=line1,
+                  line_2=line2,
+                  backlight=True,
+                  ready_led=ready,
+                  trouble_led=trouble,
+                  armed_led=False,
+                  led_status=(1 if ready else 0) | (2 if trouble else 0),
+                  raw_display=b"\xd0" + (line1 + line2).encode("ascii", errors="replace"),
+              )
+
+
+          def event(code: str, zone=0, partition=1) -> SystemEvent:
+              return SystemEvent(code, code, zone, 0, partition, 0, 0, 15, 8, 26)
+
+
+          class ReadinessTests(unittest.TestCase):
+              def test_panel_entities_require_bridge_and_panel_availability(self):
+                  expected = [
+                      {
+                          "topic": "vista128/bridge/availability",
+                          "payload_available": "online",
+                          "payload_not_available": "offline",
+                      },
+                      {
+                          "topic": "vista128/panel/connected",
+                          "payload_available": "ON",
+                          "payload_not_available": "OFF",
+                      },
+                  ]
+                  for config in (
+                      keypad_config(1, topic),
+                      partition_config(1, topic),
+                      next(iter(zone_summary_entities(topic).values())),
+                  ):
+                      self.assertEqual(config["availability_mode"], "all")
+                      self.assertEqual(config["availability"], expected)
+
+              def test_power_up_report_does_not_invent_ac_state(self):
+                  state = VistaState()
+                  state.apply_system_event(event("0E", partition=0))
+                  self.assertIsNone(state.ac_power)
+                  state.apply_system_event(event("1C", partition=0))
+                  self.assertTrue(state.ac_power)
+
+              def test_reconnect_discards_event_derived_cr2_state(self):
+                  state = VistaState()
+                  keypad = state.apply_keypad_display(1, keypad_report(), "2026-08-16T13:22:28-04:00")
+                  state.apply_system_event(event("1B", partition=0))
+                  state.apply_system_event(event("C1", zone=5))
+                  state.apply_system_event(event("43", zone=12))
+                  self.assertFalse(keypad.power_led)
+                  self.assertTrue(keypad.fire_alarm_led)
+                  self.assertTrue(keypad.supervisory_led)
+
+                  state.reset_connection_derived_annunciators()
+                  self.assertIsNone(keypad.power_led)
+                  self.assertIsNone(keypad.fire_alarm_led)
+                  self.assertIsNone(keypad.silenced_led)
+                  self.assertIsNone(keypad.supervisory_led)
+                  self.assertFalse(state.partitions[1].active_fire_tokens)
+                  self.assertFalse(state.partitions[1].active_supervisory_tokens)
+                  self.assertTrue(keypad.ready_led)
+
+              def test_fire_latch_clears_after_restore_when_burglary_not_ready(self):
+                  state = VistaState()
+                  keypad = state.apply_keypad_display(1, keypad_report(), "2026-08-16T13:22:28-04:00")
+                  state.apply_system_event(event("C1", zone=5))
+                  state.apply_system_event(event("C2", zone=5))
+                  state.apply_keypad_display(
+                      1,
+                      keypad_report(
+                          "FAULT 005       ",
+                          "KITCHEN WINDOW  ",
+                          ready=False,
+                          trouble=False,
+                      ),
+                      "2026-08-16T13:23:00-04:00",
+                  )
+                  self.assertFalse(keypad.fire_alarm_led)
+
+
+          if __name__ == "__main__":
+              unittest.main()
+          PY
+
+          cd vista128_bridge
+          python -m unittest discover -s tests -v
+          node --check ../frontend/vista-keypad-card.js
+      - name: Commit verified patch
+        run: |
+          rm .github/workflows/readiness-patch.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Harden runtime readiness for real-panel testing"
+          git push origin HEAD:fix/mobile-readiness
