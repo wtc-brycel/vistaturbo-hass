@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.6-rc.5
+
+- Add card `0.3.18` with a Home Assistant visual editor exposed through the custom-card `getConfigElement()` contract.
+- Configure keypad entity, model, layout, title, card background, case color, and day/night case overrides without hand-editing YAML.
+- Configure sound enablement, key chirp, panel-state sounds, chime/trouble/supervisory toggles, key/alarm volume, and optional burglary/AUX entity overrides in the editor.
+- Configure best-effort haptic enablement and keypress duration in the editor.
+- Configure A/B/C/D function-key labels while preserving model defaults when fields are blank.
+- Preserve advanced indicator/flashing maps and per-function-key colors as YAML-only options.
+- Keep the visual editor read-only with no panel-control toggle.
+- Preserve compatibility with `sound: true` and `haptic: true` shorthand configurations.
+- Add Chromium regression coverage for editor discovery, rendered values, nested `config-changed` events, and shorthand compatibility.
+- Keep the bridge protocol/state behavior unchanged from RC4.
+
 ## 0.2.6-rc.4
 
 - Add card `0.3.17` with optional low-latency synthesized Web Audio keypad feedback and best-effort browser haptics.

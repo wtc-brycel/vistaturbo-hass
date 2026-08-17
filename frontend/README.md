@@ -14,13 +14,13 @@ The card is **read-only** while Vista Turbo RS232 remains read-only. Keys depres
 
 ## Install in Home Assistant
 
-The current development card is `0.3.18`; the most recent published release may lag until the next RC is cut.
+Release `v0.2.6-rc.5` attaches card `0.3.18` as `vista-keypad-card.js`.
 
 From the Home Assistant Terminal or SSH add-on:
 
 ```sh
 mkdir -p /config/www
-curl -fL "https://github.com/wtc-brycel/vistaturbo-hass/releases/download/v0.2.6-rc.4/vista-keypad-card.js" \
+curl -fL "https://github.com/wtc-brycel/vistaturbo-hass/releases/download/v0.2.6-rc.5/vista-keypad-card.js" \
   -o /config/www/vista-keypad-card.js
 ```
 
@@ -56,7 +56,7 @@ entity: sensor.vista_partition_1_keypad
 model: firstalert
 ```
 
-The RC4 release also attaches `vista-keypad-simulator.html`. Place it beside the card in `/config/www` and open `/local/vista-keypad-simulator.html` to exercise all three layouts, widths, annunciators, chime/alarm states, and audio behavior without changing the real panel.
+The RC5 release also attaches `vista-keypad-simulator.html`. Place it beside the card in `/config/www` and open `/local/vista-keypad-simulator.html` to exercise all three layouts, widths, annunciators, chime/alarm states, and audio behavior without changing the real panel.
 
 
 ## Visual editor
@@ -77,7 +77,7 @@ The visual editor intentionally keeps the bridge read-only. Advanced indicator/f
 
 ## Adaptive layout
 
-Card `0.3.17` includes a model-agnostic adaptive layout system for Lovelace dashboards.
+Card `0.3.18` includes the model-agnostic adaptive layout system for Lovelace dashboards.
 
 ```yaml
 layout: auto

@@ -2,7 +2,7 @@
 
 Home Assistant App for the native RS-232 automation interface on Honeywell/Resideo VISTA Turbo alarm panels.
 
-> **Release candidate status:** 0.2.6-rc.4 is read-only. It has been developed and tested on a VISTA-128BPT. Keypad display polling is enabled. Arm, disarm, and keypad-control commands are not sent to the panel.
+> **Release candidate status:** 0.2.6-rc.5 is read-only. It has been developed and tested on a VISTA-128BPT. Keypad display polling is enabled. Arm, disarm, and keypad-control commands are not sent to the panel.
 
 ## What you get in Home Assistant
 
@@ -70,7 +70,7 @@ Home Assistant MQTT Discovery uses `availability_mode: all` for partitions, keyp
 
 ## Dashboard keypad card
 
-The matching read-only Lovelace card ships with this release as `vista-keypad-card.js`. Card `0.3.17` supports 6160CR-2, standard 6160, and First Alert-inspired skins plus optional synthesized audio and haptics.
+The matching read-only Lovelace card ships with this release as `vista-keypad-card.js`. Card `0.3.18` supports 6160CR-2, standard 6160, and First Alert-inspired skins, optional synthesized audio/haptics, and a Home Assistant visual editor for common card settings.
 
 `layout: auto` is the default. The card keeps the approved physical facsimile above 520 px card-container width and switches to a touchscreen-first compact layout at 520 px and below. `layout: physical` and `layout: compact` can force either presentation.
 
