@@ -20,6 +20,8 @@ SendQuery = Callable[[bytes, str, str], tuple[bool, str]]
 BoolCallback = Callable[[], bool]
 PublishResult = Callable[[dict], None]
 
+BASIC_KEYPAD_KEYS = frozenset("0123456789*#")
+
 
 @dataclass(frozen=True)
 class ControlRequest:
@@ -125,10 +127,12 @@ class VistaControlCoordinator:
         ok, detail = self._preflight("keypad")
         if not ok:
             return ok, detail
+        if not isinstance(key, str) or len(key) != 1 or key not in BASIC_KEYPAD_KEYS:
+            return False, "unsupported_keypad_key"
         try:
             build_keypad_stroke_command(partition, [key])
-        except ValueError as exc:
-            return False, str(exc)
+        except ValueError:
+            return False, "invalid_keypad_command"
         return self._enqueue("keypad", partition, key, "")
 
     def enqueue_alarm(self, partition: int, action: str, code: str) -> tuple[bool, str]:
@@ -208,20 +212,21 @@ class VistaControlCoordinator:
             finally:
                 self.synchronizer.end_external_transaction()
 
-        if self.settings.verify_delay_ms:
-            await asyncio.sleep(self.settings.verify_delay_ms / 1000)
         if request.generation != self._current_generation() or not self.is_connected():
             self._result(request, False, "connection_lost_after_send")
             return
 
         if request.kind == "keypad":
-            refreshed = await self.synchronizer.run_keypad_refresh(request.partition)
-            self._result(
-                request,
-                True,
-                "accepted",
-                display_refreshed=bool(refreshed),
-            )
+            # Keep code entry responsive. Do not block each digit behind a full
+            # KD round trip; the existing keypad loop coalesces refresh requests.
+            self.synchronizer.request_keypad_refresh(request.partition)
+            self._result(request, True, "accepted")
+            return
+
+        if self.settings.verify_delay_ms:
+            await asyncio.sleep(self.settings.verify_delay_ms / 1000)
+        if request.generation != self._current_generation() or not self.is_connected():
+            self._result(request, False, "connection_lost_after_send")
             return
 
         refreshed = await self.synchronizer.run_arming_refresh()
