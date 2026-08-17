@@ -42,7 +42,9 @@ jobs:
         run: npm run test:render
 
   rc8-apply:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.event.head_commit.message == 'Run RC8 feature hardening'
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main' && github.event.head_commit.message == 'Run RC8 feature hardening') ||
+      (github.event_name == 'pull_request' && github.head_ref == 'feature/rc8-control-state-hardening')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
