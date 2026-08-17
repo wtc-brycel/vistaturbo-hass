@@ -33,3 +33,5 @@ jobs:
           git add -A
           git commit -m "Add centralized configurable chime zones"
           git push origin HEAD:feature/keypad-audio-feedback
+
+# retry after adding backward-compatible KeypadSettings default
