@@ -2,7 +2,7 @@
 
 Home Assistant App for the native RS-232 automation interface on Honeywell/Resideo VISTA Turbo alarm panels.
 
-> **Release candidate status:** 0.2.6-rc.2 is read-only. It has been developed and tested on a VISTA-128BPT. Keypad display polling is enabled. Arm, disarm, and keypad-control commands are not sent to the panel.
+> **Release candidate status:** 0.2.6-rc.3 is read-only. It has been developed and tested on a VISTA-128BPT. Keypad display polling is enabled. Arm, disarm, and keypad-control commands are not sent to the panel.
 
 ## What you get in Home Assistant
 
@@ -56,7 +56,7 @@ Home Assistant receives a **Partition 1 Keypad** sensor. Its attributes preserve
 
 The dedicated Power, Fire Alarm, Silenced, and Supervisory attributes are reconstructed from validated VISTA real-time events plus keypad-display reconciliation. Unknown reconstructed state is published as JSON `null` rather than guessed.
 
-RC2 invalidates those event-derived CR-2 states across a panel TCP disconnect so stale fire, supervisory, or AC information is not carried across a communication gap. Fresh KD and event traffic reconstructs them after reconnect.
+Event-derived CR-2 states are invalidated across a panel TCP disconnect so stale fire, supervisory, or AC information is not carried across a communication gap. Fresh KD and event traffic reconstructs them after reconnect.
 
 ## MQTT availability
 
@@ -69,7 +69,11 @@ Home Assistant MQTT Discovery uses `availability_mode: all` for partitions, keyp
 
 ## Dashboard keypad card
 
-The matching read-only 6160CR-2 and 6160 Lovelace card ships with this release as `vista-keypad-card.js`. See the repository `frontend/README.md` for installation and theme options.
+The matching read-only 6160CR-2 and 6160 Lovelace card ships with this release as `vista-keypad-card.js`. Card `0.3.15` adds the adaptive layout used for mobile and narrow Home Assistant dashboards.
+
+`layout: auto` is the default. The card keeps the approved physical facsimile above 520 px card-container width and switches to a touchscreen-first compact layout at 520 px and below. `layout: physical` and `layout: compact` can force either presentation.
+
+Both models use the same adaptive framework, and future keypad models can declare their compact annunciators and function-key labels in `MODEL_PROFILES` without implementing a new mobile renderer.
 
 The card supports red, white, and dark enclosure colors for either model. `case_color: auto` is the default. AUTO follows the Home Assistant light/dark theme and defaults to:
 
@@ -78,7 +82,7 @@ The card supports red, white, and dark enclosure colors for either model. `case_
 6160:     white by day, dark at night
 ```
 
-Optional `day_case_color` and `night_case_color` settings can override either side of AUTO mode.
+Optional `day_case_color` and `night_case_color` settings can override either side of AUTO mode. See `frontend/README.md` for full card installation and configuration.
 
 ## Zone state
 
