@@ -134,6 +134,57 @@ Version 0.3.15 renders both physical and compact LCD canvases from the same stat
 
 The repository CI also runs Chromium browser regression tests for wide/compact switching, touch-target dimensions, both model profiles, forced layout modes, theme-aware case colors, and Lovelace grid sizing.
 
+## Optional audio and haptic feedback
+
+Card `0.3.16` adds optional synthesized keypad feedback. It is disabled by default and does not require audio files or network requests. Web Audio tones are created locally with an interactive-latency context.
+
+Example:
+
+```yaml
+type: custom:vista-keypad-card
+entity: sensor.vista_partition_1_keypad
+model: 6160cr2
+sound:
+  enabled: true
+  keypress: true
+  state_sounds: true
+  volume: 0.035
+  alarm_volume: 0.065
+  alarm_entity: alarm_control_panel.your_partition
+  aux_entity: binary_sensor.your_aux_alarm
+haptic:
+  enabled: true
+  keypress_ms: 10
+```
+
+Set `alarm_entity` and `aux_entity` only when those Home Assistant entities should drive the corresponding continuous sound profiles. Do not use the example entity IDs literally.
+
+Supported synthesized profiles are:
+
+- immediate short keypress chirp
+- three-beep zone chime
+- two-beep trouble/check alert
+- supervisory alert
+- repeating fire alarm cadence
+- continuous burglary alarm
+- repeating high/low auxiliary alarm
+
+Continuous sound priority is unsilenced fire, then `alarm_entity`, then `aux_entity`. A silenced fire condition keeps the fire/silenced annunciators but stops the local fire tone. Trouble, supervisory, and chime are one-shot transition sounds.
+
+The tones model conventional keypad behavior; exact Honeywell/Resideo piezo frequencies are not claimed.
+
+### Chime zones
+
+The card does not guess panel ECP chime programming and does not watch individual zone entities. Vista Turbo RS232 maintains its own centralized list of zones that should generate a dashboard chime. Configure the App with VISTA zone numbers and optional ranges:
+
+```yaml
+chime_zones: "1,2,5-8,27"
+```
+
+An empty value disables bridge-generated chimes. When a configured zone produces the validated real-time `F5` Fault event, the bridge increments `chime_sequence` on the affected partition keypad entity and publishes `chime_zone`, `chime_descriptor`, and `chime_at`. Every card using that keypad entity can then react to the same authoritative chime event without maintaining a separate list.
+
+Audio autoplay restrictions still apply. A browser may require one user interaction before Web Audio can start; pressing a keypad key or explicitly unlocking audio satisfies that requirement in supported browsers. Haptic feedback is best-effort and only runs when the browser exposes `navigator.vibrate()`.
+
 ## 6160CR-2 annunciators
 
 Vista Turbo RS232 publishes the CR-2 annunciator state directly on the keypad entity:

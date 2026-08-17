@@ -123,6 +123,7 @@ keypad_display_enabled: true
 keypad_partitions: "1"
 keypad_poll_interval_seconds: 7
 keypad_event_refresh_delay_ms: 250
+chime_zones: ""
 transport_print_enabled: false
 transport_host: ""
 transport_http_port: 9101
@@ -138,6 +139,8 @@ debug_raw_tx_enabled: false
 `keypad_partitions` is a comma-separated list of partitions whose keypad display should be queried, for example `"1"` or `"1,2"`. A real keypad should exist on each queried partition. Partition 1 is the default.
 
 The keypad display is queried every 7 seconds by default. Valid unsolicited system events also request a debounced keypad refresh for the affected configured partition. All keypad queries share the same serialized transaction lock as startup and periodic synchronization.
+
+`chime_zones` is Vista Turbo RS232's own centralized dashboard-chime policy. It is intentionally separate from any chime programming transported on the VISTA ECP bus. Supply comma-separated VISTA zone numbers and ascending ranges, for example `"1,2,5-8,27"`. Valid zones are 1 through 128. An empty string disables bridge-generated chime events. When a listed zone produces the validated `F5` Fault event, the affected keypad entity increments `chime_sequence` and exposes `chime_zone`, `chime_descriptor`, and `chime_at`. The frontend can use that sequence change to play one chime without polling or subscribing to every zone entity.
 
 ## Startup synchronization
 
