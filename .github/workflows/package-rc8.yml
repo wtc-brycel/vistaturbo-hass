@@ -1,0 +1,53 @@
+name: Package RC8
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/package-rc8.yml
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Apply RC8 package metadata
+        run: python .github/scripts/package_rc8.py
+      - name: Keep release trigger on RC7 until validation completes
+        run: |
+          grep -q 'v0.2.6-rc.7' release/rc.json
+          grep -q '0.2.6-rc.8' vista128_bridge/app/vista_bridge/version.py
+          grep -q '0.3.21' frontend/vista-keypad-card.js
+      - name: Run backend tests
+        working-directory: vista128_bridge
+        run: python -m unittest discover -s tests -v
+      - name: Validate frontend syntax
+        run: node --check frontend/vista-keypad-card.js
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci --no-audit --no-fund
+      - name: Install Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Run browser regression tests
+        working-directory: frontend
+        run: npm run test:render
+      - name: Commit packaged RC8 tree
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README.md frontend/README.md frontend/vista-keypad-card.js frontend/vista-keypad-simulator.html vista128_bridge release/0.2.6-rc.8.md
+          git commit -m "Package Vista Turbo RS232 0.2.6 RC8"
+          git push origin HEAD:main
