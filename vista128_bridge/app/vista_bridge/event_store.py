@@ -19,10 +19,11 @@ class EventJournalStats:
 class EventStore:
     """Persistent VISTA event journal backed by SQLite.
 
-    Live notifications and historical LD-dump entries share the same table.
-    The VISTA event payload only carries minute resolution, so a deterministic
-    event fingerprint is used to prevent repeated startup dumps from duplicating
-    the same panel event indefinitely.
+    The panel event payload only has minute resolution. Identical payloads can
+    legitimately occur more than once inside a minute, so rows are keyed by a
+    deterministic fingerprint plus an occurrence number. Historical LD dumps
+    assign stable occurrences in dump order; live notifications append the next
+    occurrence for that fingerprint.
     """
 
     def __init__(self, path: str) -> None:
@@ -43,7 +44,8 @@ class EventStore:
                 """
                 CREATE TABLE IF NOT EXISTS events (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    fingerprint TEXT NOT NULL UNIQUE,
+                    fingerprint TEXT NOT NULL,
+                    occurrence INTEGER NOT NULL,
                     event_code TEXT NOT NULL,
                     description TEXT NOT NULL,
                     zone INTEGER NOT NULL,
@@ -59,7 +61,8 @@ class EventStore:
                     seen_live INTEGER NOT NULL DEFAULT 0,
                     seen_history INTEGER NOT NULL DEFAULT 0,
                     first_received_at TEXT NOT NULL,
-                    last_received_at TEXT NOT NULL
+                    last_received_at TEXT NOT NULL,
+                    UNIQUE(fingerprint, occurrence)
                 );
                 CREATE INDEX IF NOT EXISTS idx_events_panel_timestamp
                     ON events(panel_timestamp DESC, id DESC);
@@ -67,6 +70,8 @@ class EventStore:
                     ON events(partition_number, panel_timestamp DESC, id DESC);
                 CREATE INDEX IF NOT EXISTS idx_events_code
                     ON events(event_code, panel_timestamp DESC, id DESC);
+                CREATE INDEX IF NOT EXISTS idx_events_fingerprint
+                    ON events(fingerprint, occurrence);
 
                 CREATE TABLE IF NOT EXISTS metadata (
                     key TEXT PRIMARY KEY,
@@ -74,6 +79,7 @@ class EventStore:
                 );
                 """
             )
+            db.execute("PRAGMA user_version=1")
 
     @staticmethod
     def fingerprint(event: SystemEvent) -> str:
@@ -98,25 +104,35 @@ class EventStore:
         source: str,
         received_at: str,
         descriptor: str = "",
+        occurrence: int | None = None,
     ) -> bool:
         if source not in {"live", "history"}:
             raise ValueError("event source must be live or history")
+        if occurrence is not None and occurrence < 1:
+            raise ValueError("event occurrence must be >= 1")
 
         fingerprint = self.fingerprint(event)
         with self._connect() as db:
+            if occurrence is None:
+                row = db.execute(
+                    "SELECT COALESCE(MAX(occurrence), 0) + 1 FROM events WHERE fingerprint = ?",
+                    (fingerprint,),
+                ).fetchone()
+                occurrence = int(row[0])
+
             existed = db.execute(
-                "SELECT 1 FROM events WHERE fingerprint = ?",
-                (fingerprint,),
+                "SELECT 1 FROM events WHERE fingerprint = ? AND occurrence = ?",
+                (fingerprint, occurrence),
             ).fetchone() is not None
             db.execute(
                 """
                 INSERT INTO events (
-                    fingerprint, event_code, description, zone, user_number,
-                    partition_number, panel_timestamp, panel_year, panel_month,
-                    panel_day, panel_hour, panel_minute, descriptor,
+                    fingerprint, occurrence, event_code, description, zone,
+                    user_number, partition_number, panel_timestamp, panel_year,
+                    panel_month, panel_day, panel_hour, panel_minute, descriptor,
                     seen_live, seen_history, first_received_at, last_received_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(fingerprint) DO UPDATE SET
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(fingerprint, occurrence) DO UPDATE SET
                     description = excluded.description,
                     descriptor = CASE
                         WHEN excluded.descriptor <> '' THEN excluded.descriptor
@@ -128,6 +144,7 @@ class EventStore:
                 """,
                 (
                     fingerprint,
+                    occurrence,
                     event.code,
                     event.description,
                     event.zone,
@@ -147,6 +164,16 @@ class EventStore:
                 ),
             )
             return not existed
+
+    def update_descriptor(self, zone: int, descriptor: str) -> int:
+        if not descriptor:
+            return 0
+        with self._connect() as db:
+            cursor = db.execute(
+                "UPDATE events SET descriptor = ? WHERE zone = ? AND descriptor <> ?",
+                (descriptor, zone, descriptor),
+            )
+            return int(cursor.rowcount)
 
     def finish_history_dump(
         self,
@@ -189,8 +216,8 @@ class EventStore:
         with self._connect() as db:
             rows = db.execute(
                 """
-                SELECT id, event_code, description, zone, user_number,
-                       partition_number, panel_timestamp, descriptor,
+                SELECT id, occurrence, event_code, description, zone,
+                       user_number, partition_number, panel_timestamp, descriptor,
                        seen_live, seen_history, last_received_at
                 FROM events
                 ORDER BY COALESCE(panel_timestamp, last_received_at) DESC, id DESC
@@ -207,6 +234,7 @@ class EventStore:
             events.append(
                 {
                     "id": row["id"],
+                    "occurrence": row["occurrence"],
                     "event_code": row["event_code"],
                     "description": row["description"],
                     "zone": row["zone"],
