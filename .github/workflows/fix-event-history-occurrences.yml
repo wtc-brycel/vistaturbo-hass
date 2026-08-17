@@ -1,0 +1,34 @@
+name: Fix event history occurrences
+
+on:
+  push:
+    branches:
+      - feature/event-history
+    paths:
+      - .github/workflows/fix-event-history-occurrences.yml
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/event-history
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Apply occurrence handling
+        run: python .github/scripts/fix_event_history_occurrences.py
+      - name: Run backend tests
+        working-directory: vista128_bridge
+        run: python -m unittest discover -s tests -v
+      - name: Commit verified occurrence handling
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add vista128_bridge/app/vista_bridge/message_handler.py vista128_bridge/tests/test_event_store.py
+          git commit -m "Preserve repeated same-minute event occurrences"
+          git push origin HEAD:feature/event-history
