@@ -34,6 +34,10 @@ export KEYPAD_PARTITIONS="$(config_or_default 'keypad_partitions' '1')"
 export KEYPAD_POLL_INTERVAL_SECONDS="$(config_or_default 'keypad_poll_interval_seconds' '7')"
 export KEYPAD_EVENT_REFRESH_DELAY_MS="$(config_or_default 'keypad_event_refresh_delay_ms' '250')"
 export CHIME_ZONES="$(config_or_default 'chime_zones' '')"
+export EVENT_HISTORY_ENABLED="$(config_or_default 'event_history_enabled' 'true')"
+export EVENT_HISTORY_STARTUP_DUMP_ENABLED="$(config_or_default 'event_history_startup_dump_enabled' 'false')"
+export EVENT_HISTORY_RECENT_LIMIT="$(config_or_default 'event_history_recent_limit' '20')"
+export EVENT_HISTORY_SQLITE_PATH="/data/vista128_events.sqlite3"
 export TRANSPORT_PRINT_ENABLED="$(config_or_default 'transport_print_enabled' 'false')"
 export TRANSPORT_HOST="$(config_or_default 'transport_host' '')"
 export TRANSPORT_HTTP_PORT="$(config_or_default 'transport_http_port' '9101')"
@@ -57,6 +61,12 @@ if bashio::var.true "${PERIODIC_SYNC_ENABLED}"; then
 fi
 if bashio::var.true "${KEYPAD_DISPLAY_ENABLED}"; then
   bashio::log.info "Keypad display polling: partitions ${KEYPAD_PARTITIONS}, every ${KEYPAD_POLL_INTERVAL_SECONDS}s"
+fi
+if bashio::var.true "${EVENT_HISTORY_ENABLED}"; then
+  bashio::log.info "Event journal: ${EVENT_HISTORY_SQLITE_PATH}; recent HA window ${EVENT_HISTORY_RECENT_LIMIT}"
+  if bashio::var.true "${EVENT_HISTORY_STARTUP_DUMP_ENABLED}"; then
+    bashio::log.info "Historical event-log dump enabled at startup"
+  fi
 fi
 if bashio::var.true "${TRANSPORT_PRINT_ENABLED}"; then
   bashio::log.info "TransPort event receipts: http://${TRANSPORT_HOST}:${TRANSPORT_HTTP_PORT}/print"

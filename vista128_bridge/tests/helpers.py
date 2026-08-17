@@ -1,4 +1,5 @@
 from vista_bridge.config import (
+    EventHistorySettings,
     KeypadSettings,
     MqttSettings,
     PanelSettings,
@@ -49,6 +50,12 @@ def make_settings(
             poll_interval_seconds=7,
             event_refresh_delay_ms=250,
             chime_zones=chime_zones,
+        ),
+        event_history=EventHistorySettings(
+            enabled=True,
+            startup_dump_enabled=False,
+            sqlite_path=spool_path + ".events",
+            recent_limit=20,
         ),
         printer=PrinterSettings(
             enabled=printer_enabled,

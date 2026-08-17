@@ -59,6 +59,8 @@ EVENT_DESCRIPTIONS: dict[str, str] = {
     "C2": "Smoke Alarm Restore",
     "C3": "Fire Trouble",
     "C4": "Fire Trouble Restore",
+    "C7": "Fail To Arm",
+    "C8": "Fail To Disarm",
     "D1": "Waterflow Alarm",
     "D2": "Waterflow Alarm Restore",
     "D3": "Fail To Communicate",

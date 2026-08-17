@@ -5,11 +5,13 @@ import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "app"))
 
 from vista_bridge.protocol import (  # noqa: E402
+    EVENT_LOG_QUERY,
     STARTUP_QUERIES,
     STATE_SYNC_QUERIES,
     build_keypad_display_query,
     identify_message,
     parse_arming_status,
+    parse_event_log_entry,
     parse_keypad_display,
     parse_system_event,
     parse_zone_descriptor,
@@ -30,6 +32,12 @@ class ProtocolTests(unittest.TestCase):
                 ("zone_descriptor", b"08ZD009A\r\n"),
             ],
         )
+
+    def test_event_log_query_is_exact_and_long_running(self):
+        self.assertEqual(EVENT_LOG_QUERY.name, "event_log")
+        self.assertEqual(EVENT_LOG_QUERY.data, b"08LD00A8\r\n")
+        self.assertEqual(EVENT_LOG_QUERY.timeout_seconds, 45)
+        self.assertFalse(EVENT_LOG_QUERY.required)
 
     def test_periodic_state_sync_is_dynamic_state_only(self):
         self.assertEqual(
@@ -52,6 +60,10 @@ class ProtocolTests(unittest.TestCase):
             "keypad_display",
         )
         self.assertEqual(identify_message(b"1BnqSOMETHING"), "system_event")
+        self.assertEqual(identify_message(b"08XF009A"), "communication_off")
+        self.assertEqual(identify_message(b"10DC000000000000"), "display_changed")
+        self.assertEqual(identify_message(b"1BldSOMETHING"), "event_log_entry")
+        self.assertEqual(identify_message(b"08lc0069"), "event_log_complete")
 
     def test_unknown_data_is_preserved_as_unknown(self):
         self.assertEqual(identify_message(b"weird"), "unknown")
@@ -144,6 +156,17 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(event.day, 15)
         self.assertEqual(event.month, 8)
         self.assertEqual(event.year, 26)
+        self.assertEqual(event.panel_timestamp, "2026-08-15T03:21")
+
+    def test_parse_historical_event_log_entry(self):
+        packet = make_packet("ldB70000021210315082600")
+        self.assertTrue(validate_packet(packet).valid)
+        self.assertEqual(identify_message(packet), "event_log_entry")
+        event = parse_event_log_entry(packet)
+        self.assertIsNotNone(event)
+        self.assertEqual(event.code, "B7")
+        self.assertEqual(event.user, 2)
+        self.assertEqual(event.partition, 1)
         self.assertEqual(event.panel_timestamp, "2026-08-15T03:21")
 
     def test_parse_zone_descriptor_and_end_marker(self):

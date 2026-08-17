@@ -23,6 +23,9 @@ STARTUP_QUERIES: tuple[ProtocolQuery, ...] = (
 )
 
 STATE_SYNC_QUERIES: tuple[ProtocolQuery, ...] = STARTUP_QUERIES[:2]
+EVENT_LOG_QUERY = ProtocolQuery(
+    "event_log", b"08LD00A8\r\n", timeout_seconds=45, required=False
+)
 
 ARMING_STATUS_TO_HA = {
     "A": "armed_away",
@@ -168,6 +171,10 @@ def identify_message(data: bytes) -> str:
         return "ready"
     if data.startswith(b"08XN"):
         return "communication_on"
+    if data.startswith(b"08XF"):
+        return "communication_off"
+    if data.startswith(b"10DC"):
+        return "display_changed"
     if data.startswith(b"10AS"):
         return "arming_status"
     if data.startswith((b"49ZS", b"68ZS", b"69ZS")):
@@ -180,6 +187,10 @@ def identify_message(data: bytes) -> str:
         return "keypad_display"
     if data.startswith((b"1Bnq", b"14NQ")):
         return "system_event"
+    if len(data) >= 4 and data[2:4].lower() == b"ld":
+        return "event_log_entry"
+    if len(data) >= 4 and data[2:4].lower() == b"lc":
+        return "event_log_complete"
     if data.startswith(b"0AFV"):
         return "field_value"
     return "unknown"
@@ -276,6 +287,44 @@ def parse_keypad_display(data: bytes) -> KeypadDisplayReport | None:
         armed_led=bool(led_status & 0x4),
         led_status=led_status,
         raw_display=raw_display,
+    )
+
+
+def parse_event_log_entry(data: bytes) -> SystemEvent | None:
+    if len(data) < 27 or data[2:4].lower() != b"ld":
+        return None
+
+    payload = data[4:-4].decode("ascii", errors="strict")
+    if len(payload) != 19:
+        return None
+
+    code = payload[0:2]
+    fields = (
+        payload[2:5],
+        payload[5:8],
+        payload[8:9],
+        payload[9:11],
+        payload[11:13],
+        payload[13:15],
+        payload[15:17],
+        payload[17:19],
+    )
+    try:
+        zone, user, partition, minute, hour, day, month, year = map(int, fields)
+    except ValueError:
+        return None
+
+    return SystemEvent(
+        code=code,
+        description=EVENT_DESCRIPTIONS.get(code, f"Event {code}"),
+        zone=zone,
+        user=user,
+        partition=partition,
+        minute=minute,
+        hour=hour,
+        day=day,
+        month=month,
+        year=year,
     )
 
 

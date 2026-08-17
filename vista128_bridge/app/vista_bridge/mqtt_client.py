@@ -11,6 +11,7 @@ from .mqtt_discovery import (
     ZONE_CONDITION_SPECS,
     device_info,
     diagnostic_entities,
+    event_history_config,
     keypad_config,
     partition_config,
     zone_condition_configs,
@@ -101,6 +102,10 @@ class MqttPublisher:
             )
         for object_id, config in zone_summary_entities(self.topic).items():
             self._publish_discovery_config("sensor", object_id, config)
+        if self.settings.event_history.enabled:
+            self._publish_discovery_config(
+                "sensor", "event_journal", event_history_config(self.topic)
+            )
         if self.settings.keypad.enabled:
             for partition in self.settings.keypad.partitions:
                 self.publish_keypad_discovery(partition)
@@ -187,6 +192,29 @@ class MqttPublisher:
                 retain=True,
                 qos=1,
             )
+
+    def publish_event_history(
+        self,
+        *,
+        count: int,
+        last_dump_at: str,
+        last_dump_seen: int,
+        last_dump_inserted: int,
+        events: list[dict],
+    ) -> None:
+        self.publish("event_history/count", count, retain=True, qos=1)
+        self.publish_json(
+            "event_history/attributes",
+            {
+                "count": count,
+                "last_dump_at": last_dump_at or None,
+                "last_dump_seen": last_dump_seen,
+                "last_dump_inserted": last_dump_inserted,
+                "events": events,
+            },
+            retain=True,
+            qos=1,
+        )
 
     def publish_event(
         self,

@@ -7,6 +7,7 @@ import queue
 import threading
 
 from .config import Settings
+from .event_store import EventStore
 from .framing import RawFrame, VistaStreamFramer
 from .message_handler import ProtocolMessageHandler
 from .mqtt_client import MqttPublisher
@@ -31,6 +32,11 @@ class VistaBridge:
         self.state = VistaState()
         self.framer = VistaStreamFramer()
         self.printer = TransPortEventPrinter(settings)
+        self.event_store = (
+            EventStore(settings.event_history.sqlite_path)
+            if settings.event_history.enabled
+            else None
+        )
         self.mqtt = MqttPublisher(settings, self.enqueue_raw_tx)
         self.rx_frames = 0
         self.rx_bytes = 0
@@ -44,6 +50,8 @@ class VistaBridge:
         self.synchronizer = VistaSynchronizer(
             settings.sync,
             settings.keypad,
+            settings.event_history.enabled,
+            settings.event_history.startup_dump_enabled,
             self._is_connected,
             self._send_sync_query,
             self._force_reconnect,
@@ -54,6 +62,7 @@ class VistaBridge:
             self.mqtt,
             self.printer,
             self.synchronizer,
+            self.event_store,
         )
 
     def enqueue_raw_tx(self, data: bytes) -> tuple[bool, str]:
@@ -161,6 +170,7 @@ class VistaBridge:
         self._panel_connected.set()
         LOG.info("Panel TCP connection established")
         self.mqtt.publish("panel/connected", "ON", retain=True)
+        self.handler.publish_event_history_snapshot()
 
     async def _stop_session(self, tasks: set[asyncio.Task]) -> None:
         self._panel_connected.clear()

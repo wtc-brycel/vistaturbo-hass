@@ -49,6 +49,8 @@ class SynchronizerTests(unittest.IsolatedAsyncioTestCase):
         sync = VistaSynchronizer(
             sync_settings(),
             keypad_settings(),
+            False,
+            False,
             lambda: True,
             send_query,
             lambda: None,
@@ -79,6 +81,8 @@ class SynchronizerTests(unittest.IsolatedAsyncioTestCase):
         sync = VistaSynchronizer(
             sync_settings(),
             keypad_settings(),
+            False,
+            False,
             lambda: True,
             send_query,
             lambda: None,
@@ -97,6 +101,8 @@ class SynchronizerTests(unittest.IsolatedAsyncioTestCase):
         sync = VistaSynchronizer(
             sync_settings(),
             keypad_settings(),
+            False,
+            False,
             lambda: True,
             lambda data, source, label: (True, "queued"),
             lambda: None,

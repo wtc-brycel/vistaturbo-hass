@@ -221,6 +221,18 @@ def diagnostic_entities(topic: TopicFn) -> dict[str, tuple[str, dict]]:
     }
 
 
+def event_history_config(topic: TopicFn) -> dict:
+    return {
+        "name": "Event Journal",
+        "unique_id": "vista128_event_journal",
+        "state_topic": topic("event_history/count"),
+        "json_attributes_topic": topic("event_history/attributes"),
+        "icon": "mdi:history",
+        "device": device_info(),
+        **panel_entity_availability(topic),
+    }
+
+
 def zone_summary_entities(topic: TopicFn) -> dict[str, dict]:
     return {
         f"{key}_zones": {

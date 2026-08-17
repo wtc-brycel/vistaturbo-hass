@@ -3,10 +3,12 @@ from __future__ import annotations
 import logging
 
 from .config import Settings
+from .event_store import EventStore
 from .mqtt_client import MqttPublisher
 from .printer import TransPortEventPrinter, panel_clock_offset_seconds
 from .protocol import (
     parse_arming_status,
+    parse_event_log_entry,
     parse_keypad_display,
     parse_system_event,
     parse_zone_descriptor,
@@ -27,16 +29,24 @@ class ProtocolMessageHandler:
         mqtt: MqttPublisher,
         printer: TransPortEventPrinter,
         synchronizer: VistaSynchronizer,
+        event_store: EventStore | None = None,
     ) -> None:
         self.settings = settings
         self.state = state
         self.mqtt = mqtt
         self.printer = printer
         self.synchronizer = synchronizer
+        self.event_store = event_store
+        self._history_dump_seen = 0
+        self._history_dump_inserted = 0
         self.last_panel_clock_offset_seconds: int | None = None
         self.last_event_received_at = ""
         self._handlers = {
             "communication_on": self._handle_communication_on,
+            "communication_off": self._handle_communication_off,
+            "display_changed": self._handle_display_changed,
+            "event_log_entry": self._handle_event_log_entry,
+            "event_log_complete": self._handle_event_log_complete,
             "arming_status": self._handle_arming_status,
             "zone_status": self._handle_zone_status,
             "zone_partition": self._handle_zone_partition,
@@ -52,7 +62,46 @@ class ProtocolMessageHandler:
 
     def _handle_communication_on(self, data: bytes, received_at: str) -> None:
         LOG.info("VISTA reported Communication On")
+        self.mqtt.publish("panel/automation_available", "ON", retain=True, qos=1)
         self.synchronizer.request_full_resync("communication_on")
+
+    def _handle_communication_off(self, data: bytes, received_at: str) -> None:
+        LOG.info("VISTA reported Communication Off")
+        self.mqtt.publish("panel/automation_available", "OFF", retain=True, qos=1)
+
+    def _handle_display_changed(self, data: bytes, received_at: str) -> None:
+        # Some Turbo integrations document DC display-change notifications, but
+        # they have not been observed on the current VISTA-128BPT. Recognize and
+        # log them passively before attempting any refresh semantics.
+        LOG.info("VISTA reported Display Changed notification: %r", data)
+
+    def _handle_event_log_entry(self, data: bytes, received_at: str) -> None:
+        event = parse_event_log_entry(data)
+        if event is None:
+            return
+        self._history_dump_seen += 1
+        descriptor = self.state.zones.get(event.zone).descriptor if event.zone in self.state.zones else ""
+        if self.event_store is not None and self.event_store.record(
+            event, source="history", received_at=received_at, descriptor=descriptor
+        ):
+            self._history_dump_inserted += 1
+
+    def _handle_event_log_complete(self, data: bytes, received_at: str) -> None:
+        LOG.info(
+            "Historical event-log dump complete: seen=%d inserted=%d",
+            self._history_dump_seen,
+            self._history_dump_inserted,
+        )
+        if self.event_store is not None:
+            self.event_store.finish_history_dump(
+                completed_at=received_at,
+                seen=self._history_dump_seen,
+                inserted=self._history_dump_inserted,
+            )
+        self.synchronizer.mark_event_log_complete()
+        self.publish_event_history_snapshot()
+        self._history_dump_seen = 0
+        self._history_dump_inserted = 0
 
     def _handle_arming_status(self, data: bytes, received_at: str) -> None:
         report = parse_arming_status(data)
@@ -169,6 +218,13 @@ class ProtocolMessageHandler:
             event.panel_timestamp,
         )
 
+        descriptor = self.state.zones.get(event.zone).descriptor if event.zone in self.state.zones else ""
+        if self.event_store is not None:
+            self.event_store.record(
+                event, source="live", received_at=received_at, descriptor=descriptor
+            )
+            self.publish_event_history_snapshot()
+
         self.last_event_received_at = received_at
         self.last_panel_clock_offset_seconds = panel_clock_offset_seconds(
             event,
@@ -214,9 +270,6 @@ class ProtocolMessageHandler:
         # changes are visible without waiting for the next KD polling interval.
         self._publish_initialized_keypads()
 
-        descriptor = ""
-        if event.zone in self.state.zones:
-            descriptor = self.state.zones[event.zone].descriptor
         self.printer.enqueue_event(
             event=event,
             descriptor=descriptor,
@@ -231,6 +284,19 @@ class ProtocolMessageHandler:
             partition = self.state.partitions.get(partition_number)
             if partition is not None:
                 self.mqtt.publish_partition_state(partition)
+
+    def publish_event_history_snapshot(self) -> None:
+        if self.event_store is None:
+            return
+        stats = self.event_store.stats()
+        recent = self.event_store.recent(self.settings.event_history.recent_limit)
+        self.mqtt.publish_event_history(
+            count=stats.count,
+            last_dump_at=stats.last_dump_at,
+            last_dump_seen=stats.last_dump_seen,
+            last_dump_inserted=stats.last_dump_inserted,
+            events=recent,
+        )
 
     def _handle_system_event_side_effects(self, code: str) -> None:
         if code == "AD":

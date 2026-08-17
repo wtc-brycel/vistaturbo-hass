@@ -8,6 +8,7 @@ import threading
 
 from .config import KeypadSettings, SyncSettings
 from .protocol import (
+    EVENT_LOG_QUERY,
     ProtocolQuery,
     STARTUP_QUERIES,
     STATE_SYNC_QUERIES,
@@ -26,18 +27,23 @@ class VistaSynchronizer:
         self,
         settings: SyncSettings,
         keypad_settings: KeypadSettings,
+        event_history_enabled: bool,
+        event_history_startup_dump_enabled: bool,
         is_connected: BoolCallback,
         send_query: SendQuery,
         force_reconnect: VoidCallback,
     ) -> None:
         self.settings = settings
         self.keypad_settings = keypad_settings
+        self.event_history_enabled = event_history_enabled
+        self.event_history_startup_dump_enabled = event_history_startup_dump_enabled
         self.is_connected = is_connected
         self.send_query = send_query
         self.force_reconnect = force_reconnect
         self.ready_event = asyncio.Event()
         self.descriptor_complete_event = asyncio.Event()
         self.keypad_response_event = asyncio.Event()
+        self.event_log_complete_event = asyncio.Event()
         self.lock = asyncio.Lock()
         self._active = threading.Event()
         self._resync_requested = asyncio.Event()
@@ -61,6 +67,7 @@ class VistaSynchronizer:
         self.ready_event.clear()
         self.descriptor_complete_event.clear()
         self.keypad_response_event.clear()
+        self.event_log_complete_event.clear()
         self._active.clear()
         self._resync_requested.clear()
         self._keypad_refresh_requested.clear()
@@ -78,6 +85,9 @@ class VistaSynchronizer:
 
     def mark_keypad_response(self) -> None:
         self.keypad_response_event.set()
+
+    def mark_event_log_complete(self) -> None:
+        self.event_log_complete_event.set()
 
     def set_program_mode(self, active: bool) -> None:
         self._program_mode = active
@@ -111,6 +121,9 @@ class VistaSynchronizer:
         if not ok:
             LOG.warning("Startup synchronization failed; reconnecting")
             self.force_reconnect()
+            return
+        if self.event_history_enabled and self.event_history_startup_dump_enabled:
+            await self.run_event_log_dump()
 
     async def periodic_loop(self) -> None:
         while self.is_connected():
@@ -219,6 +232,37 @@ class VistaSynchronizer:
                 return True
             finally:
                 self._active_keypad_partition = None
+                self._active.clear()
+
+    async def run_event_log_dump(self) -> bool:
+        if not self.is_connected():
+            return False
+
+        async with self.lock:
+            self._active.set()
+            self.event_log_complete_event.clear()
+            try:
+                accepted, detail = self.send_query(
+                    EVENT_LOG_QUERY.data, "history", EVENT_LOG_QUERY.name
+                )
+                if not accepted:
+                    LOG.warning("Event-log query was not sent: %s", detail)
+                    return False
+                LOG.info("Queued VISTA historical event-log dump")
+                try:
+                    await asyncio.wait_for(
+                        self.event_log_complete_event.wait(),
+                        timeout=EVENT_LOG_QUERY.timeout_seconds or 45,
+                    )
+                except asyncio.TimeoutError:
+                    LOG.warning(
+                        "Historical event-log dump timed out after %ss",
+                        EVENT_LOG_QUERY.timeout_seconds or 45,
+                    )
+                    return False
+                await asyncio.sleep(self.settings.command_delay_ms / 1000)
+                return True
+            finally:
                 self._active.clear()
 
     async def run_sync(
