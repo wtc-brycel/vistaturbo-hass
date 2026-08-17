@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 import sqlite3
@@ -39,7 +40,7 @@ class EventStore:
         return db
 
     def _initialize(self) -> None:
-        with self._connect() as db:
+        with closing(self._connect()) as db, db:
             db.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS events (
@@ -112,7 +113,7 @@ class EventStore:
             raise ValueError("event occurrence must be >= 1")
 
         fingerprint = self.fingerprint(event)
-        with self._connect() as db:
+        with closing(self._connect()) as db, db:
             if occurrence is None:
                 row = db.execute(
                     "SELECT COALESCE(MAX(occurrence), 0) + 1 FROM events WHERE fingerprint = ?",
@@ -168,7 +169,7 @@ class EventStore:
     def update_descriptor(self, zone: int, descriptor: str) -> int:
         if not descriptor:
             return 0
-        with self._connect() as db:
+        with closing(self._connect()) as db, db:
             cursor = db.execute(
                 "UPDATE events SET descriptor = ? WHERE zone = ? AND descriptor <> ?",
                 (descriptor, zone, descriptor),
@@ -182,7 +183,7 @@ class EventStore:
         seen: int,
         inserted: int,
     ) -> None:
-        with self._connect() as db:
+        with closing(self._connect()) as db, db:
             for key, value in (
                 ("last_dump_at", completed_at),
                 ("last_dump_seen", str(seen)),
@@ -195,7 +196,7 @@ class EventStore:
                 )
 
     def stats(self) -> EventJournalStats:
-        with self._connect() as db:
+        with closing(self._connect()) as db, db:
             count = int(db.execute("SELECT COUNT(*) FROM events").fetchone()[0])
             metadata = {
                 row["key"]: row["value"]
@@ -213,7 +214,7 @@ class EventStore:
 
     def recent(self, limit: int = 20) -> list[dict[str, Any]]:
         limit = max(1, min(100, int(limit)))
-        with self._connect() as db:
+        with closing(self._connect()) as db, db:
             rows = db.execute(
                 """
                 SELECT id, occurrence, event_code, description, zone,
