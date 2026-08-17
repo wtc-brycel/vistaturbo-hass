@@ -1,0 +1,11 @@
+{
+  "name": "vistaturbo-hass-frontend-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:render": "playwright test tests/render.spec.mjs --reporter=line"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.55.0"
+  }
+}
