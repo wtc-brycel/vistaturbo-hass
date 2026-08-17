@@ -2,7 +2,7 @@
 
 Home Assistant App for the native RS-232 automation interface on Honeywell/Resideo VISTA Turbo alarm panels.
 
-> **Release candidate status:** 0.2.6-rc.1 is read-only. It has been developed and tested on a VISTA-128BPT. Keypad display polling is enabled. Arm, disarm, and keypad-control commands are not sent to the panel.
+> **Release candidate status:** 0.2.6-rc.2 is read-only. It has been developed and tested on a VISTA-128BPT. Keypad display polling is enabled. Arm, disarm, and keypad-control commands are not sent to the panel.
 
 ## What you get in Home Assistant
 
@@ -55,6 +55,17 @@ BYPAS-RDY TO ARM
 Home Assistant receives a **Partition 1 Keypad** sensor. Its attributes preserve the exact two 16-character lines plus Ready, Trouble, Armed, Power, Fire Alarm, Silenced, Supervisory, backlight, raw LED state, raw display bytes, and the last update time.
 
 The dedicated Power, Fire Alarm, Silenced, and Supervisory attributes are reconstructed from validated VISTA real-time events plus keypad-display reconciliation. Unknown reconstructed state is published as JSON `null` rather than guessed.
+
+RC2 invalidates those event-derived CR-2 states across a panel TCP disconnect so stale fire, supervisory, or AC information is not carried across a communication gap. Fresh KD and event traffic reconstructs them after reconnect.
+
+## MQTT availability
+
+Panel entities require both conditions to be healthy:
+
+- the Vista Turbo RS232 process is online on `bridge/availability`
+- the panel TCP session is connected on `panel/connected`
+
+Home Assistant MQTT Discovery uses `availability_mode: all` for partitions, keypad sensors, zone condition entities, and zone summaries. This prevents a stale retained panel-connected value from making entities look available after an unclean App or MQTT failure.
 
 ## Dashboard keypad card
 
