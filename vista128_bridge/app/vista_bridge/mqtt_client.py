@@ -329,10 +329,21 @@ class MqttPublisher:
         LOG.warning("Disconnected from MQTT broker: %s", reason_code)
 
     def _on_message(self, client, userdata, message) -> None:
-        if self._is_keypad_command(message.topic):
+        is_keypad = self._is_keypad_command(message.topic)
+        is_partition = self._is_partition_command(message.topic)
+        if (is_keypad or is_partition) and bool(getattr(message, "retain", False)):
+            kind = "keypad" if is_keypad else "alarm"
+            category = "keypad" if is_keypad else "partition"
+            try:
+                partition = self._partition_from_topic(message.topic, category)
+            except Exception:
+                partition = None
+            self._publish_control_rejection(kind, partition, "retained_control_message")
+            return
+        if is_keypad:
             self._handle_keypad_command(message.topic, message.payload)
             return
-        if self._is_partition_command(message.topic):
+        if is_partition:
             self._handle_partition_command(message.topic, message.payload)
             return
         if message.topic == self.topic("debug/tx") and self.settings.debug_raw_tx_enabled:
@@ -366,6 +377,8 @@ class MqttPublisher:
         try:
             partition = self._partition_from_topic(topic, "keypad")
             key = payload.decode("ascii", errors="strict")
+            if len(key) != 1 or key not in "0123456789*#":
+                raise ValueError("unsupported_keypad_payload")
             if self.keypad_command_callback is None:
                 raise ValueError("keypad control callback unavailable")
             accepted, detail = self.keypad_command_callback(partition, key)

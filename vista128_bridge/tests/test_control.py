@@ -14,7 +14,8 @@ class FakeSynchronizer:
     def __init__(self):
         self.lock = asyncio.Lock()
         self.ready_event = asyncio.Event()
-        self.keypad_refreshes = []
+        self.keypad_refresh_requests = []
+        self.direct_keypad_refreshes = []
         self.arming_refreshes = 0
         self.active = False
 
@@ -32,8 +33,11 @@ class FakeSynchronizer:
         except asyncio.TimeoutError:
             return False
 
+    def request_keypad_refresh(self, partition):
+        self.keypad_refresh_requests.append(partition)
+
     async def run_keypad_refresh(self, partition):
-        self.keypad_refreshes.append(partition)
+        self.direct_keypad_refreshes.append(partition)
         return True
 
     async def run_arming_refresh(self):
@@ -83,18 +87,32 @@ class ControlCoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reason, "queued")
         self.assertTrue(await control.process_next())
         self.assertEqual(self.sent[0][0], b"0AKS11002F\r\n")
-        self.assertEqual(self.sync.keypad_refreshes, [1])
+        self.assertEqual(self.sync.keypad_refresh_requests, [1])
+        self.assertEqual(self.sync.direct_keypad_refreshes, [])
         self.assertTrue(self.results[-1]["ok"])
         self.assertEqual(self.results[-1]["action"], "keypress")
         self.assertNotIn("key", self.results[-1])
 
-    async def test_function_letter_is_rejected_not_reencoded_as_star(self):
+    async def test_function_and_panic_tokens_are_not_exposed_by_normal_keypad_control(self):
         control = self.make_control()
         control.set_automation_available(True)
-        ok, reason = control.enqueue_keypad(1, "A")
-        self.assertFalse(ok)
-        self.assertIn("unsupported keypad keystroke", reason)
+        for key in ("A", "D", "PANIC_A", "1234"):
+            ok, reason = control.enqueue_keypad(1, key)
+            self.assertFalse(ok)
+            self.assertEqual(reason, "unsupported_keypad_key")
         self.assertEqual(self.sent, [])
+
+    async def test_rapid_code_digits_are_not_blocked_by_direct_kd_round_trips(self):
+        control = self.make_control()
+        control.set_automation_available(True)
+        for key in "1234":
+            self.assertTrue(control.enqueue_keypad(1, key)[0])
+        for _ in range(4):
+            self.assertTrue(await control.process_next())
+        self.assertEqual(len(self.sent), 4)
+        self.assertEqual(self.sync.direct_keypad_refreshes, [])
+        self.assertEqual(self.sync.keypad_refresh_requests, [1, 1, 1, 1])
+        self.assertTrue(all(result["ok"] for result in self.results[-4:]))
 
     async def test_native_alarm_verifies_partition_mode(self):
         control = self.make_control()

@@ -81,6 +81,34 @@ class ControlMqttTests(unittest.TestCase):
         published_payloads = [str(item[1]) for item in publisher._client.published]
         self.assertFalse(any("1234" in item for item in published_payloads))
 
+    def test_retained_control_messages_are_rejected_without_execution(self):
+        keypad_received = []
+        alarm_received = []
+        settings = make_settings(control_enabled=True, keypad_control_enabled=True, native_alarm_control_enabled=True)
+        publisher = MqttPublisher(
+            settings,
+            lambda data: (True, "queued"),
+            lambda partition, key: (keypad_received.append((partition, key)) or True, "queued"),
+            lambda partition, action, code: (alarm_received.append((partition, action, code)) or True, "queued"),
+        )
+        publisher._on_message(None, None, types.SimpleNamespace(topic="vista128/keypad/1/command", payload=b"7", retain=True))
+        publisher._on_message(None, None, types.SimpleNamespace(topic="vista128/partition/1/command", payload=b'{"action":"DISARM","code":"1234"}', retain=True))
+        self.assertEqual(keypad_received, [])
+        self.assertEqual(alarm_received, [])
+        published = [str(item[1]) for item in publisher._client.published]
+        self.assertTrue(any("retained_control_message" in item for item in published))
+        self.assertFalse(any("1234" in item for item in published))
+
+    def test_malformed_keypad_payload_is_rejected_without_echoing_payload(self):
+        received = []
+        settings = make_settings(control_enabled=True, keypad_control_enabled=True)
+        publisher = MqttPublisher(settings, lambda data: (True, "queued"), lambda partition, key: (received.append((partition, key)) or True, "queued"))
+        publisher._on_message(None, None, types.SimpleNamespace(topic="vista128/keypad/1/command", payload=b"1234", retain=False))
+        self.assertEqual(received, [])
+        published = [str(item[1]) for item in publisher._client.published]
+        self.assertTrue(any("unsupported_keypad_payload" in item for item in published))
+        self.assertFalse(any("1234" in item for item in published))
+
     def test_connect_subscribes_only_enabled_control_topics(self):
         settings = make_settings(
             control_enabled=True,
