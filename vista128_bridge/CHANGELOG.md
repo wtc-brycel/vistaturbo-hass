@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.6-rc.3
+
+- Add card `0.3.15` with a model-agnostic adaptive Lovelace layout system.
+- Make `layout: auto` the default, preserving the physical keypad facsimile above 520 px card-container width and switching to a touchscreen-first compact layout at 520 px and below.
+- Add `layout: physical` and `layout: compact` overrides.
+- Give compact layouts a large LCD, condensed annunciator strip, and 4 x 4 keypad grid with approximately 50 px minimum key height.
+- Hide secondary numeric legends below 320 px before allowing primary key labels or touch targets to become too small.
+- Apply the same adaptive renderer to both 6160CR-2 and 6160 models.
+- Add `MODEL_PROFILES` so future keypad models can declare compact annunciators and function-key labels without implementing a separate mobile UI.
+- Reduce the Home Assistant grid minimum from six columns to four columns because compact mode remains usable at that width.
+- Add real Chromium browser regression tests for wide/compact switching, 390 px and 320 px touch-target dimensions, both model profiles, forced layout modes, AUTO case colors, and Lovelace grid sizing.
+- Keep all alarm and keypad control read-only.
+
 ## 0.2.6-rc.2
 
 - Harden the 6160/6160CR-2 card for Home Assistant mobile and narrow dashboard layouts.
