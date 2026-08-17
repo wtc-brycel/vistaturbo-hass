@@ -209,3 +209,96 @@ test("First Alert AUTO case follows white day and dark night defaults", async ({
   caseColor = await page.evaluate(() => document.getElementById("card").shadowRoot.querySelector(".firstalert-portrait").dataset.caseColor);
   expect(caseColor).toBe("dark");
 });
+
+
+test("custom card exposes a Home Assistant visual editor", async ({ page }) => {
+  await page.setContent(`<!doctype html><html><body></body></html>`);
+  await page.evaluate(() => {
+    if (!customElements.get("ha-card")) customElements.define("ha-card", class extends HTMLElement {});
+  });
+  await page.addScriptTag({ content: cardSource });
+
+  const result = await page.evaluate(async ({ entity }) => {
+    const ctor = customElements.get("vista-keypad-card");
+    const editor = await ctor.getConfigElement();
+    document.body.append(editor);
+    editor.hass = {
+      states: {
+        [entity]: { state: "ready", attributes: { friendly_name: "Partition 1 Keypad" } },
+      },
+    };
+    editor.setConfig({
+      type: "custom:vista-keypad-card",
+      entity,
+      model: "firstalert",
+      layout: "auto",
+      case_color: "auto",
+      sound: { enabled: true, state_sounds: true },
+      haptic: { enabled: true, keypress_ms: 10 },
+    });
+    return {
+      tag: editor.tagName.toLowerCase(),
+      model: editor.shadowRoot.querySelector("[data-top=model]").value,
+      layout: editor.shadowRoot.querySelector("[data-top=layout]").value,
+      sound: editor.shadowRoot.querySelector("[data-sound=enabled]").checked,
+      haptic: editor.shadowRoot.querySelector("[data-haptic=enabled]").checked,
+      entity: editor.shadowRoot.querySelector("[data-top=entity]").value,
+    };
+  }, { entity: ENTITY });
+
+  expect(result).toEqual({
+    tag: "vista-keypad-card-editor",
+    model: "firstalert",
+    layout: "auto",
+    sound: true,
+    haptic: true,
+    entity: ENTITY,
+  });
+});
+
+test("visual editor emits clean nested config changes", async ({ page }) => {
+  await page.setContent(`<!doctype html><html><body></body></html>`);
+  await page.evaluate(() => {
+    if (!customElements.get("ha-card")) customElements.define("ha-card", class extends HTMLElement {});
+  });
+  await page.addScriptTag({ content: cardSource });
+
+  const changes = await page.evaluate(async ({ entity }) => {
+    const ctor = customElements.get("vista-keypad-card");
+    const editor = await ctor.getConfigElement();
+    document.body.append(editor);
+    editor.setConfig({ type: "custom:vista-keypad-card", entity, model: "6160cr2" });
+    const emitted = [];
+    editor.addEventListener("config-changed", (event) => emitted.push(JSON.parse(JSON.stringify(event.detail.config))));
+
+    const model = editor.shadowRoot.querySelector("[data-top=model]");
+    model.value = "firstalert";
+    model.dispatchEvent(new Event("change", { bubbles: true }));
+
+    const sound = editor.shadowRoot.querySelector("[data-sound=enabled]");
+    sound.checked = true;
+    sound.dispatchEvent(new Event("change", { bubbles: true }));
+
+    const stateSounds = editor.shadowRoot.querySelector("[data-sound=state_sounds]");
+    stateSounds.checked = true;
+    stateSounds.dispatchEvent(new Event("change", { bubbles: true }));
+
+    const haptic = editor.shadowRoot.querySelector("[data-haptic=enabled]");
+    haptic.checked = true;
+    haptic.dispatchEvent(new Event("change", { bubbles: true }));
+
+    const functionA = editor.shadowRoot.querySelector("[data-function=a]");
+    functionA.value = "PANIC";
+    functionA.dispatchEvent(new Event("change", { bubbles: true }));
+
+    return emitted;
+  }, { entity: ENTITY });
+
+  const last = changes.at(-1);
+  expect(last.model).toBe("firstalert");
+  expect(last.sound.enabled).toBe(true);
+  expect(last.sound.state_sounds).toBe(true);
+  expect(last.haptic.enabled).toBe(true);
+  expect(last.function_keys.a).toBe("PANIC");
+  expect(last.entity).toBe(ENTITY);
+});

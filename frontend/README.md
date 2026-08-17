@@ -14,7 +14,7 @@ The card is **read-only** while Vista Turbo RS232 remains read-only. Keys depres
 
 ## Install in Home Assistant
 
-Release `v0.2.6-rc.4` attaches card `0.3.17` as `vista-keypad-card.js`.
+The current development card is `0.3.18`; the most recent published release may lag until the next RC is cut.
 
 From the Home Assistant Terminal or SSH add-on:
 
@@ -27,7 +27,7 @@ curl -fL "https://github.com/wtc-brycel/vistaturbo-hass/releases/download/v0.2.6
 Then add the card as a Lovelace JavaScript module under **Settings -> Dashboards -> Resources**:
 
 ```text
-/local/vista-keypad-card.js?v=0.3.17
+/local/vista-keypad-card.js?v=0.3.18
 ```
 
 The version suffix is intentional. Change it whenever the JavaScript file is replaced so Home Assistant and mobile browsers do not reuse a stale cached copy.
@@ -57,6 +57,23 @@ model: firstalert
 ```
 
 The RC4 release also attaches `vista-keypad-simulator.html`. Place it beside the card in `/config/www` and open `/local/vista-keypad-simulator.html` to exercise all three layouts, widths, annunciators, chime/alarm states, and audio behavior without changing the real panel.
+
+
+## Visual editor
+
+Card `0.3.18` implements Home Assistant's custom-card visual editor contract through `getConfigElement()`. The dashboard editor can configure the normal installation without hand-editing YAML:
+
+- keypad entity
+- 6160CR-2, 6160, or First Alert style
+- AUTO, physical, or compact layout
+- case color plus optional day/night overrides
+- title and Home Assistant card background
+- sound enablement, key chirp, panel-state sounds, chime/trouble/supervisory toggles, and volume levels
+- optional burglary/AUX Home Assistant entity overrides
+- haptic enablement and keypress duration
+- A/B/C/D function-key labels
+
+The visual editor intentionally keeps the bridge read-only. Advanced indicator/flashing entity mappings and per-function-key colors remain YAML-only.
 
 ## Adaptive layout
 
