@@ -1,0 +1,35 @@
+name: Apply centralized chime zone policy
+
+on:
+  push:
+    branches:
+      - feature/keypad-audio-feedback
+    paths:
+      - .github/workflows/apply-chime-policy.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/keypad-audio-feedback
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Apply patch
+        run: python .github/scripts/apply_chime_policy.py
+      - name: Test backend
+        working-directory: vista128_bridge
+        run: python -m unittest discover -s tests -v
+      - name: Commit verified patch
+        run: |
+          rm .github/workflows/apply-chime-policy.yml .github/scripts/apply_chime_policy.py
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Add centralized configurable chime zones"
+          git push origin HEAD:feature/keypad-audio-feedback
