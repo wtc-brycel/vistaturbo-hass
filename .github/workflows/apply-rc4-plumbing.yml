@@ -44,6 +44,7 @@ jobs:
         run: npm run test:render
       - name: Commit verified integration
         run: |
+          git restore .github/workflows/publish-release-candidate.yml
           rm .github/workflows/apply-rc4-plumbing.yml .github/scripts/apply_rc4_plumbing.py .github/scripts/fix_rc4_generated_tests.py .github/scripts/fix_rc4_frontend_tests.py
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
