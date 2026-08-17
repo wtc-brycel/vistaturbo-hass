@@ -35,7 +35,7 @@ jobs:
 
           gh release create "$tag" \
             frontend/vista-keypad-card.js#vista-keypad-card.js \
-            frontend/simulator.html#vista-keypad-simulator.html \
+            frontend/vista-keypad-simulator.html#vista-keypad-simulator.html \
             --target "$GITHUB_SHA" \
             --title "$title" \
             --notes-file "$notes" \
