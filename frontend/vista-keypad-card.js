@@ -1,4 +1,4 @@
-const VISTA_KEYPAD_CARD_VERSION = "0.3.15";
+const VISTA_KEYPAD_CARD_VERSION = "0.3.16";
 
 const MODEL_ALIASES = {
   "6160cr2": "6160cr2",
@@ -99,38 +99,211 @@ function safeCssColor(value, fallback = "") {
   return text;
 }
 
+/*
+ * Synthesized keypad feedback. Cadences are intentionally modeled after
+ * conventional VISTA keypad behavior, but exact factory piezo frequencies are
+ * not published. Keeping the profiles synthesized avoids fetch/decode latency.
+ */
+const KEYPAD_SOUND_PROFILES = {
+  keypress: { steps: [[1450, 38, 0]] },
+  chime: { steps: [[1200, 75, 70], [1200, 75, 70], [1200, 90, 0]] },
+  trouble: { steps: [[1000, 110, 85], [1000, 110, 0]] },
+  supervisory: { steps: [[900, 120, 75], [700, 120, 0]] },
+  auxiliary: { loop: true, steps: [[900, 250, 35], [650, 250, 35]] },
+  fire: { loop: true, steps: [[1000, 500, 500], [1000, 500, 500], [1000, 500, 1500]] },
+  burglary: { loop: true, continuous: true, frequency: 950 },
+};
+
 class VistaKeypadAudio {
   constructor() {
     this.ctx = null;
+    this._loopName = null;
+    this._loopSignature = "";
+    this._loopTimer = null;
+    this._loopNodes = new Set();
+    this._desiredLoop = null;
+    this._desiredConfig = null;
   }
 
-  async beep(config = {}) {
-    if (!config.enabled) return;
+  _context() {
+    if (this.ctx) return this.ctx;
     const AudioCtx = window.AudioContext || window.webkitAudioContext;
-    if (!AudioCtx) return;
-    this.ctx ??= new AudioCtx();
-    if (this.ctx.state === "suspended") await this.ctx.resume();
+    if (!AudioCtx) return null;
+    try {
+      this.ctx = new AudioCtx({ latencyHint: "interactive" });
+    } catch (_) {
+      this.ctx = new AudioCtx();
+    }
+    return this.ctx;
+  }
 
-    const frequency = Number(config.frequency ?? 1400);
-    const duration = Number(config.duration_ms ?? 45) / 1000;
-    const volume = Math.max(0, Math.min(1, Number(config.volume ?? 0.035)));
-    const now = this.ctx.currentTime;
-    const osc = this.ctx.createOscillator();
-    const gain = this.ctx.createGain();
+  async unlock() {
+    const ctx = this._context();
+    if (!ctx) return false;
+    if (ctx.state === "suspended") {
+      try { await ctx.resume(); } catch (_) { return false; }
+    }
+    const ready = ctx.state === "running";
+    if (ready && this._desiredLoop && this._loopName !== this._desiredLoop) {
+      this._startLoopNow(this._desiredLoop, this._desiredConfig ?? {});
+    }
+    return ready;
+  }
+
+  _volume(config, profileName) {
+    if (profileName === "keypress") {
+      return Math.max(0, Math.min(1, Number(config.keypress_volume ?? config.volume ?? 0.035)));
+    }
+    return Math.max(0, Math.min(1, Number(config.alarm_volume ?? 0.065)));
+  }
+
+  _scheduleTone(frequency, durationMs, volume, startAt, targetSet = null) {
+    const ctx = this._context();
+    if (!ctx || ctx.state !== "running") return null;
+
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const start = Math.max(ctx.currentTime, startAt ?? ctx.currentTime);
+    const duration = Math.max(0.015, Number(durationMs || 0) / 1000);
+    const stop = start + duration;
 
     osc.type = "square";
-    osc.frequency.setValueAtTime(frequency, now);
-    gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.exponentialRampToValueAtTime(Math.max(volume, 0.0002), now + 0.002);
-    gain.gain.setValueAtTime(Math.max(volume, 0.0002), now + Math.max(0.003, duration - 0.003));
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+    osc.frequency.setValueAtTime(Math.max(80, Number(frequency) || 1000), start);
+    gain.gain.setValueAtTime(0.0001, start);
+    gain.gain.exponentialRampToValueAtTime(Math.max(volume, 0.0002), start + 0.002);
+    gain.gain.setValueAtTime(Math.max(volume, 0.0002), Math.max(start + 0.003, stop - 0.004));
+    gain.gain.exponentialRampToValueAtTime(0.0001, stop);
 
-    osc.connect(gain).connect(this.ctx.destination);
-    osc.start(now);
-    osc.stop(now + duration + 0.003);
+    osc.connect(gain).connect(ctx.destination);
+    if (targetSet) targetSet.add(osc);
+    osc.addEventListener?.("ended", () => targetSet?.delete(osc), { once: true });
+    osc.start(start);
+    osc.stop(stop + 0.004);
+    return osc;
+  }
+
+  _scheduleProfile(name, config = {}, targetSet = null) {
+    const ctx = this._context();
+    const profile = KEYPAD_SOUND_PROFILES[name];
+    if (!ctx || ctx.state !== "running" || !profile) return 0;
+
+    const volume = this._volume(config, name);
+    let at = ctx.currentTime + 0.002;
+    let totalMs = 0;
+    const steps = name === "keypress" && (config.frequency || config.duration_ms)
+      ? [[Number(config.frequency ?? 1450), Number(config.duration_ms ?? 38), 0]]
+      : profile.steps ?? [];
+
+    for (const [frequency, durationMs, gapMs] of steps) {
+      this._scheduleTone(frequency, durationMs, volume, at, targetSet);
+      const stepMs = Number(durationMs || 0) + Number(gapMs || 0);
+      totalMs += stepMs;
+      at += stepMs / 1000;
+    }
+    return totalMs;
+  }
+
+  async keypress(config = {}) {
+    if (!config.enabled || config.keypress === false) return false;
+    if (!(await this.unlock())) return false;
+    this._scheduleProfile("keypress", config);
+    return true;
+  }
+
+  async play(name, config = {}) {
+    if (!config.enabled) return false;
+    if (!(await this.unlock())) return false;
+    if (!KEYPAD_SOUND_PROFILES[name] || KEYPAD_SOUND_PROFILES[name].loop) return false;
+    this._scheduleProfile(name, config);
+    return true;
+  }
+
+  setLoop(name, config = {}) {
+    const enabled = Boolean(config.enabled && config.state_sounds);
+    const next = enabled && name && KEYPAD_SOUND_PROFILES[name]?.loop ? name : null;
+    this._desiredLoop = next;
+    this._desiredConfig = config;
+
+    if (!next) {
+      this.stopLoop();
+      return;
+    }
+
+    const signature = JSON.stringify([next, this._volume(config, next)]);
+    if (this._loopName === next && this._loopSignature === signature) return;
+
+    const ctx = this._context();
+    if (ctx?.state === "running") this._startLoopNow(next, config);
+  }
+
+  _startLoopNow(name, config = {}) {
+    this.stopLoop(false);
+    const ctx = this._context();
+    const profile = KEYPAD_SOUND_PROFILES[name];
+    if (!ctx || ctx.state !== "running" || !profile?.loop) return;
+
+    this._loopName = name;
+    this._loopSignature = JSON.stringify([name, this._volume(config, name)]);
+
+    if (profile.continuous) {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const now = ctx.currentTime;
+      const volume = this._volume(config, name);
+      osc.type = "square";
+      osc.frequency.setValueAtTime(profile.frequency ?? 950, now);
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.exponentialRampToValueAtTime(Math.max(volume, 0.0002), now + 0.008);
+      osc.connect(gain).connect(ctx.destination);
+      this._loopNodes.add(osc);
+      osc.start(now);
+      return;
+    }
+
+    const scheduleCycle = () => {
+      if (this._loopName !== name || this._desiredLoop !== name) return;
+      const cycleMs = this._scheduleProfile(name, config, this._loopNodes);
+      this._loopTimer = setTimeout(scheduleCycle, Math.max(50, cycleMs - 15));
+    };
+    scheduleCycle();
+  }
+
+  stopLoop(clearDesired = true) {
+    clearTimeout(this._loopTimer);
+    this._loopTimer = null;
+    for (const node of this._loopNodes) {
+      try { node.stop(); } catch (_) {}
+    }
+    this._loopNodes.clear();
+    this._loopName = null;
+    this._loopSignature = "";
+    if (clearDesired) {
+      this._desiredLoop = null;
+      this._desiredConfig = null;
+    }
+  }
+
+  stopAll() {
+    this.stopLoop();
   }
 }
 
+class VistaKeypadHaptics {
+  pulse(config = {}) {
+    if (!config.enabled || typeof navigator === "undefined" || typeof navigator.vibrate !== "function") {
+      return false;
+    }
+    try {
+      return navigator.vibrate(Math.max(1, Math.min(100, Number(config.keypress_ms ?? 10))));
+    } catch (_) {
+      return false;
+    }
+  }
+
+  stop() {
+    try { navigator.vibrate?.(0); } catch (_) {}
+  }
+}
 class VistaKeypadCard extends HTMLElement {
   constructor() {
     super();
@@ -144,6 +317,8 @@ class VistaKeypadCard extends HTMLElement {
     this._themeMedia = null;
     this._themeMediaHandler = null;
     this._audio = new VistaKeypadAudio();
+    this._haptics = new VistaKeypadHaptics();
+    this._feedbackSnapshot = null;
   }
 
   connectedCallback() {
@@ -167,6 +342,8 @@ class VistaKeypadCard extends HTMLElement {
     this._themeMedia = null;
     this._themeMediaHandler = null;
     clearTimeout(this._pressTimer);
+    this._audio.stopAll();
+    this._haptics.stop();
   }
 
   _installThemeListener() {
@@ -195,6 +372,8 @@ class VistaKeypadCard extends HTMLElement {
       case_color: "auto",
       layout: "auto",
       read_only: true,
+      sound: { enabled: false },
+      haptic: { enabled: false },
     };
   }
 
@@ -226,6 +405,31 @@ class VistaKeypadCard extends HTMLElement {
     const dayCaseColor = normalizeOptionalCaseColor(config.day_case_color, "day_case_color");
     const nightCaseColor = normalizeOptionalCaseColor(config.night_case_color, "night_case_color");
 
+    const soundInput = config.sound === true
+      ? { enabled: true }
+      : config.sound && typeof config.sound === "object"
+        ? config.sound
+        : {};
+    const sound = {
+      enabled: false,
+      keypress: true,
+      state_sounds: false,
+      volume: 0.035,
+      alarm_volume: 0.065,
+      trouble: true,
+      supervisory: true,
+      chime: true,
+      alarm_entity: null,
+      aux_entity: null,
+      ...soundInput,
+    };
+    const hapticInput = config.haptic === true
+      ? { enabled: true }
+      : config.haptic && typeof config.haptic === "object"
+        ? config.haptic
+        : {};
+    const haptic = { enabled: false, keypress_ms: 10, ...hapticInput };
+
     this._config = {
       title: "",
       model,
@@ -239,21 +443,27 @@ class VistaKeypadCard extends HTMLElement {
       indicators: {},
       indicator_flashing: {},
       led_flash_period_ms: 1000,
-      sound: { enabled: false },
+      sound,
+      haptic,
       ...config,
       model,
       case_color: caseColor,
       layout,
       day_case_color: dayCaseColor,
       night_case_color: nightCaseColor,
+      sound,
+      haptic,
     };
+    this._feedbackSnapshot = null;
     this._lastRenderSignature = null;
+    this._syncFeedback();
     this._render();
     this._lastRenderSignature = this._renderSignature(this._hass);
   }
 
   set hass(hass) {
     this._hass = hass;
+    this._syncFeedback();
     const signature = this._renderSignature(hass);
     if (signature === this._lastRenderSignature) return;
     this._lastRenderSignature = signature;
@@ -302,6 +512,9 @@ class VistaKeypadCard extends HTMLElement {
       a.fire_alarm ?? null,
       a.silenced ?? null,
       a.supervisory ?? null,
+      a.chime_sequence ?? null,
+      a.chime_zone ?? null,
+      a.chime_descriptor ?? null,
       hass?.themes?.darkMode ?? null,
       externalIndicators,
       externalFlashing,
@@ -339,6 +552,67 @@ class VistaKeypadCard extends HTMLElement {
     return false;
   }
 
+  _entityActive(entityId, activeStates = ["on", "triggered", "alarm", "active"]) {
+    const entity = this._entityState(entityId);
+    if (!entity) return false;
+    return activeStates.includes(String(entity.state ?? "").toLowerCase());
+  }
+
+  _feedbackState(display) {
+    return {
+      ready: display.ready,
+      armed: display.armed,
+      trouble: display.trouble,
+      fireAlarm: display.fireAlarm,
+      silenced: display.silenced,
+      supervisory: display.supervisory,
+      chimeSequence: display.chimeSequence,
+    };
+  }
+
+  _syncFeedback() {
+    const sound = this._config?.sound ?? {};
+    const display = this._config ? this._displayState() : null;
+    if (!display) return;
+
+    let loop = null;
+    if (sound.enabled && sound.state_sounds) {
+      if (display.fireAlarm === true && display.silenced !== true) {
+        loop = "fire";
+      } else if (this._entityActive(sound.alarm_entity, ["triggered", "alarm", "on"])) {
+        loop = "burglary";
+      } else if (this._entityActive(sound.aux_entity)) {
+        loop = "auxiliary";
+      }
+    }
+    this._audio.setLoop(loop, sound);
+
+    const current = this._feedbackState(display);
+    const previous = this._feedbackSnapshot;
+    this._feedbackSnapshot = current;
+    if (!previous || !sound.enabled || !sound.state_sounds || loop) return;
+
+    if (sound.chime !== false && current.chimeSequence !== previous.chimeSequence) {
+      this._audio.play("chime", sound).catch(() => {});
+      return;
+    }
+    if (sound.supervisory !== false && !previous.supervisory && current.supervisory) {
+      this._audio.play("supervisory", sound).catch(() => {});
+      return;
+    }
+    if (sound.trouble !== false && !previous.trouble && current.trouble) {
+      this._audio.play("trouble", sound).catch(() => {});
+    }
+  }
+
+  async _keyPressFeedback() {
+    const sound = this._config?.sound ?? {};
+    const haptic = this._config?.haptic ?? {};
+    this._haptics.pulse(haptic);
+    await this._audio.keypress(sound).catch(() => false);
+    this._syncFeedback();
+  }
+
   _resolvedCaseColor(model) {
     const configured = this._config?.case_color ?? "auto";
     if (configured !== "auto") return configured;
@@ -371,6 +645,9 @@ class VistaKeypadCard extends HTMLElement {
         fireAlarm: null,
         silenced: null,
         supervisory: null,
+        chimeSequence: 0,
+        chimeZone: null,
+        chimeDescriptor: "",
         flashing: {
           armed: false,
           ready: false,
@@ -404,6 +681,9 @@ class VistaKeypadCard extends HTMLElement {
       fireAlarm: indicator("fire_alarm", "fire_alarm", null),
       silenced: indicator("silenced", "silenced", null),
       supervisory: indicator("supervisory", "supervisory", null),
+      chimeSequence: Number(a.chime_sequence ?? 0) || 0,
+      chimeZone: a.chime_zone ?? null,
+      chimeDescriptor: String(a.chime_descriptor ?? ""),
       flashing: {
         armed: this._indicatorFlashing("armed"),
         ready: this._indicatorFlashing("ready"),
@@ -1592,7 +1872,10 @@ class VistaKeypadCard extends HTMLElement {
 
     this.shadowRoot.querySelectorAll("button[data-key]").forEach((button) => {
       const release = () => button.classList.remove("pressed");
-      button.addEventListener("pointerdown", () => button.classList.add("pressed"));
+      button.addEventListener("pointerdown", () => {
+        button.classList.add("pressed");
+        this._keyPressFeedback();
+      });
       button.addEventListener("pointerup", release);
       button.addEventListener("pointerleave", release);
       button.addEventListener("pointercancel", release);
@@ -1605,7 +1888,6 @@ class VistaKeypadCard extends HTMLElement {
     const key = button?.dataset?.key;
     if (!key) return;
 
-    this._audio.beep(this._config?.sound ?? {}).catch(() => {});
 
     if (this._config.read_only !== false) {
       const note = this.shadowRoot.getElementById("read-only-note");
