@@ -1,4 +1,4 @@
-const VISTA_KEYPAD_CARD_VERSION = "0.3.14";
+const VISTA_KEYPAD_CARD_VERSION = "0.3.15";
 
 const MODEL_ALIASES = {
   "6160cr2": "6160cr2",
@@ -164,6 +164,7 @@ class VistaKeypadCard extends HTMLElement {
       entity: "sensor.vista_partition_1_keypad",
       model: "6160cr2",
       case_color: "auto",
+      mobile_layout: "auto",
       read_only: true,
     };
   }
@@ -177,6 +178,11 @@ class VistaKeypadCard extends HTMLElement {
     const caseColor = String(config.case_color ?? "auto").toLowerCase();
     if (caseColor !== "auto" && !CASE_COLORS.has(caseColor)) {
       throw new Error("case_color must be auto, red, white, or dark");
+    }
+
+    const mobileLayout = String(config.mobile_layout ?? "auto").toLowerCase();
+    if (!["auto", "compact", "physical"].includes(mobileLayout)) {
+      throw new Error("mobile_layout must be auto, compact, or physical");
     }
 
     const normalizeOptionalCaseColor = (value, name) => {
@@ -197,6 +203,7 @@ class VistaKeypadCard extends HTMLElement {
       case_color: "auto",
       day_case_color: null,
       night_case_color: null,
+      mobile_layout: "auto",
       read_only: true,
       show_card_background: false,
       function_keys: {},
@@ -209,6 +216,7 @@ class VistaKeypadCard extends HTMLElement {
       case_color: caseColor,
       day_case_color: dayCaseColor,
       night_case_color: nightCaseColor,
+      mobile_layout: mobileLayout,
     };
     this._lastRenderSignature = null;
     this._render();
@@ -230,7 +238,7 @@ class VistaKeypadCard extends HTMLElement {
   getGridOptions() {
     return {
       columns: 12,
-      min_columns: 6,
+      min_columns: 8,
       max_columns: 12,
     };
   }
@@ -484,8 +492,9 @@ class VistaKeypadCard extends HTMLElement {
     const isCR2 = model === "6160cr2";
     const resolvedCaseColor = this._resolvedCaseColor(model);
     const caseClass = `case-${resolvedCaseColor}`;
+    const layoutClass = `layout-${this._config?.mobile_layout ?? "auto"}`;
 
-    return `<div class="keypad-shell ${isCR2 ? "cr2" : "k6160"} ${caseClass}" data-model="${model}" data-case-color="${escapeHtml(resolvedCaseColor)}">
+    return `<div class="keypad-shell ${isCR2 ? "cr2" : "k6160"} ${caseClass} ${layoutClass}" data-model="${model}" data-case-color="${escapeHtml(resolvedCaseColor)}">
       <div class="microtexture" aria-hidden="true"></div>
       <div class="top-lip" aria-hidden="true"></div>
       <div class="speaker" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
@@ -1173,6 +1182,199 @@ class VistaKeypadCard extends HTMLElement {
         .function-slot { transform:translateX(-.72cqw); }
       }
 
+
+/* Lovelace/mobile composition. */
+.keypad-shell.compact-layout {
+  aspect-ratio:auto;
+  min-height:0;
+  height:auto;
+  display:grid;
+  grid-template-columns:minmax(0,1fr);
+  grid-template-rows:auto auto auto;
+  gap:8px;
+  padding:10px 10px 12px;
+  overflow:hidden;
+}
+
+.compact-layout .speaker,
+.compact-layout .burg-bracket,
+.compact-layout .fire-bracket,
+.compact-layout .burg-icon,
+.compact-layout .fire-icon {
+  display:none;
+}
+
+.compact-layout .display-hood {
+  position:relative;
+  left:auto;
+  right:auto;
+  top:auto;
+  width:100%;
+  height:clamp(78px,23cqw,96px);
+  border-radius:5px;
+}
+
+.compact-layout.k6160 .display-hood {
+  left:auto;
+  width:100%;
+}
+
+.compact-layout .lcd-frame {
+  left:3.2%;
+  right:3.2%;
+  top:14%;
+  height:72%;
+  padding:3px;
+  border-radius:2px;
+}
+
+.compact-layout .status-cr2,
+.compact-layout .status-6160 {
+  position:relative;
+  left:auto;
+  top:auto;
+  width:100%;
+  height:auto;
+}
+
+.compact-layout .status-cr2 {
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:6px;
+}
+
+.compact-layout .burg-panel,
+.compact-layout .fire-panel,
+.compact-layout .burg-rows,
+.compact-layout .fire-rows {
+  display:contents;
+}
+
+.compact-layout .status-6160 {
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:6px;
+}
+
+.compact-layout .led-row,
+.compact-layout .burg-rows .led-row,
+.compact-layout .status-6160 .led-row {
+  display:flex;
+  flex-direction:row;
+  align-items:center;
+  justify-content:center;
+  gap:4px;
+  min-width:0;
+  min-height:32px;
+  padding:5px 3px;
+  border:1px solid rgba(127,127,127,.28);
+  border-radius:6px;
+  font-size:clamp(6px,2.2cqw,10px);
+  font-weight:700;
+  line-height:1;
+  background:rgba(0,0,0,.055);
+}
+
+.compact-layout.case-white .led-row {
+  background:rgba(0,0,0,.035);
+}
+
+.compact-layout.case-dark .led-row {
+  background:rgba(255,255,255,.045);
+}
+
+.compact-layout .led-label {
+  min-width:0;
+  white-space:nowrap;
+  text-shadow:none;
+}
+
+.compact-layout .led {
+  flex:0 0 auto;
+  width:16px;
+  height:8px;
+  border-width:1px;
+  outline-width:1px;
+  outline-offset:1px;
+}
+
+.compact-layout .controls-well {
+  position:relative;
+  left:auto;
+  top:auto;
+  width:100%;
+  height:auto;
+}
+
+.compact-layout .key-grid {
+  width:100%;
+  height:auto;
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  grid-template-rows:repeat(4,clamp(52px,14cqw,60px));
+  column-gap:7px;
+  row-gap:7px;
+}
+
+.compact-layout .grid-slot {
+  width:auto;
+  height:auto;
+  min-width:0;
+}
+
+.compact-layout .function-slot {
+  transform:none;
+}
+
+.compact-layout .physical-key {
+  min-width:0;
+  min-height:52px;
+  padding:2px 3px;
+  border-width:1px;
+  border-radius:6px;
+}
+
+.compact-layout .function-label {
+  font-size:clamp(8px,2.7cqw,11px);
+}
+
+.compact-layout .number-key {
+  flex-direction:column;
+  gap:0;
+}
+
+.compact-layout .number-main {
+  font-size:clamp(21px,7cqw,29px);
+  line-height:.92;
+}
+
+.compact-layout .number-legend {
+  font-size:clamp(7px,2.25cqw,10px);
+  line-height:1;
+}
+
+@container (max-width:320px) {
+  .compact-layout .status-cr2 {
+    grid-template-columns:repeat(3,minmax(0,1fr));
+  }
+
+  .compact-layout .led-row,
+  .compact-layout .burg-rows .led-row,
+  .compact-layout .status-6160 .led-row {
+    font-size:6px;
+  }
+
+  .compact-layout .key-grid {
+    column-gap:5px;
+    row-gap:6px;
+  }
+
+  .compact-layout .physical-key {
+    min-height:50px;
+    padding:1px 2px;
+  }
+}
+
       @media(prefers-reduced-motion:reduce) {
         .physical-key, .read-only-note { transition:none; }
         .led.on.flashing { animation:none; }
@@ -1255,6 +1457,15 @@ class VistaKeypadCard extends HTMLElement {
     ctx.fillRect(0, 0, w, h * .42);
   }
 
+  _updateResponsiveLayout() {
+    const shell = this.shadowRoot?.querySelector(".keypad-shell");
+    if (!shell) return;
+    const mode = this._config?.mobile_layout ?? "auto";
+    const width = shell.getBoundingClientRect().width;
+    const compact = mode === "compact" || (mode === "auto" && width <= 480);
+    shell.classList.toggle("compact-layout", compact);
+  }
+
   _observeResize() {
     const shell = this.shadowRoot?.querySelector(".keypad-shell");
     if (!shell || typeof ResizeObserver === "undefined") return;
@@ -1263,6 +1474,7 @@ class VistaKeypadCard extends HTMLElement {
       if (this._resizeFrame) cancelAnimationFrame(this._resizeFrame);
       this._resizeFrame = requestAnimationFrame(() => {
         this._resizeFrame = 0;
+        this._updateResponsiveLayout();
         this._drawLCD();
       });
     });
@@ -1281,6 +1493,7 @@ class VistaKeypadCard extends HTMLElement {
     </div></ha-card>`;
 
     requestAnimationFrame(() => {
+      this._updateResponsiveLayout();
       this._drawLCD();
       this._observeResize();
     });
