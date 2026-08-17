@@ -17,6 +17,7 @@ Home Assistant App for the native RS-232 automation interface on Honeywell/Resid
 - Real-time VISTA system events
 - Five-minute state reconciliation by default
 - Optional TransPort event receipts
+- Persistent SQLite event journal with optional historical panel event-log import
 
 The VISTA remains authoritative. Home Assistant is a monitoring client and is not part of the panel's life-safety path.
 
@@ -85,6 +86,14 @@ First Alert style: white by day, dark at night
 ```
 
 Optional `day_case_color` and `night_case_color` settings can override either side of AUTO mode. See `frontend/README.md` for full card installation and configuration.
+
+## Persistent event journal
+
+When `event_history_enabled` is true, every decoded live system event is persisted in `/data/vista128_events.sqlite3`. The journal keeps event code, panel timestamp, partition, zone, user number, descriptor, and whether the row was observed live, in the historical panel log, or both. Repeated identical events within the same panel minute remain separate occurrences.
+
+The App discovers an **Event Journal** sensor whose state is the total journal row count. Its attributes contain dump metadata and only the configured recent window. The complete database is not copied into Home Assistant state.
+
+Set `event_history_startup_dump_enabled: true` to request the VISTA historical log once after successful startup synchronization. The first test release leaves this disabled by default pending physical VISTA-128BPT validation. Historical records are storage-only and do not mutate live panel state or generate chimes, alarm sounds, keypad refreshes, or printer receipts.
 
 ## Zone state
 

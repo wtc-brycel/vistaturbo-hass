@@ -2611,7 +2611,7 @@ class VistaEventLogCard extends HTMLElement {
 
   static getStubConfig() {
     return {
-      entity: "sensor.vista_128bpt_event_journal",
+      entity: "sensor.event_journal",
       rows: 20,
       partition: 0,
       show_source: true,

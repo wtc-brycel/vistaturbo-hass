@@ -82,6 +82,7 @@ class VistaBridge:
                 task.cancel()
             await asyncio.gather(*background, return_exceptions=True)
             self.mqtt.publish("panel/connected", "OFF", retain=True)
+            self.mqtt.publish("panel/automation_available", "OFF", retain=True)
             self.mqtt.stop()
 
     async def _connection_loop(self) -> None:
@@ -170,6 +171,7 @@ class VistaBridge:
         self._panel_connected.set()
         LOG.info("Panel TCP connection established")
         self.mqtt.publish("panel/connected", "ON", retain=True)
+        self.mqtt.publish("panel/automation_available", "OFF", retain=True)
         self.handler.publish_event_history_snapshot()
 
     async def _stop_session(self, tasks: set[asyncio.Task]) -> None:
@@ -185,6 +187,7 @@ class VistaBridge:
         if discarded:
             LOG.warning("Discarded %d pending TX request(s)", discarded)
         self.mqtt.publish("panel/connected", "OFF", retain=True)
+        self.mqtt.publish("panel/automation_available", "OFF", retain=True)
 
         if self._writer is not None:
             self._writer.close()
@@ -352,6 +355,9 @@ class VistaBridge:
         self.mqtt.publish("protocol/last_message_type", message_type, retain=True)
 
     def _publish_dynamic_state(self, *, include_discovery: bool = False) -> None:
+        if include_discovery:
+            self.handler.publish_event_history_snapshot()
+
         if self.state.arming_initialized:
             for partition in self.state.partitions.values():
                 if include_discovery:

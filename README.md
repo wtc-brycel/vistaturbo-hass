@@ -17,6 +17,8 @@ Vista Turbo HASS is a local Home Assistant integration for the native RS-232 aut
 - Supports optional low-latency keypad chirps, alarm/chime sounds, and browser haptics
 - Includes a Home Assistant visual card editor for common keypad, appearance, sound, haptic, and function-key settings
 - Supports a centralized configurable dashboard chime-zone list
+- Maintains a persistent SQLite event journal from live panel events, with optional historical panel-log import
+- Includes a responsive Home Assistant event-journal card for recent panel history
 - Reconciles panel state periodically in case an event is missed
 - Optionally prints event receipts through TransPort
 
@@ -139,6 +141,14 @@ BYPAS-RDY TO ARM
 The keypad entity also publishes Ready, Trouble, Armed, backlight, Power, Fire Alarm, Silenced, Supervisory, Burglary Alarm, Auxiliary Alarm, and a normalized `sound_mode`. The native KD packet supplies Ready, Trouble, and Armed directly. Supplemental states are reconstructed from validated VISTA events plus keypad reconciliation. Unknown reconstructed state remains `null` rather than being guessed.
 
 Configured dashboard chime events are published through `chime_sequence`, `chime_zone`, `chime_descriptor`, and `chime_at`. Event-derived states are invalidated after a panel TCP gap, and panel entities require both the bridge process and panel TCP session to be available before Home Assistant shows them as available.
+
+## Persistent event journal
+
+Vista Turbo RS232 can preserve VISTA system events in `/data/vista128_events.sqlite3`. Live `nq` notifications are journaled as they arrive. An optional startup import can request the panel's historical event log using the documented `08LD00A8` transaction and merge `ld` records into the same database without replaying live alarm, chime, keypad-refresh, or printer side effects.
+
+The full journal stays in SQLite. Home Assistant receives only a configurable recent window so Recorder is not forced to store the entire panel history on every sensor update. The matching frontend resource also registers `custom:vista-event-log-card` for a responsive recent-history view.
+
+The historical startup import is disabled by default in the first test release because the `LD/ld/lc` transaction has not yet been physically validated against this VISTA-128BPT. Live SQLite journaling is enabled by default.
 
 ## Adaptive Lovelace layout
 

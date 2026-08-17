@@ -168,6 +168,28 @@ class MqttPublisherTests(unittest.TestCase):
         self.assertEqual(attributes["zones"][0]["descriptor"], "FRONT DOOR")
         self.assertEqual(attributes["zones"][1]["partition"], 1)
 
+    def test_event_journal_discovery_survives_panel_disconnect(self):
+        self.publisher.publish_discovery()
+        published = {item[0]: item[1] for item in self.publisher._client.published if item[1]}
+        config = json.loads(
+            published["homeassistant/sensor/vista128_bridge/event_journal/config"]
+        )
+        self.assertEqual(config["name"], "Event Journal")
+        self.assertEqual(config["state_topic"], "vista128/event_history/count")
+        self.assertEqual(config["availability_topic"], "vista128/bridge/availability")
+        self.assertNotIn("availability", config)
+
+    def test_automation_interface_has_diagnostic_discovery(self):
+        self.publisher.publish_discovery()
+        published = {item[0]: item[1] for item in self.publisher._client.published if item[1]}
+        config = json.loads(
+            published["homeassistant/binary_sensor/vista128_bridge/automation_available/config"]
+        )
+        self.assertEqual(config["state_topic"], "vista128/panel/automation_available")
+        self.assertEqual(config["entity_category"], "diagnostic")
+        self.assertEqual(config["device_class"], "connectivity")
+
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -124,6 +124,9 @@ keypad_partitions: "1"
 keypad_poll_interval_seconds: 7
 keypad_event_refresh_delay_ms: 250
 chime_zones: ""
+event_history_enabled: true
+event_history_startup_dump_enabled: false
+event_history_recent_limit: 20
 transport_print_enabled: false
 transport_host: ""
 transport_http_port: 9101
@@ -141,6 +144,22 @@ debug_raw_tx_enabled: false
 The keypad display is queried every 7 seconds by default. Valid unsolicited system events also request a debounced keypad refresh for the affected configured partition. All keypad queries share the same serialized transaction lock as startup and periodic synchronization.
 
 `chime_zones` is Vista Turbo RS232's own centralized dashboard-chime policy. It is intentionally separate from any chime programming transported on the VISTA ECP bus. Supply comma-separated VISTA zone numbers and ascending ranges, for example `"1,2,5-8,27"`. Valid zones are 1 through 128. An empty string disables bridge-generated chime events. A listed zone increments `chime_sequence` only for a new false-to-faulted `F5` transition after arming state is initialized and while the resolved partition is disarmed. Duplicate fault reports and faults while armed do not chime. The keypad entity also exposes `chime_zone`, `chime_descriptor`, and `chime_at`.
+
+## Event journal and historical panel log
+
+`event_history_enabled` defaults to `true`. The App stores decoded events in `/data/vista128_events.sqlite3` using SQLite WAL mode. Live `1Bnq` notifications are written immediately. The journal is local to the App data directory and survives App upgrades/restarts.
+
+`event_history_recent_limit` controls how many recent rows (1 through 100, default 20) are mirrored into the Home Assistant **Event Journal** sensor attributes. This is intentionally a window rather than the complete journal so Home Assistant Recorder does not repeatedly persist hundreds of historical events. The Event Journal entity remains available while the panel TCP link is down as long as the bridge process itself is online.
+
+`event_history_startup_dump_enabled` defaults to `false` in the first release containing this feature. When enabled, a successful startup synchronization is followed by the documented historical-log request:
+
+```text
+08LD00A8
+```
+
+Historical entries are decoded from `ld` packets and the transaction completes on `08lc0069`. The query uses the same serialized transaction lock as keypad and state synchronization. Historical rows are merged with matching live occurrences, and repeated identical events within one panel minute are preserved with stable occurrence numbers. Imported historical entries never call the live event state machine and therefore cannot create alarm/chime/printer/keypad side effects.
+
+The protocol parser also recognizes `08XF` (Communication Off) and `10DC` (Display Changed). `08XF` drives the **Automation Interface Available** diagnostic. `10DC` is logged passively only until it is observed and validated on the current panel.
 
 ## Startup synchronization
 

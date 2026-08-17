@@ -77,6 +77,18 @@ def diagnostic_entities(topic: TopicFn) -> dict[str, tuple[str, dict]]:
                 "entity_category": "diagnostic",
             },
         ),
+        "automation_available": (
+            "binary_sensor",
+            {
+                "name": "Automation Interface Available",
+                "unique_id": "vista128_automation_available",
+                "state_topic": topic("panel/automation_available"),
+                "payload_on": "ON",
+                "payload_off": "OFF",
+                "device_class": "connectivity",
+                "entity_category": "diagnostic",
+            },
+        ),
         "rx_frames": (
             "sensor",
             {
@@ -229,7 +241,9 @@ def event_history_config(topic: TopicFn) -> dict:
         "json_attributes_topic": topic("event_history/attributes"),
         "icon": "mdi:history",
         "device": device_info(),
-        **panel_entity_availability(topic),
+        "availability_topic": topic("bridge/availability"),
+        "payload_available": "online",
+        "payload_not_available": "offline",
     }
 
 
