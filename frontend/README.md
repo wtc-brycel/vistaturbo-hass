@@ -19,17 +19,17 @@ From the Home Assistant Terminal or SSH add-on:
 
 ```sh
 mkdir -p /config/www
-curl -fL "https://github.com/wtc-brycel/vistaturbo-hass/releases/download/v0.2.6-rc.1/vista-keypad-card.js" \
+curl -fL "https://github.com/wtc-brycel/vistaturbo-hass/releases/download/v0.2.6-rc.2/vista-keypad-card.js" \
   -o /config/www/vista-keypad-card.js
 ```
 
 Then add the card as a Lovelace JavaScript module under **Settings -> Dashboards -> Resources**:
 
 ```text
-/local/vista-keypad-card.js?v=0.3.13
+/local/vista-keypad-card.js?v=0.3.14
 ```
 
-If an older version of the card was already loaded, keeping the `?v=0.3.13` suffix forces Home Assistant/browser cache invalidation after the file is replaced.
+The version suffix is intentional. Change it whenever the JavaScript file is replaced so Home Assistant and mobile browsers do not reuse a stale cached copy.
 
 A minimal 6160CR-2 card is:
 
@@ -97,9 +97,20 @@ case_color: red
 
 AUTO first uses Home Assistant's `hass.themes.darkMode`. If that flag is unavailable, the card falls back to the browser's `prefers-color-scheme` setting.
 
-## Responsive sizing
+## Responsive and mobile behavior
 
-The physical keypad keeps its fixed enclosure aspect ratio as the Lovelace column narrows. There is no forced minimum height that can stretch the enclosure vertically. Button, legend, annunciator-label, border, and spacing dimensions scale from the card container width, with additional narrow-container adjustments below 520 px and 360 px.
+The physical keypad keeps its fixed enclosure aspect ratio as the Lovelace column narrows. There is no forced minimum height that can stretch the enclosure vertically. Button, legend, annunciator-label, border, and spacing dimensions scale from the card container width, with narrow-container adjustments below 520 px and 360 px.
+
+Card `0.3.14` adds several mobile-specific protections:
+
+- the LCD canvas is redrawn with a `ResizeObserver` when its rendered size changes
+- orientation changes and Lovelace column resizing no longer leave a stretched LCD bitmap
+- `pointercancel` clears pressed-key feedback when a touch becomes a page scroll or gesture
+- unrelated Home Assistant state changes are filtered out so they do not rebuild the full Shadow DOM and canvas
+- browser-level light/dark changes are observed when Home Assistant does not provide an explicit theme mode
+- Home Assistant grid layout hints prefer a 6-column minimum and allow a full 12-column keypad
+
+The current narrow layout remains a scaled physical keypad. The full CR-2 annunciator label stack is intentionally preserved for the first real-device test. A later compact mode can render the same seven states as abbreviated lamps or icons without changing the backend.
 
 ## 6160CR-2 annunciators
 
