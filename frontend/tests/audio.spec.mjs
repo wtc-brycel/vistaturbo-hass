@@ -202,3 +202,23 @@ test("sound and haptic feedback remain off by default", async ({ page }) => {
   expect(config.sound.enabled).toBe(false);
   expect(config.haptic.enabled).toBe(false);
 });
+
+
+test("sound-enabled card exposes a small audio flag and any dashboard interaction can unlock it", async ({ page }) => {
+  await mountAudioCard(page);
+  await page.evaluate(() => {
+    const card = document.getElementById("card");
+    card._audio.ctx = { state: "suspended" };
+    card._audio.unlock = async () => {
+      card._audio.ctx = { state: "running" };
+      return true;
+    };
+    card._syncAudioUnlockListener();
+  });
+  let hidden = await page.evaluate(() => document.getElementById("card").shadowRoot.getElementById("audio-lock-flag").hidden);
+  expect(hidden).toBe(false);
+  await page.dispatchEvent("body", "pointerdown");
+  await page.waitForTimeout(20);
+  hidden = await page.evaluate(() => document.getElementById("card").shadowRoot.getElementById("audio-lock-flag").hidden);
+  expect(hidden).toBe(true);
+});

@@ -2,10 +2,11 @@
 
 Home Assistant dashboard card for keypad-display entities published by Vista Turbo RS232.
 
-The card currently implements two keypad models:
+The card currently implements three keypad models:
 
 - `6160cr2`, modeled after the commercial fire/burglary keypad
 - `6160`, modeled after the standard alpha keypad
+- `firstalert`, a First Alert-inspired adaptive skin that uses a horizontal composition when wide and a portrait composition when narrow
 
 Both models use the same live VISTA data. The LCD is rendered from the exact 16-character `line_1` and `line_2` attributes from `sensor.vista_partition_1_keypad`.
 
@@ -87,6 +88,20 @@ Compact behavior is declared in `MODEL_PROFILES` rather than hard-coded into the
 The generic compact renderer then provides the LCD, status strip, touch-grid geometry, case theme, responsive breakpoints, and input handling. A future panel therefore does not need a separate mobile UI implementation.
 
 Home Assistant grid hints allow the card to shrink to four grid columns because compact mode remains usable at that width.
+
+
+## First Alert-inspired skin
+
+`model: firstalert` is intentionally inspired by the supplied First Alert keypad examples rather than being a pixel-for-pixel reproduction. AUTO layout uses a low, horizontal keypad on wider Lovelace cards and a tall portrait keypad at the compact breakpoint. Both forms keep the same 16-key VISTA input surface: the numeric keys use First Alert-style secondary legends and the A/B/C/D function keys are presented as separate round function buttons. The same seven available CR-2 status fields are adapted into a compact First Alert-style indicator rail.
+
+```yaml
+type: custom:vista-keypad-card
+entity: sensor.vista_partition_1_keypad
+model: firstalert
+layout: auto
+```
+
+The default AUTO enclosure mapping is white in light mode and dark in dark mode. Red remains available as an explicit case color.
 
 ## Case colors and theme following
 
@@ -183,7 +198,7 @@ chime_zones: "1,2,5-8,27"
 
 An empty value disables bridge-generated chimes. When a configured zone produces the validated real-time `F5` Fault event, the bridge increments `chime_sequence` on the affected partition keypad entity and publishes `chime_zone`, `chime_descriptor`, and `chime_at`. Every card using that keypad entity can then react to the same authoritative chime event without maintaining a separate list.
 
-Audio autoplay restrictions still apply. A browser may require one user interaction before Web Audio can start; pressing a keypad key or explicitly unlocking audio satisfies that requirement in supported browsers. Haptic feedback is best-effort and only runs when the browser exposes `navigator.vibrate()`.
+Audio autoplay restrictions still apply. When sound is enabled, the card listens for the first pointer or keyboard interaction anywhere on the Lovelace page and uses that user gesture to unlock its AudioContext. A small `AUDIO` flag remains visible only while audio is still blocked and can be tapped as an explicit fallback. Haptic feedback is best-effort and only runs when the browser exposes `navigator.vibrate()`.
 
 ## 6160CR-2 annunciators
 

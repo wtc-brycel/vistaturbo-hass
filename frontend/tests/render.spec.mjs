@@ -153,3 +153,59 @@ test("Lovelace grid contract permits four-column compact placement", async ({ pa
   const state = await renderedState(page);
   expect(state.grid).toEqual({ columns: 12, min_columns: 4, max_columns: 12 });
 });
+
+
+test("First Alert AUTO uses horizontal wide and portrait narrow compositions", async ({ page }) => {
+  await mountCard(page, { width: 760, model: "firstalert" });
+  let state = await page.evaluate(() => {
+    const root = document.getElementById("card").shadowRoot;
+    const wide = root.querySelector(".layout-physical-view .firstalert-wide");
+    const portrait = root.querySelector(".layout-compact-view .firstalert-portrait");
+    const wr = wide.getBoundingClientRect();
+    return {
+      wideVisible: getComputedStyle(root.querySelector(".layout-physical-view")).display !== "none",
+      portraitVisible: getComputedStyle(root.querySelector(".layout-compact-view")).display !== "none",
+      wideRatio: wr.width / wr.height,
+      statusCount: wide.querySelectorAll(".fa-status .compact-indicator").length,
+      functionLabels: [...wide.querySelectorAll(".fa-function-bank .function-label")].map((el) => el.textContent.trim()),
+      legends: [...wide.querySelectorAll(".fa-numeric-grid .number-legend")].map((el) => el.textContent.trim()),
+    };
+  });
+  expect(state.wideVisible).toBe(true);
+  expect(state.portraitVisible).toBe(false);
+  expect(state.wideRatio).toBeGreaterThan(1.5);
+  expect(state.statusCount).toBe(7);
+  expect(state.functionLabels).toEqual(["A", "B", "C", "D"]);
+  expect(state.legends).toContain("SELECT");
+  expect(state.legends).toContain("SCROLL");
+
+  await mountCard(page, { width: 390, model: "firstalert" });
+  state = await page.evaluate(() => {
+    const root = document.getElementById("card").shadowRoot;
+    const portrait = root.querySelector(".layout-compact-view .firstalert-portrait");
+    const pr = portrait.getBoundingClientRect();
+    return {
+      physicalVisible: getComputedStyle(root.querySelector(".layout-physical-view")).display !== "none",
+      compactVisible: getComputedStyle(root.querySelector(".layout-compact-view")).display !== "none",
+      portraitRatio: pr.height / pr.width,
+      statusCount: portrait.querySelectorAll(".fa-status .compact-indicator").length,
+      functionLabels: [...portrait.querySelectorAll(".fa-function-bank .function-label")].map((el) => el.textContent.trim()),
+      keyCount: portrait.querySelectorAll("button[data-key]").length,
+    };
+  });
+  expect(state.physicalVisible).toBe(false);
+  expect(state.compactVisible).toBe(true);
+  expect(state.portraitRatio).toBeGreaterThan(1.0);
+  expect(state.statusCount).toBe(7);
+  expect(state.functionLabels).toEqual(["A", "B", "C", "D"]);
+  expect(state.keyCount).toBe(16);
+});
+
+test("First Alert AUTO case follows white day and dark night defaults", async ({ page }) => {
+  await mountCard(page, { width: 390, model: "firstalert", dark: false });
+  let caseColor = await page.evaluate(() => document.getElementById("card").shadowRoot.querySelector(".firstalert-portrait").dataset.caseColor);
+  expect(caseColor).toBe("white");
+  await mountCard(page, { width: 390, model: "firstalert", dark: true });
+  caseColor = await page.evaluate(() => document.getElementById("card").shadowRoot.querySelector(".firstalert-portrait").dataset.caseColor);
+  expect(caseColor).toBe("dark");
+});

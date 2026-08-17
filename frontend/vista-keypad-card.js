@@ -1,16 +1,21 @@
-const VISTA_KEYPAD_CARD_VERSION = "0.3.16";
+const VISTA_KEYPAD_CARD_VERSION = "0.3.17";
 
 const MODEL_ALIASES = {
   "6160cr2": "6160cr2",
   "6160cr-2": "6160cr2",
   "cr2": "6160cr2",
   "6160": "6160",
+  "firstalert": "firstalert",
+  "first-alert": "firstalert",
+  "first_alert": "firstalert",
+  "fa": "firstalert",
 };
 
 const CASE_COLORS = new Set(["red", "white", "dark"]);
 const AUTO_CASE_DEFAULTS = {
   "6160cr2": { day: "red", night: "dark" },
   "6160": { day: "white", night: "dark" },
+  "firstalert": { day: "white", night: "dark" },
 };
 
 const NUMBER_KEYS = [
@@ -20,10 +25,18 @@ const NUMBER_KEYS = [
   ["*", "READY"], ["0", ""], ["#", ""],
 ];
 
+const FIRST_ALERT_NUMBER_KEYS = [
+  ["1", "OFF"], ["2", "SELECT"], ["3", "SCROLL"],
+  ["4", "MAX"], ["5", "TEST"], ["6", "BYPASS"],
+  ["7", "INSTANT"], ["8", "CODE"], ["9", "CHIME"],
+  ["*", "READY"], ["0", ""], ["#", ""],
+];
+
 const FUNCTION_IDS = ["a", "b", "c", "d"];
 const DEFAULT_FUNCTION_KEYS = {
   "6160cr2": ["AWAY", "STAY", "POLICE", "PAGE"],
   "6160": ["", "", "", ""],
+  "firstalert": ["A", "B", "C", "D"],
 };
 
 /*
@@ -51,6 +64,20 @@ const MODEL_PROFILES = {
       { label: "ARMED", state: "armed", className: "armed", flash: "armed" },
     ],
   },
+  "firstalert": {
+    compactFunctionKeys: ["A", "B", "C", "D"],
+    numberKeys: FIRST_ALERT_NUMBER_KEYS,
+    compactIndicators: [
+      { label: "PWR", state: "power", className: "power", flash: "power" },
+      { label: "READY", state: "ready", className: "ready", flash: "ready" },
+      { label: "ARMED", state: "armed", className: "armed", flash: "armed" },
+      { label: "FIRE", state: "fireAlarm", className: "fire-alarm", flash: "fire_alarm" },
+      { label: "SIL", state: "silenced", className: "silenced", flash: "silenced" },
+      { label: "SUPV", state: "supervisory", className: "supervisory", flash: "supervisory" },
+      { label: "TRBL", state: "trouble", className: "trouble", flash: null },
+    ],
+  },
+
 };
 
 const LAYOUT_MODES = new Set(["auto", "physical", "compact"]);
@@ -319,10 +346,12 @@ class VistaKeypadCard extends HTMLElement {
     this._audio = new VistaKeypadAudio();
     this._haptics = new VistaKeypadHaptics();
     this._feedbackSnapshot = null;
+    this._audioUnlockHandler = null;
   }
 
   connectedCallback() {
     this._installThemeListener();
+    this._syncAudioUnlockListener();
   }
 
   disconnectedCallback() {
@@ -342,6 +371,7 @@ class VistaKeypadCard extends HTMLElement {
     this._themeMedia = null;
     this._themeMediaHandler = null;
     clearTimeout(this._pressTimer);
+    this._removeAudioUnlockListener();
     this._audio.stopAll();
     this._haptics.stop();
   }
@@ -365,6 +395,42 @@ class VistaKeypadCard extends HTMLElement {
     }
   }
 
+  _audioUnlocked() {
+    return this._audio.ctx?.state === "running";
+  }
+
+  _removeAudioUnlockListener() {
+    if (!this._audioUnlockHandler || typeof window === "undefined") return;
+    window.removeEventListener("pointerdown", this._audioUnlockHandler, true);
+    window.removeEventListener("keydown", this._audioUnlockHandler, true);
+    this._audioUnlockHandler = null;
+  }
+
+  _updateAudioFlag() {
+    const flag = this.shadowRoot?.getElementById("audio-lock-flag");
+    if (!flag) return;
+    flag.hidden = !this._config?.sound?.enabled || this._audioUnlocked();
+  }
+
+  _syncAudioUnlockListener() {
+    if (!this._config?.sound?.enabled || this._audioUnlocked()) {
+      this._removeAudioUnlockListener();
+      this._updateAudioFlag();
+      return;
+    }
+    if (!this._audioUnlockHandler && typeof window !== "undefined") {
+      this._audioUnlockHandler = () => {
+        this._audio.unlock().then(() => {
+          if (this._audioUnlocked()) this._removeAudioUnlockListener();
+          this._updateAudioFlag();
+        }).catch(() => {});
+      };
+      window.addEventListener("pointerdown", this._audioUnlockHandler, true);
+      window.addEventListener("keydown", this._audioUnlockHandler, true);
+    }
+    this._updateAudioFlag();
+  }
+
   static getStubConfig() {
     return {
       entity: "sensor.vista_partition_1_keypad",
@@ -381,7 +447,7 @@ class VistaKeypadCard extends HTMLElement {
     if (!config?.entity) throw new Error("vista-keypad-card requires an entity");
 
     const model = MODEL_ALIASES[String(config.model ?? "6160cr2").toLowerCase()];
-    if (!model) throw new Error("model must be 6160cr2 or 6160");
+    if (!model) throw new Error("model must be 6160cr2, 6160, or firstalert");
 
     const caseColor = String(config.case_color ?? "auto").toLowerCase();
     if (caseColor !== "auto" && !CASE_COLORS.has(caseColor)) {
@@ -457,6 +523,7 @@ class VistaKeypadCard extends HTMLElement {
     this._feedbackSnapshot = null;
     this._lastRenderSignature = null;
     if (this._hass) this._syncFeedback(true);
+    this._syncAudioUnlockListener();
     this._render();
     this._lastRenderSignature = this._renderSignature(this._hass);
   }
@@ -572,6 +639,7 @@ class VistaKeypadCard extends HTMLElement {
 
   _syncFeedback(suppressOneShots = false) {
     const sound = this._config?.sound ?? {};
+    this._syncAudioUnlockListener();
     const display = this._config ? this._displayState() : null;
     if (!display) return;
 
@@ -745,7 +813,8 @@ class VistaKeypadCard extends HTMLElement {
       (_, i) => `<div class="grid-slot function-slot slot-r${i + 1}">${this._functionKey(i, model, compact)}</div>`
     ).join("");
 
-    const numeric = NUMBER_KEYS.map(([key, legend], i) => {
+    const numberKeys = MODEL_PROFILES[model]?.numberKeys ?? NUMBER_KEYS;
+    const numeric = numberKeys.map(([key, legend], i) => {
       const row = Math.floor(i / 3) + 1;
       const col = (i % 3) + 2;
       return `<div class="grid-slot numeric-slot slot-r${row} slot-c${col}">${this._numberKey(key, legend)}</div>`;
@@ -823,7 +892,46 @@ class VistaKeypadCard extends HTMLElement {
     </div>`;
   }
 
+  _firstAlertStatus(display) {
+    const indicators = MODEL_PROFILES.firstalert.compactIndicators;
+    return `<div class="fa-status" aria-label="Keypad status">
+      ${indicators.map((item) => this._compactIndicator(item, display)).join("")}
+    </div>`;
+  }
+
+  _firstAlertControls(portrait = false) {
+    const functions = FUNCTION_IDS.map(
+      (_, i) => `<div class="fa-function-slot">${this._functionKey(i, "firstalert", true)}</div>`
+    ).join("");
+    const numeric = FIRST_ALERT_NUMBER_KEYS.map(
+      ([key, legend]) => `<div class="fa-number-slot">${this._numberKey(key, legend)}</div>`
+    ).join("");
+    return `<div class="fa-control-layout ${portrait ? "fa-controls-portrait" : "fa-controls-wide"}">
+      <div class="fa-function-bank">${functions}</div>
+      <div class="fa-numeric-grid">${numeric}</div>
+    </div>`;
+  }
+
+  _renderFirstAlert(display, portrait = false) {
+    const resolvedCaseColor = this._resolvedCaseColor("firstalert");
+    const caseClass = `case-${resolvedCaseColor}`;
+    const orientation = portrait ? "firstalert-portrait" : "firstalert-wide";
+    return `<div class="firstalert-shell ${orientation} ${caseClass}" data-model="firstalert" data-case-color="${escapeHtml(resolvedCaseColor)}">
+      <div class="fa-lcd-panel">
+        <canvas class="matrix-lcd"
+          data-lcd-style="firstalert"
+          data-line1="${escapeHtml(display.line1)}"
+          data-line2="${escapeHtml(display.line2)}"
+          data-lit="${display.backlight && display.available ? "1" : "0"}"></canvas>
+      </div>
+      ${this._firstAlertStatus(display)}
+      ${this._firstAlertControls(portrait)}
+      <div class="fa-brand" aria-hidden="true">FIRST ALERT STYLE</div>
+    </div>`;
+  }
+
   _renderCompact(model, display) {
+    if (model === "firstalert") return this._renderFirstAlert(display, true);
     const resolvedCaseColor = this._resolvedCaseColor(model);
     const caseClass = `case-${resolvedCaseColor}`;
 
@@ -840,6 +948,7 @@ class VistaKeypadCard extends HTMLElement {
   }
 
   _renderPhysical(model, display) {
+    if (model === "firstalert") return this._renderFirstAlert(display, false);
     const isCR2 = model === "6160cr2";
     const resolvedCaseColor = this._resolvedCaseColor(model);
     const caseClass = `case-${resolvedCaseColor}`;
@@ -902,7 +1011,7 @@ class VistaKeypadCard extends HTMLElement {
         color:var(--primary-text-color);
       }
 
-      .keypad-shell, .keypad-shell *, .compact-shell, .compact-shell * { box-sizing:border-box; }
+      .keypad-shell, .keypad-shell *, .compact-shell, .compact-shell *, .firstalert-shell, .firstalert-shell * { box-sizing:border-box; }
 
       .keypad-shell {
         --case-red:#d71f26;
@@ -1725,6 +1834,239 @@ class VistaKeypadCard extends HTMLElement {
         }
       }
 
+      /* First Alert-inspired skin: horizontal when wide, portrait when compact. */
+      .firstalert-shell {
+        position:relative;
+        width:100%;
+        max-width:940px;
+        min-width:0;
+        overflow:hidden;
+        user-select:none;
+        -webkit-tap-highlight-color:transparent;
+        border:1px solid;
+        filter:drop-shadow(0 7px 10px rgba(0,0,0,.22));
+        font-family:"Arial Narrow","Roboto Condensed",Arial,sans-serif;
+      }
+
+      .firstalert-wide {
+        aspect-ratio:1.68/1;
+        padding:clamp(16px,2.6cqw,28px) clamp(18px,3.4cqw,34px) clamp(13px,2.0cqw,22px);
+        border-radius:clamp(18px,3.0cqw,30px);
+      }
+
+      .firstalert-portrait {
+        width:min(100%,520px);
+        padding:14px 14px 12px;
+        border-radius:24px;
+      }
+
+      .fa-lcd-panel {
+        padding:5px;
+        background:linear-gradient(180deg,#343a40,#11161b 15%,#080b0e 100%);
+        border-radius:12px;
+        box-shadow:inset 0 2px 4px rgba(0,0,0,.78),0 1px 1px rgba(255,255,255,.2);
+      }
+
+      .firstalert-wide .fa-lcd-panel {
+        width:74%;
+        height:25%;
+        margin:0 auto;
+      }
+
+      .firstalert-portrait .fa-lcd-panel {
+        width:100%;
+        height:96px;
+      }
+
+      .fa-lcd-panel .matrix-lcd {
+        border-radius:6px;
+      }
+
+      .fa-status {
+        display:grid;
+        align-items:center;
+        gap:6px;
+      }
+
+      .firstalert-wide .fa-status {
+        width:82%;
+        grid-template-columns:repeat(7,minmax(0,1fr));
+        margin:clamp(7px,1.15cqw,12px) auto clamp(8px,1.3cqw,14px);
+      }
+
+      .firstalert-portrait .fa-status {
+        grid-template-columns:repeat(4,minmax(0,1fr));
+        margin:9px 0 10px;
+      }
+
+      .fa-status .compact-indicator.led-row {
+        min-height:28px;
+        min-width:0;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        gap:5px;
+        padding:3px 4px;
+        border:0;
+        border-radius:8px;
+        background:rgba(0,0,0,.045);
+      }
+
+      .firstalert-shell.case-dark .fa-status .compact-indicator.led-row,
+      .firstalert-shell.case-red .fa-status .compact-indicator.led-row {
+        background:rgba(0,0,0,.14);
+      }
+
+      .fa-status .compact-indicator .led {
+        width:11px;
+        height:11px;
+        border-radius:50%;
+        outline-width:1px;
+        outline-offset:1px;
+      }
+
+      .fa-status .compact-indicator-label {
+        font-size:clamp(8px,1.45cqw,11px);
+        font-weight:700;
+      }
+
+      .fa-control-layout {
+        width:100%;
+        min-width:0;
+      }
+
+      .fa-controls-wide {
+        display:grid;
+        grid-template-columns:minmax(62px,16%) minmax(0,1fr);
+        align-items:stretch;
+        gap:clamp(12px,2.1cqw,22px);
+        width:68%;
+        margin:0 auto;
+      }
+
+      .fa-controls-wide .fa-function-bank {
+        display:grid;
+        grid-template-rows:repeat(4,1fr);
+        gap:clamp(5px,.8cqw,9px);
+      }
+
+      .fa-controls-wide .fa-numeric-grid {
+        display:grid;
+        grid-template-columns:repeat(3,minmax(0,1fr));
+        grid-template-rows:repeat(4,clamp(38px,5.25cqw,52px));
+        gap:clamp(5px,.8cqw,9px) clamp(7px,1.2cqw,12px);
+      }
+
+      .fa-controls-portrait {
+        display:flex;
+        flex-direction:column;
+      }
+
+      .fa-controls-portrait .fa-numeric-grid {
+        order:1;
+        display:grid;
+        grid-template-columns:repeat(3,minmax(0,1fr));
+        grid-template-rows:repeat(4,52px);
+        gap:8px;
+      }
+
+      .fa-controls-portrait .fa-function-bank {
+        order:2;
+        display:grid;
+        grid-template-columns:repeat(4,minmax(0,1fr));
+        gap:8px;
+        margin-top:10px;
+      }
+
+      .firstalert-shell .physical-key {
+        width:100%;
+        height:100%;
+        min-height:44px;
+        padding:0 5px;
+        border:1px solid #7d7f80;
+        border-radius:999px;
+        background:linear-gradient(180deg,#fff 0%,#f0f0ef 28%,#d8d9d8 100%);
+        color:#404345;
+        box-shadow:0 2px 3px rgba(0,0,0,.20),inset 0 1px 1px rgba(255,255,255,.88);
+      }
+
+      .firstalert-shell.case-dark .physical-key {
+        border-color:#64696d;
+        background:linear-gradient(180deg,#6b7074 0%,#4d5256 30%,#34383b 100%);
+        color:#f5f6f6;
+      }
+
+      .firstalert-shell.case-red .physical-key {
+        border-color:#992027;
+        background:linear-gradient(180deg,#fff 0%,#f2e9e8 28%,#dcc6c5 100%);
+        color:#421a1d;
+      }
+
+      .firstalert-shell .fa-function-bank .physical-key {
+        aspect-ratio:1/1;
+        width:min(100%,54px);
+        min-width:44px;
+        justify-self:center;
+        border-radius:50%;
+      }
+
+      .firstalert-shell .function-label {
+        font-size:clamp(12px,2.0cqw,18px);
+        font-weight:800;
+      }
+
+      .firstalert-shell .number-main {
+        font-size:clamp(20px,3.8cqw,31px);
+        transform:none;
+        font-weight:600;
+      }
+
+      .firstalert-shell .number-legend {
+        font-size:clamp(7px,1.15cqw,10px);
+        font-style:normal;
+        font-weight:600;
+      }
+
+      .firstalert-portrait .number-main {
+        font-size:26px;
+      }
+
+      .firstalert-portrait .number-legend {
+        font-size:9px;
+      }
+
+      .firstalert-portrait .fa-function-bank .physical-key {
+        width:min(100%,52px);
+        height:52px;
+      }
+
+      .fa-brand {
+        margin-top:clamp(7px,1.1cqw,12px);
+        text-align:center;
+        font:800 clamp(9px,1.5cqw,13px)/1 sans-serif;
+        letter-spacing:.06em;
+        opacity:.28;
+      }
+
+      .audio-lock-flag {
+        position:absolute;
+        z-index:30;
+        top:5px;
+        right:5px;
+        min-height:24px;
+        padding:3px 7px;
+        border:1px solid rgba(150,108,0,.45);
+        border-radius:999px;
+        background:rgba(255,202,40,.94);
+        color:#332700;
+        box-shadow:0 1px 3px rgba(0,0,0,.18);
+        font:800 9px/1 sans-serif;
+        letter-spacing:.03em;
+        cursor:pointer;
+      }
+
+      .audio-lock-flag[hidden] { display:none !important; }
+
       .read-only-note {
         min-height:18px;
         opacity:0;
@@ -1776,9 +2118,17 @@ class VistaKeypadCard extends HTMLElement {
     const w = rect.width;
     const h = rect.height;
     const lit = canvas.dataset.lit === "1";
+    const firstAlertLcd = canvas.dataset.lcdStyle === "firstalert";
 
     const bg = ctx.createLinearGradient(0, 0, 0, h);
-    if (lit) {
+    if (firstAlertLcd && lit) {
+      bg.addColorStop(0, "#e7eff6");
+      bg.addColorStop(.5, "#d7e3ed");
+      bg.addColorStop(1, "#c7d5e0");
+    } else if (firstAlertLcd) {
+      bg.addColorStop(0, "#9ca8b0");
+      bg.addColorStop(1, "#808b92");
+    } else if (lit) {
       bg.addColorStop(0, "#b2ed54");
       bg.addColorStop(.5, "#9ee247");
       bg.addColorStop(1, "#88cb38");
@@ -1790,7 +2140,9 @@ class VistaKeypadCard extends HTMLElement {
     ctx.fillStyle = bg;
     ctx.fillRect(0, 0, w, h);
 
-    ctx.fillStyle = lit ? "rgba(33,80,23,.055)" : "rgba(25,42,24,.065)";
+    ctx.fillStyle = firstAlertLcd
+      ? (lit ? "rgba(34,54,70,.035)" : "rgba(30,42,50,.05)")
+      : (lit ? "rgba(33,80,23,.055)" : "rgba(25,42,24,.065)");
     const grid = Math.max(2.5, w / 120);
     for (let x = 0; x < w; x += grid) ctx.fillRect(x, 0, 1, h);
     for (let y = 0; y < h; y += grid) ctx.fillRect(0, y, w, 1);
@@ -1804,7 +2156,9 @@ class VistaKeypadCard extends HTMLElement {
     const gap = dot * .19;
     const px = dot - gap;
 
-    ctx.fillStyle = lit ? "#17341a" : "#253126";
+    ctx.fillStyle = firstAlertLcd
+      ? (lit ? "#2d3944" : "#29343b")
+      : (lit ? "#17341a" : "#253126");
 
     lines.forEach((line, rowIndex) => {
       [...line].forEach((rawChar, charIndex) => {
@@ -1859,6 +2213,7 @@ class VistaKeypadCard extends HTMLElement {
     this.shadowRoot.innerHTML = `<style>${this._styles()}</style><ha-card><div class="wrap">
       ${this._config.title ? `<div class="card-title">${escapeHtml(this._config.title)}</div>` : ""}
       <div class="layout-host ${layoutClass}">
+        ${this._config.sound?.enabled ? `<button id="audio-lock-flag" class="audio-lock-flag" type="button" aria-label="Keypad audio is locked. Tap to enable audio." ${this._audioUnlocked() ? "hidden" : ""}>AUDIO</button>` : ""}
         <div class="layout-physical-view">${this._renderPhysical(this._config.model, display)}</div>
         <div class="layout-compact-view">${this._renderCompact(this._config.model, display)}</div>
       </div>
@@ -1868,6 +2223,15 @@ class VistaKeypadCard extends HTMLElement {
     requestAnimationFrame(() => {
       this._drawLCD();
       this._observeResize();
+      this._updateAudioFlag();
+    });
+
+    const audioFlag = this.shadowRoot.getElementById("audio-lock-flag");
+    audioFlag?.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      await this._audio.unlock().catch(() => false);
+      this._syncAudioUnlockListener();
+      this._updateAudioFlag();
     });
 
     this.shadowRoot.querySelectorAll("button[data-key]").forEach((button) => {
@@ -1919,7 +2283,7 @@ window.customCards = window.customCards || [];
 window.customCards.push({
   type: "vista-keypad-card",
   name: "Vista Keypad",
-  description: "Physical VISTA keypad card with 6160CR-2 and 6160 skins.",
+  description: "Adaptive VISTA keypad card with 6160CR-2, 6160, and First Alert-inspired skins.",
   preview: false,
   documentationURL: "https://github.com/wtc-brycel/vistaturbo-hass/tree/main/frontend",
 });
