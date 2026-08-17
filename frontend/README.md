@@ -20,14 +20,14 @@ From the Home Assistant Terminal or SSH add-on:
 
 ```sh
 mkdir -p /config/www
-curl -fL "https://github.com/wtc-brycel/vistaturbo-hass/releases/download/v0.2.6-rc.5/vista-keypad-card.js" \
+curl -fL "https://github.com/wtc-brycel/vistaturbo-hass/releases/download/v0.2.6-rc.6/vista-keypad-card.js" \
   -o /config/www/vista-keypad-card.js
 ```
 
 Then add the card as a Lovelace JavaScript module under **Settings -> Dashboards -> Resources**:
 
 ```text
-/local/vista-keypad-card.js?v=0.3.18
+/local/vista-keypad-card.js?v=0.3.19
 ```
 
 The version suffix is intentional. Change it whenever the JavaScript file is replaced so Home Assistant and mobile browsers do not reuse a stale cached copy.

@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.2.6-rc.6
+
+- Add a persistent SQLite VISTA event journal at `/data/vista128_events.sqlite3`.
+- Journal live `nq` system events with event code, panel time, partition, zone, user, descriptor, and source metadata.
+- Add optional startup import of the documented VISTA historical event log using `08LD00A8`, `ld` entries, and the `08lc0069` completion packet.
+- Leave historical startup import disabled by default pending physical VISTA-128BPT validation; live SQLite journaling is enabled by default.
+- Keep imported historical events isolated from live state changes, chimes, sounds, keypad refreshes, and printer receipts.
+- Deduplicate repeated historical imports while preserving multiple identical events that genuinely occur within the same panel minute.
+- Backfill programmed zone descriptors into existing journal rows when descriptors become available.
+- Add the Home Assistant **Event Journal** sensor with a configurable 1-100 row recent window instead of copying the full database into HA state.
+- Keep the Event Journal available while the panel TCP link is down as long as the bridge remains online.
+- Add card `0.3.19` with `custom:vista-event-log-card`, responsive recent-event rows, partition filtering, live/history/both source labels, and a visual editor.
+- Recognize `08XF` Communication Off and expose an **Automation Interface Available** diagnostic.
+- Recognize `10DC` Display Changed passively without assuming refresh behavior until observed on the test panel.
+- Add C7 Fail To Arm and C8 Fail To Disarm event descriptions.
+- Keep all alarm and keypad control read-only.
+
 ## 0.2.6-rc.5
 
 - Add card `0.3.18` with a Home Assistant visual editor exposed through the custom-card `getConfigElement()` contract.
