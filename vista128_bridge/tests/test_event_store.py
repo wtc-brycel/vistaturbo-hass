@@ -1,4 +1,5 @@
 import os
+import sqlite3
 import sys
 import tempfile
 import unittest
@@ -24,7 +25,40 @@ def sample_event() -> SystemEvent:
     )
 
 
+class TrackingEventStore(EventStore):
+    def __init__(self, path: str) -> None:
+        self.opened_connections = []
+        super().__init__(path)
+
+    def _connect(self):
+        db = super()._connect()
+        self.opened_connections.append(db)
+        return db
+
+    def assert_all_closed(self, testcase: unittest.TestCase) -> None:
+        for db in self.opened_connections:
+            with testcase.assertRaises(sqlite3.ProgrammingError):
+                db.execute("SELECT 1")
+
+
 class EventStoreTests(unittest.TestCase):
+    def test_connections_are_closed_after_each_operation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = TrackingEventStore(os.path.join(tmp, "events.sqlite3"))
+            store.assert_all_closed(self)
+
+            event = sample_event()
+            store.record(event, source="live", received_at="2026-08-15T03:21:05-04:00")
+            store.update_descriptor(0, "SYSTEM")
+            store.finish_history_dump(
+                completed_at="2026-08-17T10:00:01-04:00",
+                seen=1,
+                inserted=1,
+            )
+            store.stats()
+            store.recent(20)
+            store.assert_all_closed(self)
+
     def test_live_and_history_observations_dedupe_into_one_journal_row(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = EventStore(os.path.join(tmp, "events.sqlite3"))
