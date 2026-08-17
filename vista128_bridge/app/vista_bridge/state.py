@@ -5,6 +5,10 @@ from dataclasses import dataclass, field
 from .event_codes import (
     ALARM_RESTORE_TO_START,
     ALARM_START_CODES,
+    AUXILIARY_RESTORE_TO_START,
+    AUXILIARY_START_CODES,
+    BURGLARY_RESTORE_TO_START,
+    BURGLARY_START_CODES,
     DISARM_EVENT_CODES,
     ZONE_EVENT_TRANSITIONS,
 )
@@ -102,6 +106,8 @@ class PartitionState:
     active_alarm_tokens: set[str] = field(default_factory=set)
     active_fire_tokens: set[str] = field(default_factory=set)
     active_supervisory_tokens: set[str] = field(default_factory=set)
+    active_burglary_tokens: set[str] = field(default_factory=set)
+    active_auxiliary_tokens: set[str] = field(default_factory=set)
     fire_silenced: bool = False
 
     @property
@@ -128,6 +134,14 @@ class PartitionState:
     def supervisory_active(self) -> bool:
         return bool(self.active_supervisory_tokens)
 
+    @property
+    def burglary_alarm_active(self) -> bool:
+        return bool(self.active_burglary_tokens)
+
+    @property
+    def auxiliary_alarm_active(self) -> bool:
+        return bool(self.active_auxiliary_tokens)
+
     def attributes(self) -> dict:
         return {
             "partition": self.partition,
@@ -138,6 +152,8 @@ class PartitionState:
             "fire_alarm_active": self.fire_alarm_active,
             "fire_silenced": self.fire_silenced,
             "supervisory_active": self.supervisory_active,
+            "burglary_alarm_active": self.burglary_alarm_active,
+            "auxiliary_alarm_active": self.auxiliary_alarm_active,
             "control_enabled": False,
         }
 
@@ -156,6 +172,8 @@ class KeypadState:
     fire_alarm_led: bool | None = None
     silenced_led: bool | None = None
     supervisory_led: bool | None = None
+    burglary_alarm_led: bool | None = None
+    auxiliary_alarm_led: bool | None = None
     chime_sequence: int = 0
     chime_zone: int | None = None
     chime_descriptor: str = ""
@@ -168,6 +186,25 @@ class KeypadState:
     def ha_state(self) -> str:
         lines = [line.rstrip() for line in (self.line_1, self.line_2)]
         return " | ".join(line for line in lines if line) or "blank"
+
+    @property
+    def sound_mode(self) -> str:
+        if self.fire_alarm_led is True and self.silenced_led is not True:
+            return "fire"
+        if self.burglary_alarm_led is True:
+            return "burglary"
+        if self.auxiliary_alarm_led is True:
+            return "auxiliary"
+        if any(
+            value is None
+            for value in (
+                self.fire_alarm_led,
+                self.burglary_alarm_led,
+                self.auxiliary_alarm_led,
+            )
+        ):
+            return "unknown"
+        return "none"
 
     def attributes(self) -> dict:
         return {
@@ -182,6 +219,9 @@ class KeypadState:
             "fire_alarm": self.fire_alarm_led,
             "silenced": self.silenced_led,
             "supervisory": self.supervisory_led,
+            "burglary_alarm": self.burglary_alarm_led,
+            "auxiliary_alarm": self.auxiliary_alarm_led,
+            "sound_mode": self.sound_mode,
             "chime_sequence": self.chime_sequence,
             "chime_zone": self.chime_zone,
             "chime_descriptor": self.chime_descriptor,
@@ -211,12 +251,16 @@ class VistaState:
         for partition in self.partitions.values():
             partition.active_fire_tokens.clear()
             partition.active_supervisory_tokens.clear()
+            partition.active_burglary_tokens.clear()
+            partition.active_auxiliary_tokens.clear()
             partition.fire_silenced = False
         for keypad in self.keypads.values():
             keypad.power_led = None
             keypad.fire_alarm_led = None
             keypad.silenced_led = None
             keypad.supervisory_led = None
+            keypad.burglary_alarm_led = None
+            keypad.auxiliary_alarm_led = None
 
     def record_chime(self, partition: int, zone_number: int, received_at: str) -> KeypadState | None:
         zone = self.zones.get(zone_number)
@@ -317,6 +361,16 @@ class VistaState:
         elif normal_ready:
             keypad.supervisory_led = False
 
+        if partition_state.burglary_alarm_active:
+            keypad.burglary_alarm_led = True
+        elif normal_ready:
+            keypad.burglary_alarm_led = False
+
+        if partition_state.auxiliary_alarm_active:
+            keypad.auxiliary_alarm_led = True
+        elif normal_ready:
+            keypad.auxiliary_alarm_led = False
+
         return keypad
 
     def apply_zone_status(self, report: ZoneStatusReport) -> set[int]:
@@ -368,6 +422,7 @@ class VistaState:
         self._apply_zone_transition(event, changed_zones)
         self._apply_partition_event(event, changed_zones, changed_partitions)
         self._apply_cr2_annunciator_event(event, changed_partitions)
+        self._apply_audible_alarm_event(event, changed_partitions)
         return changed_zones, changed_partitions
 
     def _apply_zone_transition(self, event: SystemEvent, changed: set[int]) -> None:
@@ -478,6 +533,59 @@ class VistaState:
                 changed_partitions.add(event.partition)
             if keypad is not None and not partition.active_supervisory_tokens:
                 keypad.supervisory_led = False
+
+    def _apply_audible_alarm_event(
+        self,
+        event: SystemEvent,
+        changed_partitions: set[int],
+    ) -> None:
+        partition = self.partitions.get(event.partition)
+        keypad = self.keypads.get(event.partition)
+        if partition is None:
+            return
+
+        token_prefix = f"{event.zone:03d}:"
+
+        if event.code in BURGLARY_START_CODES:
+            token = token_prefix + event.code
+            if token not in partition.active_burglary_tokens:
+                partition.active_burglary_tokens.add(token)
+                changed_partitions.add(event.partition)
+            if keypad is not None:
+                keypad.burglary_alarm_led = True
+
+        burglary_start = BURGLARY_RESTORE_TO_START.get(event.code)
+        if burglary_start is not None:
+            token = token_prefix + burglary_start
+            if token in partition.active_burglary_tokens:
+                partition.active_burglary_tokens.remove(token)
+                changed_partitions.add(event.partition)
+            if keypad is not None and not partition.active_burglary_tokens:
+                keypad.burglary_alarm_led = False
+
+        if event.code in AUXILIARY_START_CODES:
+            token = token_prefix + event.code
+            if token not in partition.active_auxiliary_tokens:
+                partition.active_auxiliary_tokens.add(token)
+                changed_partitions.add(event.partition)
+            if keypad is not None:
+                keypad.auxiliary_alarm_led = True
+
+        auxiliary_start = AUXILIARY_RESTORE_TO_START.get(event.code)
+        if auxiliary_start is not None:
+            token = token_prefix + auxiliary_start
+            if token in partition.active_auxiliary_tokens:
+                partition.active_auxiliary_tokens.remove(token)
+                changed_partitions.add(event.partition)
+            if keypad is not None and not partition.active_auxiliary_tokens:
+                keypad.auxiliary_alarm_led = False
+
+        if event.code in DISARM_EVENT_CODES:
+            if partition.active_burglary_tokens:
+                partition.active_burglary_tokens.clear()
+                changed_partitions.add(event.partition)
+            if keypad is not None:
+                keypad.burglary_alarm_led = False
 
     def _set_ac_power(self, value: bool) -> None:
         self.ac_power = value

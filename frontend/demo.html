@@ -21,7 +21,7 @@
 </head>
 <body>
 <h1>Vista Turbo HASS adaptive keypad layout</h1>
-<p>Card 0.3.15 development preview. AUTO switches from physical to compact at a 520 px card-container width.</p>
+<p>Card 0.3.17 development preview with optional audio feedback and First Alert style. AUTO switches from physical to compact at a 520 px card-container width.</p>
 <div class="toolbar">
   <button id="light">HA light</button><button id="dark">HA dark</button>
   <label>Card width <input id="width" type="range" min="220" max="940" value="390" step="10"><span id="width-value">390px</span></label>
@@ -29,6 +29,7 @@
 <div class="grid">
   <section class="panel"><h2>6160CR-2 — AUTO</h2><p>physical wide / compact narrow</p><div class="demo-card"><vista-keypad-card id="cr2-auto"></vista-keypad-card></div></section>
   <section class="panel"><h2>6160 — AUTO</h2><p>same adaptive renderer; A/B/C/D compact function keys</p><div class="demo-card"><vista-keypad-card id="k6160-auto"></vista-keypad-card></div></section>
+  <section class="panel"><h2>First Alert style — AUTO</h2><p>horizontal wide / portrait narrow</p><div class="demo-card"><vista-keypad-card id="fa-auto"></vista-keypad-card></div></section>
   <section class="panel"><h2>6160CR-2 — forced PHYSICAL</h2><p>comparison at exactly the same width</p><div class="demo-card"><vista-keypad-card id="cr2-physical"></vista-keypad-card></div></section>
   <section class="panel"><h2>6160CR-2 — forced COMPACT</h2><p>touchscreen composition at any width</p><div class="demo-card"><vista-keypad-card id="cr2-compact"></vista-keypad-card></div></section>
 </div>
@@ -37,6 +38,7 @@ const hass={themes:{darkMode:false},states:{"sensor.vista_partition_1_keypad":{s
 const configs=[
  ["cr2-auto",{model:"6160cr2",layout:"auto"}],
  ["k6160-auto",{model:"6160",layout:"auto"}],
+ ["fa-auto",{model:"firstalert",layout:"auto"}],
  ["cr2-physical",{model:"6160cr2",layout:"physical"}],
  ["cr2-compact",{model:"6160cr2",layout:"compact"}],
 ];

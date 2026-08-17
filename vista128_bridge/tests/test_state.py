@@ -121,6 +121,40 @@ class StateTests(unittest.TestCase):
         self.assertTrue(keypad.silenced_led)
         self.assertTrue(state.partitions[1].fire_silenced)
 
+    def test_audible_alarm_families_drive_native_keypad_sound_state(self):
+        state = VistaState()
+        keypad = state.keypads[1]
+        keypad.initialized = True
+        keypad.fire_alarm_led = False
+        keypad.silenced_led = False
+        keypad.burglary_alarm_led = False
+        keypad.auxiliary_alarm_led = False
+
+        state.apply_system_event(SystemEvent("31", "Audible Alarm", 10, 0, 1, 0, 0, 15, 8, 26))
+        self.assertTrue(keypad.burglary_alarm_led)
+        self.assertEqual(keypad.sound_mode, "burglary")
+        state.apply_system_event(SystemEvent("32", "Audible Alarm Restore", 10, 0, 1, 0, 0, 15, 8, 26))
+        self.assertFalse(keypad.burglary_alarm_led)
+
+        state.apply_system_event(SystemEvent("B1", "24 Hour Auxiliary Alarm", 11, 0, 1, 0, 0, 15, 8, 26))
+        self.assertTrue(keypad.auxiliary_alarm_led)
+        self.assertEqual(keypad.sound_mode, "auxiliary")
+        state.apply_system_event(SystemEvent("B2", "24 Hour Auxiliary Alarm Restore", 11, 0, 1, 0, 0, 15, 8, 26))
+        self.assertFalse(keypad.auxiliary_alarm_led)
+        self.assertEqual(keypad.sound_mode, "none")
+
+    def test_silent_and_duress_events_do_not_drive_burglary_speaker_state(self):
+        state = VistaState()
+        keypad = state.keypads[1]
+        keypad.burglary_alarm_led = False
+        keypad.auxiliary_alarm_led = False
+        keypad.fire_alarm_led = False
+        keypad.silenced_led = False
+        state.apply_system_event(SystemEvent("21", "Silent Alarm", 12, 0, 1, 0, 0, 15, 8, 26))
+        state.apply_system_event(SystemEvent("11", "Duress Alarm", 0, 1, 1, 0, 0, 15, 8, 26))
+        self.assertFalse(keypad.burglary_alarm_led)
+        self.assertEqual(keypad.sound_mode, "none")
+
     def test_supervisory_start_restore_drives_cr2_annunciator(self):
         state = VistaState()
         keypad = state.apply_keypad_display(1, keypad_report(), "2026-08-16T13:22:28-04:00")

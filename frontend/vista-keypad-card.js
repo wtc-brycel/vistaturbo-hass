@@ -579,6 +579,9 @@ class VistaKeypadCard extends HTMLElement {
       a.fire_alarm ?? null,
       a.silenced ?? null,
       a.supervisory ?? null,
+      a.burglary_alarm ?? null,
+      a.auxiliary_alarm ?? null,
+      a.sound_mode ?? null,
       a.chime_sequence ?? null,
       a.chime_zone ?? null,
       a.chime_descriptor ?? null,
@@ -633,6 +636,9 @@ class VistaKeypadCard extends HTMLElement {
       fireAlarm: display.fireAlarm,
       silenced: display.silenced,
       supervisory: display.supervisory,
+      burglaryAlarm: display.burglaryAlarm,
+      auxiliaryAlarm: display.auxiliaryAlarm,
+      soundMode: display.soundMode,
       chimeSequence: display.chimeSequence,
     };
   }
@@ -644,9 +650,13 @@ class VistaKeypadCard extends HTMLElement {
     if (!display) return;
 
     let loop = null;
-    if (sound.enabled && sound.state_sounds) {
-      if (display.fireAlarm === true && display.silenced !== true) {
+    if (sound.enabled && sound.state_sounds && display.available) {
+      if (display.soundMode === "fire" || (display.soundMode === null && display.fireAlarm === true && display.silenced !== true)) {
         loop = "fire";
+      } else if (display.soundMode === "burglary" || display.burglaryAlarm === true) {
+        loop = "burglary";
+      } else if (display.soundMode === "auxiliary" || display.auxiliaryAlarm === true) {
+        loop = "auxiliary";
       } else if (this._entityActive(sound.alarm_entity, ["triggered", "alarm", "on"])) {
         loop = "burglary";
       } else if (this._entityActive(sound.aux_entity)) {
@@ -660,7 +670,7 @@ class VistaKeypadCard extends HTMLElement {
     this._feedbackSnapshot = current;
     if (suppressOneShots || !previous || !sound.enabled || !sound.state_sounds || loop) return;
 
-    if (sound.chime !== false && current.chimeSequence !== previous.chimeSequence) {
+    if (sound.chime !== false && current.chimeSequence > previous.chimeSequence) {
       this._audio.play("chime", sound).catch(() => {});
       return;
     }
@@ -713,6 +723,9 @@ class VistaKeypadCard extends HTMLElement {
         fireAlarm: null,
         silenced: null,
         supervisory: null,
+        burglaryAlarm: null,
+        auxiliaryAlarm: null,
+        soundMode: "unknown",
         chimeSequence: 0,
         chimeZone: null,
         chimeDescriptor: "",
@@ -749,6 +762,11 @@ class VistaKeypadCard extends HTMLElement {
       fireAlarm: indicator("fire_alarm", "fire_alarm", null),
       silenced: indicator("silenced", "silenced", null),
       supervisory: indicator("supervisory", "supervisory", null),
+      burglaryAlarm: a.burglary_alarm === null || a.burglary_alarm === undefined ? null : boolValue(a.burglary_alarm),
+      auxiliaryAlarm: a.auxiliary_alarm === null || a.auxiliary_alarm === undefined ? null : boolValue(a.auxiliary_alarm),
+      soundMode: ["none", "fire", "burglary", "auxiliary", "unknown"].includes(String(a.sound_mode ?? "").toLowerCase())
+        ? String(a.sound_mode).toLowerCase()
+        : null,
       chimeSequence: Number(a.chime_sequence ?? 0) || 0,
       chimeZone: a.chime_zone ?? null,
       chimeDescriptor: String(a.chime_descriptor ?? ""),

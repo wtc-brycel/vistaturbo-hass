@@ -59,6 +59,21 @@ class ReadinessTests(unittest.TestCase):
         state.apply_system_event(event("1C", partition=0))
         self.assertTrue(state.ac_power)
 
+    def test_reconnect_invalidates_native_audible_state(self):
+        state = VistaState()
+        keypad = state.keypads[1]
+        keypad.initialized = True
+        keypad.fire_alarm_led = False
+        keypad.silenced_led = False
+        keypad.burglary_alarm_led = True
+        keypad.auxiliary_alarm_led = False
+        state.partitions[1].active_burglary_tokens.add("010:31")
+        state.reset_connection_derived_annunciators()
+        self.assertIsNone(keypad.burglary_alarm_led)
+        self.assertIsNone(keypad.auxiliary_alarm_led)
+        self.assertEqual(keypad.sound_mode, "unknown")
+        self.assertFalse(state.partitions[1].active_burglary_tokens)
+
     def test_reconnect_discards_event_derived_cr2_state(self):
         state = VistaState()
         keypad = state.apply_keypad_display(1, keypad_report(), "2026-08-16T13:22:28-04:00")

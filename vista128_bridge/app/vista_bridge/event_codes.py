@@ -90,6 +90,18 @@ ALARM_RESTORE_TO_START = {
 }
 ALARM_START_CODES = set(ALARM_RESTORE_TO_START.values())
 
+BURGLARY_RESTORE_TO_START = {
+    "32": "31",  # audible alarm
+    "42": "41",  # perimeter alarm
+    "52": "51",  # interior alarm
+}
+BURGLARY_START_CODES = set(BURGLARY_RESTORE_TO_START.values())
+
+AUXILIARY_RESTORE_TO_START = {
+    "B2": "B1",  # 24 hour auxiliary alarm
+}
+AUXILIARY_START_CODES = set(AUXILIARY_RESTORE_TO_START.values())
+
 ZONE_EVENT_TRANSITIONS: dict[str, tuple[str, bool]] = {
     "03": ("trouble", True),
     "04": ("trouble", False),

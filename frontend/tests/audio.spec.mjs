@@ -23,6 +23,9 @@ function keypadState(overrides = {}) {
       fire_alarm: false,
       silenced: false,
       supervisory: false,
+      burglary_alarm: false,
+      auxiliary_alarm: false,
+      sound_mode: "none",
       chime_sequence: 0,
       chime_zone: null,
       chime_descriptor: "",
@@ -69,6 +72,7 @@ async function mountAudioCard(page, { haptic = false } = {}) {
             line_1: "P1   DISARMED   ", line_2: "READY TO ARM    ",
             ready: true, armed: false, trouble: false, backlight: true,
             power: true, fire_alarm: false, silenced: false, supervisory: false,
+            burglary_alarm: false, auxiliary_alarm: false, sound_mode: "none",
             chime_sequence: 0, chime_zone: null, chime_descriptor: "",
           },
         },
@@ -146,11 +150,49 @@ test("configured chime sequence change produces one chime profile", async ({ pag
   expect(calls.play).toEqual(["chime"]);
 });
 
+test("chime sequence rollback after bridge restart does not replay a chime", async ({ page }) => {
+  await mountAudioCard(page);
+  await installAudioSpies(page);
+  await updateStates(page, { keypad: { chime_sequence: 9 } });
+  await page.evaluate(() => { window.__audioCalls.play = []; });
+  await updateStates(page, { keypad: { chime_sequence: 0 } });
+  const calls = await page.evaluate(() => window.__audioCalls.play);
+  expect(calls).toEqual([]);
+});
+
+test("native burglary and auxiliary keypad attributes select continuous profiles", async ({ page }) => {
+  await mountAudioCard(page);
+  await installAudioSpies(page);
+  await updateStates(page, { keypad: { burglary_alarm: true, sound_mode: "burglary" } });
+  await updateStates(page, { keypad: { burglary_alarm: false, auxiliary_alarm: true, sound_mode: "auxiliary" } });
+  const loops = await page.evaluate(() => window.__audioCalls.loops);
+  expect(loops).toContain("burglary");
+  expect(loops.at(-1)).toBe("auxiliary");
+});
+
+test("unavailable keypad state stops continuous native audio", async ({ page }) => {
+  await mountAudioCard(page);
+  await installAudioSpies(page);
+  await updateStates(page, { keypad: { fire_alarm: true, silenced: false, sound_mode: "fire" } });
+  await page.evaluate((entity) => {
+    const card = document.getElementById("card");
+    card.hass = {
+      ...card._hass,
+      states: {
+        ...card._hass.states,
+        [entity]: { ...card._hass.states[entity], state: "unavailable" },
+      },
+    };
+  }, ENTITY);
+  const loops = await page.evaluate(() => window.__audioCalls.loops);
+  expect(loops.at(-1)).toBe(null);
+});
+
 test("fire loop has priority and silencing stops it", async ({ page }) => {
   await mountAudioCard(page);
   await installAudioSpies(page);
-  await updateStates(page, { keypad: { fire_alarm: true, silenced: false, trouble: true, ready: false } });
-  await updateStates(page, { keypad: { fire_alarm: true, silenced: true, trouble: true, ready: false } });
+  await updateStates(page, { keypad: { fire_alarm: true, silenced: false, trouble: true, ready: false, sound_mode: "fire" } });
+  await updateStates(page, { keypad: { fire_alarm: true, silenced: true, trouble: true, ready: false, sound_mode: "none" } });
   const loops = await page.evaluate(() => window.__audioCalls.loops);
   expect(loops.at(-2)).toBe("fire");
   expect(loops.at(-1)).toBe(null);

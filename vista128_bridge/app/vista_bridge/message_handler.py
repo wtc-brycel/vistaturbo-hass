@@ -156,6 +156,8 @@ class ProtocolMessageHandler:
         event = parse_system_event(data)
         if event is None:
             return
+        zone_before = self.state.zones.get(event.zone)
+        zone_was_faulted = bool(zone_before and zone_before.faulted)
         changed_zones, changed_partitions = self.state.apply_system_event(event)
         LOG.info(
             "Decoded event %s (%s): zone=%03d user=%03d partition=%d panel_time=%s",
@@ -181,8 +183,23 @@ class ProtocolMessageHandler:
         self._handle_system_event_side_effects(event.code)
         self.synchronizer.request_keypad_refresh(event.partition)
 
-        if event.code == "F5" and event.zone in self.settings.keypad.chime_zones:
-            keypad = self.state.record_chime(event.partition, event.zone, received_at)
+        zone_after = self.state.zones.get(event.zone)
+        resolved_partition = event.partition
+        if resolved_partition not in self.state.partitions and zone_after is not None:
+            resolved_partition = zone_after.partition
+        partition_state = self.state.partitions.get(resolved_partition)
+        should_chime = (
+            event.code == "F5"
+            and event.zone in self.settings.keypad.chime_zones
+            and not zone_was_faulted
+            and zone_after is not None
+            and zone_after.faulted
+            and self.state.arming_initialized
+            and partition_state is not None
+            and partition_state.raw_mode in {"D", "N"}
+        )
+        if should_chime:
+            keypad = self.state.record_chime(resolved_partition, event.zone, received_at)
             if keypad is not None:
                 LOG.info(
                     "Chime zone fault: zone=%03d partition=%d sequence=%d",

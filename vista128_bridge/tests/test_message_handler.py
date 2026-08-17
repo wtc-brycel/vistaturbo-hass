@@ -160,6 +160,8 @@ class MessageHandlerTests(unittest.TestCase):
         )
         self.state.zones[27].partition = 1
         self.state.zones[27].descriptor = "GLASS BREAK KITCHEN"
+        self.state.arming_initialized = True
+        self.state.partitions[1].raw_mode = "D"
         before = len(self.mqtt.keypad_states)
         handler.handle(
             "system_event",
@@ -171,6 +173,44 @@ class MessageHandlerTests(unittest.TestCase):
         self.assertEqual(keypad.chime_zone, 27)
         self.assertEqual(keypad.chime_descriptor, "GLASS BREAK KITCHEN")
         self.assertGreater(len(self.mqtt.keypad_states), before)
+
+    def test_duplicate_fault_event_does_not_chime_twice(self):
+        handler = ProtocolMessageHandler(
+            make_settings(chime_zones=(27,)), self.state, self.mqtt, self.printer, self.sync
+        )
+        self.state.zones[27].partition = 1
+        self.state.arming_initialized = True
+        self.state.partitions[1].raw_mode = "D"
+        packet = b"1BnqF502700012123150826007B"
+        handler.handle("system_event", packet, "2026-08-16T13:23:00-04:00")
+        handler.handle("system_event", packet, "2026-08-16T13:23:01-04:00")
+        self.assertEqual(self.state.keypads[1].chime_sequence, 1)
+
+    def test_configured_fault_does_not_chime_while_armed(self):
+        handler = ProtocolMessageHandler(
+            make_settings(chime_zones=(27,)), self.state, self.mqtt, self.printer, self.sync
+        )
+        self.state.zones[27].partition = 1
+        self.state.arming_initialized = True
+        self.state.partitions[1].raw_mode = "A"
+        handler.handle(
+            "system_event",
+            b"1BnqF502700012123150826007B",
+            "2026-08-16T13:23:00-04:00",
+        )
+        self.assertEqual(self.state.keypads[1].chime_sequence, 0)
+
+    def test_configured_fault_waits_for_authoritative_arming_state(self):
+        handler = ProtocolMessageHandler(
+            make_settings(chime_zones=(27,)), self.state, self.mqtt, self.printer, self.sync
+        )
+        self.state.zones[27].partition = 1
+        handler.handle(
+            "system_event",
+            b"1BnqF502700012123150826007B",
+            "2026-08-16T13:23:00-04:00",
+        )
+        self.assertEqual(self.state.keypads[1].chime_sequence, 0)
 
     def test_unlisted_fault_zone_does_not_chime(self):
         handler = ProtocolMessageHandler(
