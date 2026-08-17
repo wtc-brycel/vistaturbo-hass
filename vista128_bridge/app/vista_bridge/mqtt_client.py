@@ -131,9 +131,13 @@ class MqttPublisher:
     def publish_partition_state(self, partition: PartitionState) -> None:
         prefix = f"partition/{partition.partition}"
         self.publish(f"{prefix}/state", partition.ha_state, retain=True, qos=1)
+        attributes = partition.attributes()
+        attributes["control_enabled"] = bool(
+            self.settings.control.enabled and self.settings.control.native_alarm_enabled
+        )
         self.publish_json(
             f"{prefix}/attributes",
-            partition.attributes(),
+            attributes,
             retain=True,
             qos=1,
         )

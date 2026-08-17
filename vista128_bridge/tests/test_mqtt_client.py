@@ -179,6 +179,15 @@ class MqttPublisherTests(unittest.TestCase):
         self.assertEqual(config["availability_topic"], "vista128/bridge/availability")
         self.assertNotIn("availability", config)
 
+    def test_partition_control_attribute_reflects_settings(self):
+        settings = make_settings(control_enabled=True, native_alarm_control_enabled=True)
+        publisher = MqttPublisher(settings, lambda data: (True, "queued"))
+        state = VistaState()
+        publisher.publish_partition_state(state.partitions[1])
+        published = {item[0]: item[1] for item in publisher._client.published}
+        attrs = json.loads(published["vista128/partition/1/attributes"])
+        self.assertTrue(attrs["control_enabled"])
+
     def test_automation_interface_has_diagnostic_discovery(self):
         self.publisher.publish_discovery()
         published = {item[0]: item[1] for item in self.publisher._client.published if item[1]}
@@ -188,6 +197,10 @@ class MqttPublisherTests(unittest.TestCase):
         self.assertEqual(config["state_topic"], "vista128/panel/automation_available")
         self.assertEqual(config["entity_category"], "diagnostic")
         self.assertEqual(config["device_class"], "connectivity")
+        source = json.loads(
+            published["homeassistant/sensor/vista128_bridge/automation_availability_source/config"]
+        )
+        self.assertEqual(source["state_topic"], "vista128/panel/automation_availability_source")
 
 
 

@@ -61,6 +61,24 @@ FIRE_DISPLAY_TOKENS = ("FIRE ALARM", "SMOKE ALARM", "WATERFLOW ALARM")
 SUPERVISORY_DISPLAY_TOKENS = ("SUPERVISORY", "SUPV")
 AC_LOSS_DISPLAY_TOKENS = ("AC LOSS", "AC FAIL")
 SILENCED_DISPLAY_TOKENS = ("SILENCED", "SILENCE")
+TROUBLE_DISPLAY_TOKENS = (
+    "TROUBLE", "TRBL", "CHECK ", "LOW BAT", "FAIL TO COMM", "COMM FAIL", "BELL TROUBLE",
+)
+
+PARTITION_TROUBLE_RESTORE_TO_START = {
+    "04": "03",
+    "54": "53",
+    "64": "63",
+    "A2": "A1",
+    "A4": "A3",
+    "C4": "C3",
+    "D4": "D3",
+    "E4": "E3",
+    "F4": "F3",
+    "FE": "FD",
+}
+PARTITION_TROUBLE_START_CODES = set(PARTITION_TROUBLE_RESTORE_TO_START.values())
+SYSTEM_BATTERY_EVENT_STATES = {"29": True, "2A": False}
 
 
 @dataclass
@@ -108,6 +126,7 @@ class PartitionState:
     active_supervisory_tokens: set[str] = field(default_factory=set)
     active_burglary_tokens: set[str] = field(default_factory=set)
     active_auxiliary_tokens: set[str] = field(default_factory=set)
+    active_trouble_tokens: set[str] = field(default_factory=set)
     fire_silenced: bool = False
 
     @property
@@ -154,7 +173,6 @@ class PartitionState:
             "supervisory_active": self.supervisory_active,
             "burglary_alarm_active": self.burglary_alarm_active,
             "auxiliary_alarm_active": self.auxiliary_alarm_active,
-            "control_enabled": False,
         }
 
 
@@ -167,6 +185,7 @@ class KeypadState:
     backlight: bool = False
     ready_led: bool = False
     trouble_led: bool = False
+    trouble_led_raw: bool = False
     armed_led: bool = False
     power_led: bool | None = None
     fire_alarm_led: bool | None = None
@@ -214,6 +233,7 @@ class KeypadState:
             "display": f"{self.line_1}\n{self.line_2}",
             "ready": self.ready_led,
             "trouble": self.trouble_led,
+            "trouble_led_raw": self.trouble_led_raw,
             "armed": self.armed_led,
             "power": self.power_led,
             "fire_alarm": self.fire_alarm_led,
@@ -242,17 +262,22 @@ class VistaState:
         self.zones = {zone: ZoneState(zone) for zone in range(1, 129)}
         self.last_event: SystemEvent | None = None
         self.ac_power: bool | None = None
+        self.system_battery_low: bool | None = None
+        self.active_global_trouble_tokens: set[str] = set()
         self.arming_initialized = False
         self.zone_status_initialized = False
         self.zone_partition_initialized = False
 
     def reset_connection_derived_annunciators(self) -> None:
         self.ac_power = None
+        self.system_battery_low = None
+        self.active_global_trouble_tokens.clear()
         for partition in self.partitions.values():
             partition.active_fire_tokens.clear()
             partition.active_supervisory_tokens.clear()
             partition.active_burglary_tokens.clear()
             partition.active_auxiliary_tokens.clear()
+            partition.active_trouble_tokens.clear()
             partition.fire_silenced = False
         for keypad in self.keypads.values():
             keypad.power_led = None
@@ -293,7 +318,7 @@ class VistaState:
             if partition.raw_mode != raw_mode:
                 partition.raw_mode = raw_mode
                 changed.add(partition_number)
-            if raw_mode == "D" and partition.active_alarm_tokens:
+            if raw_mode in {"D", "N"} and partition.active_alarm_tokens:
                 partition.active_alarm_tokens.clear()
                 changed.add(partition_number)
         return changed
@@ -314,7 +339,7 @@ class VistaState:
         keypad.line_2 = report.line_2
         keypad.backlight = report.backlight
         keypad.ready_led = report.ready_led
-        keypad.trouble_led = report.trouble_led
+        keypad.trouble_led_raw = report.trouble_led
         keypad.armed_led = report.armed_led
         keypad.led_status = report.led_status
         keypad.raw_display = report.raw_display
@@ -327,8 +352,6 @@ class VistaState:
         # gives us a safe startup reconciliation path for the POWER annunciator.
         if self._contains_any(display, AC_LOSS_DISPLAY_TOKENS):
             self._set_ac_power(False)
-        elif not report.trouble_led:
-            self._set_ac_power(True)
         keypad.power_led = self.ac_power
 
         explicit_fire = self._contains_any(display, FIRE_DISPLAY_TOKENS)
@@ -371,6 +394,7 @@ class VistaState:
         elif normal_ready:
             keypad.auxiliary_alarm_led = False
 
+        self._reconcile_keypad_trouble(partition)
         return keypad
 
     def apply_zone_status(self, report: ZoneStatusReport) -> set[int]:
@@ -391,6 +415,7 @@ class VistaState:
                     setattr(zone, attribute, value)
                     changed.add(zone_number)
         self._reconcile_partition_zone_alarms()
+        self._reconcile_all_keypad_trouble()
         return changed
 
     def apply_zone_partition(self, report: ZonePartitionReport) -> set[int]:
@@ -423,6 +448,8 @@ class VistaState:
         self._apply_partition_event(event, changed_zones, changed_partitions)
         self._apply_cr2_annunciator_event(event, changed_partitions)
         self._apply_audible_alarm_event(event, changed_partitions)
+        self._apply_trouble_event(event, changed_partitions)
+        self._reconcile_all_keypad_trouble()
         return changed_zones, changed_partitions
 
     def _apply_zone_transition(self, event: SystemEvent, changed: set[int]) -> None:
@@ -587,10 +614,60 @@ class VistaState:
             if keypad is not None:
                 keypad.burglary_alarm_led = False
 
+    def _apply_trouble_event(self, event: SystemEvent, changed_partitions: set[int]) -> None:
+        battery_state = SYSTEM_BATTERY_EVENT_STATES.get(event.code)
+        if battery_state is not None:
+            self.system_battery_low = battery_state
+
+        start_code = None
+        if event.code in PARTITION_TROUBLE_START_CODES:
+            start_code = event.code
+            adding = True
+        else:
+            start_code = PARTITION_TROUBLE_RESTORE_TO_START.get(event.code)
+            adding = False
+        if start_code is None:
+            return
+
+        token = f"{event.zone:03d}:{start_code}"
+        partition = self.partitions.get(event.partition)
+        tokens = partition.active_trouble_tokens if partition is not None else self.active_global_trouble_tokens
+        before = token in tokens
+        if adding:
+            tokens.add(token)
+        else:
+            tokens.discard(token)
+        if partition is not None and before != (token in tokens):
+            changed_partitions.add(event.partition)
+
+    def _partition_has_known_trouble(self, partition_number: int) -> bool:
+        if self.ac_power is False or self.system_battery_low is True or self.active_global_trouble_tokens:
+            return True
+        partition = self.partitions.get(partition_number)
+        if partition is not None and partition.active_trouble_tokens:
+            return True
+        return any(
+            zone.partition == partition_number and (zone.trouble or zone.low_battery or zone.tamper)
+            for zone in self.zones.values()
+        )
+
+    def _reconcile_keypad_trouble(self, partition_number: int) -> None:
+        keypad = self.keypads.get(partition_number)
+        if keypad is None or not keypad.initialized:
+            return
+        display = f"{keypad.line_1} {keypad.line_2}".upper()
+        explicit = keypad.trouble_led_raw or self._contains_any(display, TROUBLE_DISPLAY_TOKENS)
+        keypad.trouble_led = bool(explicit or self._partition_has_known_trouble(partition_number))
+
+    def _reconcile_all_keypad_trouble(self) -> None:
+        for partition_number in self.keypads:
+            self._reconcile_keypad_trouble(partition_number)
+
     def _set_ac_power(self, value: bool) -> None:
         self.ac_power = value
         for keypad in self.keypads.values():
             keypad.power_led = value
+        self._reconcile_all_keypad_trouble()
 
     @staticmethod
     def _contains_any(text: str, tokens: tuple[str, ...]) -> bool:

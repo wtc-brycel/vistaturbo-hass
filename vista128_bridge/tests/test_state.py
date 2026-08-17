@@ -65,10 +65,17 @@ class StateTests(unittest.TestCase):
         self.assertTrue(keypad.backlight)
         self.assertTrue(keypad.ready_led)
         self.assertEqual(keypad.attributes()["led_status"], "1")
-        self.assertTrue(keypad.attributes()["power"])
+        self.assertIsNone(keypad.attributes()["power"])
         self.assertFalse(keypad.attributes()["fire_alarm"])
         self.assertFalse(keypad.attributes()["silenced"])
         self.assertFalse(keypad.attributes()["supervisory"])
+
+    def test_not_ready_arming_snapshot_clears_stale_alarm_tokens(self):
+        state = VistaState()
+        state.partitions[1].active_alarm_tokens.add("010:31")
+        state.apply_arming_status(ArmingStatusReport(tuple("NDDDDDDD")))
+        self.assertEqual(state.partitions[1].ha_state, "disarmed")
+        self.assertFalse(state.partitions[1].active_alarm_tokens)
 
     def test_keypad_trouble_does_not_guess_power_without_ac_evidence(self):
         state = VistaState()
@@ -78,11 +85,56 @@ class StateTests(unittest.TestCase):
             "2026-08-16T13:22:28-04:00",
         )
         self.assertIsNone(keypad.power_led)
+        self.assertTrue(keypad.trouble_led)
+        self.assertTrue(keypad.trouble_led_raw)
+
+    def test_kd_page_without_trouble_bit_does_not_infer_ac_restore(self):
+        state = VistaState()
+        state.ac_power = False
+        keypad = state.apply_keypad_display(
+            1,
+            keypad_report("P1   DISARMED   ", "ZONES IN TROUBLE", ready=False, trouble=False),
+            "2026-08-17T17:00:19-04:00",
+        )
+        self.assertFalse(keypad.power_led)
+        self.assertTrue(keypad.trouble_led)
+        self.assertFalse(keypad.trouble_led_raw)
+
+    def test_semantic_trouble_stays_on_across_alternating_kd_pages(self):
+        state = VistaState()
+        partitions = [0] * 64
+        partitions[20] = 1
+        state.apply_zone_partition(ZonePartitionReport(1, tuple(partitions)))
+        statuses = [0] * 64
+        statuses[20] = 0x2
+        state.apply_zone_status(ZoneStatusReport(1, tuple(statuses)))
+
+        keypad = state.apply_keypad_display(
+            1,
+            keypad_report("P1   DISARMED   ", "ZONES IN TROUBLE", ready=False, trouble=False),
+            "2026-08-17T17:00:19-04:00",
+        )
+        self.assertTrue(keypad.trouble_led)
+        self.assertFalse(keypad.trouble_led_raw)
+        state.apply_keypad_display(
+            1,
+            keypad_report("TRBL  021 FRONT ", "DOOR            ", ready=False, trouble=True),
+            "2026-08-17T17:00:34-04:00",
+        )
+        self.assertTrue(keypad.trouble_led)
+        self.assertTrue(keypad.trouble_led_raw)
+        state.apply_keypad_display(
+            1,
+            keypad_report("FAULT 021 FRONT ", "DOOR            ", ready=False, trouble=False),
+            "2026-08-17T17:00:42-04:00",
+        )
+        self.assertTrue(keypad.trouble_led)
+        self.assertFalse(keypad.trouble_led_raw)
 
     def test_ac_loss_restore_drives_cr2_power_annunciator(self):
         state = VistaState()
         keypad = state.apply_keypad_display(1, keypad_report(), "2026-08-16T13:22:28-04:00")
-        self.assertTrue(keypad.power_led)
+        self.assertIsNone(keypad.power_led)
 
         state.apply_system_event(SystemEvent("1B", "AC Loss", 0, 0, 0, 0, 0, 15, 8, 26))
         self.assertFalse(keypad.power_led)
