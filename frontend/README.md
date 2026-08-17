@@ -260,3 +260,19 @@ function_keys:
   d:
     text: PAGE
 ```
+
+
+## Event journal card
+
+Card `0.3.19` also registers `custom:vista-event-log-card`. It renders the recent window exposed by the App's persistent SQLite event journal while the complete journal remains in `/data/vista128_events.sqlite3`.
+
+```yaml
+type: custom:vista-event-log-card
+entity: sensor.vista_128bpt_event_journal
+rows: 20
+partition: 0
+```
+
+`partition: 0` shows all partitions; values 1 through 8 filter the displayed recent window. The card shows panel time, event code, description, programmed zone descriptor, partition/zone/user metadata, and whether the row came from the live event stream, the historical panel dump, or both. A visual editor is included.
+
+The App intentionally publishes only a small configurable recent window to Home Assistant. The full historical journal is not repeated in sensor attributes, which avoids bloating Home Assistant Recorder as the panel history grows.
