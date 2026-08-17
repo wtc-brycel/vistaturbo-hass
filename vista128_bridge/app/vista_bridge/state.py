@@ -156,6 +156,10 @@ class KeypadState:
     fire_alarm_led: bool | None = None
     silenced_led: bool | None = None
     supervisory_led: bool | None = None
+    chime_sequence: int = 0
+    chime_zone: int | None = None
+    chime_descriptor: str = ""
+    chime_at: str = ""
     led_status: int = 0
     raw_display: bytes = b""
     updated_at: str = ""
@@ -178,6 +182,10 @@ class KeypadState:
             "fire_alarm": self.fire_alarm_led,
             "silenced": self.silenced_led,
             "supervisory": self.supervisory_led,
+            "chime_sequence": self.chime_sequence,
+            "chime_zone": self.chime_zone,
+            "chime_descriptor": self.chime_descriptor,
+            "chime_at": self.chime_at,
             "backlight": self.backlight,
             "led_status": f"{self.led_status:X}",
             "raw_display_hex": self.raw_display.hex(" "),
@@ -209,6 +217,20 @@ class VistaState:
             keypad.fire_alarm_led = None
             keypad.silenced_led = None
             keypad.supervisory_led = None
+
+    def record_chime(self, partition: int, zone_number: int, received_at: str) -> KeypadState | None:
+        zone = self.zones.get(zone_number)
+        resolved_partition = partition if partition in self.keypads else 0
+        if not resolved_partition and zone is not None:
+            resolved_partition = zone.partition
+        keypad = self.keypads.get(resolved_partition)
+        if keypad is None:
+            return None
+        keypad.chime_sequence += 1
+        keypad.chime_zone = zone_number
+        keypad.chime_descriptor = zone.descriptor if zone is not None else ""
+        keypad.chime_at = received_at
+        return keypad
 
     def assigned_zones_with(self, attribute: str) -> list[ZoneState]:
         if attribute not in ZONE_STATUS_BITS:

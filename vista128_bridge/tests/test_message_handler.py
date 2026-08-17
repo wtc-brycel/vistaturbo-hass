@@ -144,6 +144,49 @@ class MessageHandlerTests(unittest.TestCase):
         self.assertEqual(self.sync.descriptor_complete, 1)
         self.assertIn(1, self.sync.keypad_refreshes)
 
+    def test_configured_fault_zone_increments_keypad_chime_sequence(self):
+        handler = ProtocolMessageHandler(
+            make_settings(chime_zones=(27,)),
+            self.state,
+            self.mqtt,
+            self.printer,
+            self.sync,
+        )
+        self.sync.keypad_partition = 1
+        handler.handle(
+            "keypad_display",
+            b"29kd\xd01   DISARMED   BYPAS-RDY TO ARM100CD",
+            "2026-08-16T13:22:28-04:00",
+        )
+        self.state.zones[27].partition = 1
+        self.state.zones[27].descriptor = "GLASS BREAK KITCHEN"
+        before = len(self.mqtt.keypad_states)
+        handler.handle(
+            "system_event",
+            b"1BnqF502700012123150826007B",
+            "2026-08-16T13:23:00-04:00",
+        )
+        keypad = self.state.keypads[1]
+        self.assertEqual(keypad.chime_sequence, 1)
+        self.assertEqual(keypad.chime_zone, 27)
+        self.assertEqual(keypad.chime_descriptor, "GLASS BREAK KITCHEN")
+        self.assertGreater(len(self.mqtt.keypad_states), before)
+
+    def test_unlisted_fault_zone_does_not_chime(self):
+        handler = ProtocolMessageHandler(
+            make_settings(chime_zones=(28,)),
+            self.state,
+            self.mqtt,
+            self.printer,
+            self.sync,
+        )
+        handler.handle(
+            "system_event",
+            b"1BnqF502700012123150826007B",
+            "2026-08-16T13:23:00-04:00",
+        )
+        self.assertEqual(self.state.keypads[1].chime_sequence, 0)
+
     def test_captured_bypass_event_refreshes_zone_summaries(self):
         self.handler.handle(
             "zone_partition",

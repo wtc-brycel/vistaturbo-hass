@@ -181,7 +181,18 @@ class ProtocolMessageHandler:
         self._handle_system_event_side_effects(event.code)
         self.synchronizer.request_keypad_refresh(event.partition)
 
-        # Supplemental 6160CR-2 annunciators are reconstructed from nq events.
+        if event.code == "F5" and event.zone in self.settings.keypad.chime_zones:
+            keypad = self.state.record_chime(event.partition, event.zone, received_at)
+            if keypad is not None:
+                LOG.info(
+                    "Chime zone fault: zone=%03d partition=%d sequence=%d",
+                    event.zone,
+                    keypad.partition,
+                    keypad.chime_sequence,
+                )
+
+        # Supplemental 6160CR-2 annunciators and configured chime events are
+        # published immediately without waiting for the next KD poll.
         # Publish initialized keypad entities immediately so AC/fire/supervisory
         # changes are visible without waiting for the next KD polling interval.
         self._publish_initialized_keypads()

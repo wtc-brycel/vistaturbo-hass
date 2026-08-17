@@ -20,6 +20,26 @@ def _partition_list(value: str) -> tuple[int, ...]:
     return partitions
 
 
+def _zone_list(value: str) -> tuple[int, ...]:
+    zones: set[int] = set()
+    for item in value.split(","):
+        token = item.strip()
+        if not token:
+            continue
+        if "-" in token:
+            start_text, end_text = token.split("-", 1)
+            start = int(start_text.strip())
+            end = int(end_text.strip())
+            if end < start:
+                raise ValueError("chime_zones ranges must be ascending")
+            zones.update(range(start, end + 1))
+        else:
+            zones.add(int(token))
+    if any(zone < 1 or zone > 128 for zone in zones):
+        raise ValueError("chime_zones must contain zone numbers 1..128")
+    return tuple(sorted(zones))
+
+
 @dataclass(frozen=True)
 class PanelSettings:
     host: str
@@ -58,6 +78,7 @@ class KeypadSettings:
     partitions: tuple[int, ...]
     poll_interval_seconds: int
     event_refresh_delay_ms: int
+    chime_zones: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -128,6 +149,7 @@ class Settings:
                 event_refresh_delay_ms=int(
                     os.environ.get("KEYPAD_EVENT_REFRESH_DELAY_MS", "250")
                 ),
+                chime_zones=_zone_list(os.environ.get("CHIME_ZONES", "")),
             ),
             printer=PrinterSettings(
                 enabled=_bool_env("TRANSPORT_PRINT_ENABLED", False),

@@ -33,6 +33,7 @@ export KEYPAD_DISPLAY_ENABLED="$(config_or_default 'keypad_display_enabled' 'tru
 export KEYPAD_PARTITIONS="$(config_or_default 'keypad_partitions' '1')"
 export KEYPAD_POLL_INTERVAL_SECONDS="$(config_or_default 'keypad_poll_interval_seconds' '7')"
 export KEYPAD_EVENT_REFRESH_DELAY_MS="$(config_or_default 'keypad_event_refresh_delay_ms' '250')"
+export CHIME_ZONES="$(config_or_default 'chime_zones' '')"
 export TRANSPORT_PRINT_ENABLED="$(config_or_default 'transport_print_enabled' 'false')"
 export TRANSPORT_HOST="$(config_or_default 'transport_host' '')"
 export TRANSPORT_HTTP_PORT="$(config_or_default 'transport_http_port' '9101')"

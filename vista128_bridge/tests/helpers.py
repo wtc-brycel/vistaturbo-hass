@@ -14,6 +14,7 @@ def make_settings(
     printer_enabled: bool = False,
     printer_host: str = "127.0.0.1",
     printer_port: int = 9101,
+    chime_zones: tuple[int, ...] = (),
 ) -> Settings:
     return Settings(
         panel=PanelSettings(
@@ -47,6 +48,7 @@ def make_settings(
             partitions=(1,),
             poll_interval_seconds=7,
             event_refresh_delay_ms=250,
+            chime_zones=chime_zones,
         ),
         printer=PrinterSettings(
             enabled=printer_enabled,
