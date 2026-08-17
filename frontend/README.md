@@ -13,20 +13,20 @@ The card is **read-only** while Vista Turbo RS232 remains read-only. Keys depres
 
 ## Install in Home Assistant
 
-The current release attaches `vista-keypad-card.js` as a standalone asset.
+Release `v0.2.6-rc.3` attaches card `0.3.15` as `vista-keypad-card.js`.
 
 From the Home Assistant Terminal or SSH add-on:
 
 ```sh
 mkdir -p /config/www
-curl -fL "https://github.com/wtc-brycel/vistaturbo-hass/releases/download/v0.2.6-rc.2/vista-keypad-card.js" \
+curl -fL "https://github.com/wtc-brycel/vistaturbo-hass/releases/download/v0.2.6-rc.3/vista-keypad-card.js" \
   -o /config/www/vista-keypad-card.js
 ```
 
 Then add the card as a Lovelace JavaScript module under **Settings -> Dashboards -> Resources**:
 
 ```text
-/local/vista-keypad-card.js?v=0.3.14
+/local/vista-keypad-card.js?v=0.3.15
 ```
 
 The version suffix is intentional. Change it whenever the JavaScript file is replaced so Home Assistant and mobile browsers do not reuse a stale cached copy.
@@ -49,7 +49,7 @@ model: 6160
 
 ## Adaptive layout
 
-Card development version `0.3.15` adds a model-agnostic adaptive layout system for Lovelace dashboards.
+Card `0.3.15` includes a model-agnostic adaptive layout system for Lovelace dashboards.
 
 ```yaml
 layout: auto
@@ -86,7 +86,7 @@ Compact behavior is declared in `MODEL_PROFILES` rather than hard-coded into the
 
 The generic compact renderer then provides the LCD, status strip, touch-grid geometry, case theme, responsive breakpoints, and input handling. A future panel therefore does not need a separate mobile UI implementation.
 
-Home Assistant grid hints now allow the card to shrink to four grid columns because compact mode remains usable at that width.
+Home Assistant grid hints allow the card to shrink to four grid columns because compact mode remains usable at that width.
 
 ## Case colors and theme following
 
@@ -131,6 +131,8 @@ The adaptive layout retains the mobile hardening introduced in card 0.3.14:
 - browser light/dark changes are observed when Home Assistant does not expose an explicit theme mode
 
 Version 0.3.15 renders both physical and compact LCD canvases from the same state and redraws whichever layout becomes visible after a container breakpoint change.
+
+The repository CI also runs Chromium browser regression tests for wide/compact switching, touch-target dimensions, both model profiles, forced layout modes, theme-aware case colors, and Lovelace grid sizing.
 
 ## 6160CR-2 annunciators
 
