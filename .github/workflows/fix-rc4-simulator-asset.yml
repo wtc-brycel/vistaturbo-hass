@@ -1,0 +1,24 @@
+name: Repair RC4 simulator asset
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/fix-rc4-simulator-asset.yml
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Replace simulator release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release delete-asset v0.2.6-rc.4 simulator.html -y || true
+          gh release upload v0.2.6-rc.4 frontend/vista-keypad-simulator.html --clobber
