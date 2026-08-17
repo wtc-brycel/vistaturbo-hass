@@ -1,4 +1,4 @@
-const VISTA_KEYPAD_CARD_VERSION = "0.3.19";
+const VISTA_KEYPAD_CARD_VERSION = "0.3.20";
 
 const MODEL_ALIASES = {
   "6160cr2": "6160cr2",
@@ -490,7 +490,8 @@ class VistaKeypadCardEditor extends HTMLElement {
           <div class="field full"><label for="title">Title</label><input id="title" data-top="title" type="text" value="${escapeHtml(this._config.title ?? "")}" placeholder="Optional"></div>
           <div class="toggle field full"><span><span class="label">Card background</span></span><input data-top="show_card_background" type="checkbox" ${checked(Boolean(this._config.show_card_background))}></div>
         </div>
-        <div class="readonly">Monitoring remains read-only. The editor does not expose a panel-control toggle.</div>
+        <div class="toggle"><span class="label">Enable keypad input</span><input data-control-toggle type="checkbox" ${checked(this._config.read_only === false)}></div>
+        <div class="readonly">Requires bridge <code>control_enabled</code> and <code>keypad_control_enabled</code>. A-D function buttons remain inert until explicitly mapped.</div>
       </section>
 
       <section class="section">
@@ -538,6 +539,9 @@ class VistaKeypadCardEditor extends HTMLElement {
       </section>
     </div>`;
 
+    this.shadowRoot.querySelector("[data-control-toggle]")?.addEventListener("change", (event) => {
+      this._topLevel("read_only", !event.currentTarget.checked);
+    });
     this.shadowRoot.querySelectorAll("[data-top]").forEach((el) => {
       el.addEventListener("change", () => {
         const value = el.type === "checkbox" ? el.checked : el.value;
@@ -820,6 +824,8 @@ class VistaKeypadCard extends HTMLElement {
       a.chime_sequence ?? null,
       a.chime_zone ?? null,
       a.chime_descriptor ?? null,
+      a.control_enabled ?? null,
+      a.command_topic ?? null,
       hass?.themes?.darkMode ?? null,
       externalIndicators,
       externalFlashing,
@@ -964,6 +970,8 @@ class VistaKeypadCard extends HTMLElement {
         chimeSequence: 0,
         chimeZone: null,
         chimeDescriptor: "",
+        controlEnabled: false,
+        commandTopic: "",
         flashing: {
           armed: false,
           ready: false,
@@ -1005,6 +1013,8 @@ class VistaKeypadCard extends HTMLElement {
       chimeSequence: Number(a.chime_sequence ?? 0) || 0,
       chimeZone: a.chime_zone ?? null,
       chimeDescriptor: String(a.chime_descriptor ?? ""),
+      controlEnabled: boolValue(a.control_enabled, false),
+      commandTopic: String(a.command_topic ?? ""),
       flashing: {
         armed: this._indicatorFlashing("armed"),
         ready: this._indicatorFlashing("ready"),
@@ -2470,7 +2480,7 @@ class VistaKeypadCard extends HTMLElement {
         <div class="layout-physical-view">${this._renderPhysical(this._config.model, display)}</div>
         <div class="layout-compact-view">${this._renderCompact(this._config.model, display)}</div>
       </div>
-      <div class="read-only-note" id="read-only-note">Read-only monitoring. Keypad control is not enabled.</div>
+      <div class="read-only-note" id="read-only-note">Keypad control is not enabled.</div>
     </div></ha-card>`;
 
     requestAnimationFrame(() => {
@@ -2501,18 +2511,52 @@ class VistaKeypadCard extends HTMLElement {
     });
   }
 
-  _handleKey(button) {
+  _showControlNote(message) {
+    const note = this.shadowRoot?.getElementById("read-only-note");
+    if (!note) return;
+    note.textContent = message;
+    note.classList.add("show");
+    clearTimeout(this._pressTimer);
+    this._pressTimer = setTimeout(() => note.classList.remove("show"), 1600);
+  }
+
+  async _handleKey(button) {
     const key = button?.dataset?.key;
     if (!key) return;
 
-
     if (this._config.read_only !== false) {
-      const note = this.shadowRoot.getElementById("read-only-note");
-      if (note) {
-        note.classList.add("show");
-        clearTimeout(this._pressTimer);
-        this._pressTimer = setTimeout(() => note.classList.remove("show"), 1200);
-      }
+      this._showControlNote("Enable keypad input in the card editor first.");
+      return;
+    }
+
+    if (![..."0123456789", "*", "#"].includes(key)) {
+      this._showControlNote("A-D function keys are not mapped yet.");
+      return;
+    }
+
+    const display = this._displayState();
+    if (!display.available) {
+      this._showControlNote("Panel is offline.");
+      return;
+    }
+    if (!display.controlEnabled || !display.commandTopic) {
+      this._showControlNote("Bridge keypad control is disabled or unavailable.");
+      return;
+    }
+    if (!this._hass?.callService) {
+      this._showControlNote("Home Assistant MQTT publish action is unavailable.");
+      return;
+    }
+
+    try {
+      await this._hass.callService("mqtt", "publish", {
+        topic: display.commandTopic,
+        payload: key,
+        qos: 1,
+        retain: false,
+      });
+    } catch (_) {
+      this._showControlNote("Keypad command could not be published.");
       return;
     }
 

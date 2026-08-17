@@ -276,3 +276,8 @@ partition: 0
 `partition: 0` shows all partitions; values 1 through 8 filter the displayed recent window. The card shows panel time, event code, description, programmed zone descriptor, partition/zone/user metadata, and whether the row came from the live event stream, the historical panel dump, or both. A visual editor is included.
 
 The App intentionally publishes only a small configurable recent window to Home Assistant. The full historical journal is not repeated in sensor attributes, which avoids bloating Home Assistant Recorder as the panel history grows.
+
+
+### Keypad input
+
+Card `0.3.20` can publish real keypad input when both the bridge and card are explicitly enabled for control. Enable the App's `control_enabled` and `keypad_control_enabled`, then enable **Keypad input** in the card visual editor. Numeric keys, `*`, and `#` publish non-retained MQTT commands through Home Assistant's MQTT publish action. A-D function buttons remain intentionally unmapped pending explicit action/hold semantics.

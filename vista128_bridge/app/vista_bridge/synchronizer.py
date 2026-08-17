@@ -8,6 +8,7 @@ import threading
 
 from .config import KeypadSettings, SyncSettings
 from .protocol import (
+    ARMING_STATUS_QUERY,
     EVENT_LOG_QUERY,
     ProtocolQuery,
     STARTUP_QUERIES,
@@ -79,6 +80,27 @@ class VistaSynchronizer:
 
     def mark_ready(self) -> None:
         self.ready_event.set()
+
+    def begin_external_transaction(self) -> None:
+        self._active.set()
+        self.ready_event.clear()
+
+    def end_external_transaction(self) -> None:
+        self._active.clear()
+
+    async def wait_ready(self, timeout_seconds: int) -> bool:
+        try:
+            await asyncio.wait_for(self.ready_event.wait(), timeout=timeout_seconds)
+            return True
+        except asyncio.TimeoutError:
+            return False
+
+    async def run_arming_refresh(self) -> bool:
+        return await self.run_sync(
+            (ARMING_STATUS_QUERY,),
+            source="control-verify",
+            description="post-control arming verification",
+        )
 
     def mark_descriptor_complete(self) -> None:
         self.descriptor_complete_event.set()

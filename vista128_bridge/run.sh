@@ -34,6 +34,11 @@ export KEYPAD_PARTITIONS="$(config_or_default 'keypad_partitions' '1')"
 export KEYPAD_POLL_INTERVAL_SECONDS="$(config_or_default 'keypad_poll_interval_seconds' '7')"
 export KEYPAD_EVENT_REFRESH_DELAY_MS="$(config_or_default 'keypad_event_refresh_delay_ms' '250')"
 export CHIME_ZONES="$(config_or_default 'chime_zones' '')"
+export CONTROL_ENABLED="$(config_or_default 'control_enabled' 'false')"
+export KEYPAD_CONTROL_ENABLED="$(config_or_default 'keypad_control_enabled' 'false')"
+export NATIVE_ALARM_CONTROL_ENABLED="$(config_or_default 'native_alarm_control_enabled' 'false')"
+export CONTROL_RESPONSE_TIMEOUT_SECONDS="$(config_or_default 'control_response_timeout_seconds' '3')"
+export CONTROL_VERIFY_DELAY_MS="$(config_or_default 'control_verify_delay_ms' '400')"
 export EVENT_HISTORY_ENABLED="$(config_or_default 'event_history_enabled' 'true')"
 export EVENT_HISTORY_STARTUP_DUMP_ENABLED="$(config_or_default 'event_history_startup_dump_enabled' 'false')"
 export EVENT_HISTORY_RECENT_LIMIT="$(config_or_default 'event_history_recent_limit' '20')"
@@ -67,6 +72,9 @@ if bashio::var.true "${EVENT_HISTORY_ENABLED}"; then
   if bashio::var.true "${EVENT_HISTORY_STARTUP_DUMP_ENABLED}"; then
     bashio::log.info "Historical event-log dump enabled at startup"
   fi
+fi
+if bashio::var.true "${CONTROL_ENABLED}"; then
+  bashio::log.warning "Panel control ENABLED: keypad=${KEYPAD_CONTROL_ENABLED}, native_alarm=${NATIVE_ALARM_CONTROL_ENABLED}"
 fi
 if bashio::var.true "${TRANSPORT_PRINT_ENABLED}"; then
   bashio::log.info "TransPort event receipts: http://${TRANSPORT_HOST}:${TRANSPORT_HTTP_PORT}/print"

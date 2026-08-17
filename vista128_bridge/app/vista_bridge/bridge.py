@@ -7,6 +7,7 @@ import queue
 import threading
 
 from .config import Settings
+from .control import VistaControlCoordinator
 from .event_store import EventStore
 from .framing import RawFrame, VistaStreamFramer
 from .message_handler import ProtocolMessageHandler
@@ -37,7 +38,6 @@ class VistaBridge:
             if settings.event_history.enabled
             else None
         )
-        self.mqtt = MqttPublisher(settings, self.enqueue_raw_tx)
         self.rx_frames = 0
         self.rx_bytes = 0
         self.tx_frames = 0
@@ -56,6 +56,20 @@ class VistaBridge:
             self._send_sync_query,
             self._force_reconnect,
         )
+        self.control = VistaControlCoordinator(
+            settings.control,
+            self.state,
+            self.synchronizer,
+            self._is_connected,
+            self._send_sync_query,
+            self._publish_control_result,
+        )
+        self.mqtt = MqttPublisher(
+            settings,
+            self.enqueue_raw_tx,
+            self.enqueue_keypad_control,
+            self.enqueue_alarm_control,
+        )
         self.handler = ProtocolMessageHandler(
             settings,
             self.state,
@@ -63,7 +77,17 @@ class VistaBridge:
             self.printer,
             self.synchronizer,
             self.event_store,
+            self.control,
         )
+
+    def _publish_control_result(self, payload: dict) -> None:
+        self.mqtt.publish_json("control/result", payload, qos=1)
+
+    def enqueue_keypad_control(self, partition: int, key: str) -> tuple[bool, str]:
+        return self.control.enqueue_keypad(partition, key)
+
+    def enqueue_alarm_control(self, partition: int, action: str, code: str) -> tuple[bool, str]:
+        return self.control.enqueue_alarm(partition, action, code)
 
     def enqueue_raw_tx(self, data: bytes) -> tuple[bool, str]:
         return self._enqueue_tx(data, source="debug", label="raw")
@@ -72,6 +96,7 @@ class VistaBridge:
         self.mqtt.start()
         background = [
             asyncio.create_task(self._metrics_loop(), name="metrics"),
+            asyncio.create_task(self.control.run(self._stop), name="panel-control"),
             asyncio.create_task(self.printer.run(self._stop), name="transport-printer"),
         ]
         try:
@@ -164,6 +189,7 @@ class VistaBridge:
         self._writer = writer
         self.framer = VistaStreamFramer()
         self.synchronizer.reset_connection_state()
+        self.control.reset_session()
         self.state.reset_connection_derived_annunciators()
         for keypad in self.state.keypads.values():
             if keypad.initialized:
@@ -177,6 +203,7 @@ class VistaBridge:
     async def _stop_session(self, tasks: set[asyncio.Task]) -> None:
         self._panel_connected.clear()
         self.synchronizer.reset_connection_state()
+        self.control.reset_session()
         for task in tasks:
             if not task.done():
                 task.cancel()
@@ -275,6 +302,9 @@ class VistaBridge:
     def _log_tx(item: TxItem) -> None:
         if item.source == "debug":
             LOG.warning("RAW TX sent (%d bytes): %s", len(item.data), item.data.hex(" "))
+            return
+        if item.source == "control":
+            LOG.info("TX control [%s] %d bytes (payload redacted)", item.label, len(item.data))
             return
         LOG.info(
             "TX %s [%s] %d bytes ASCII=%r HEX=%s",

@@ -1,5 +1,6 @@
 from vista_bridge.config import (
     EventHistorySettings,
+    ControlSettings,
     KeypadSettings,
     MqttSettings,
     PanelSettings,
@@ -16,6 +17,9 @@ def make_settings(
     printer_host: str = "127.0.0.1",
     printer_port: int = 9101,
     chime_zones: tuple[int, ...] = (),
+    control_enabled: bool = False,
+    keypad_control_enabled: bool = False,
+    native_alarm_control_enabled: bool = False,
 ) -> Settings:
     return Settings(
         panel=PanelSettings(
@@ -50,6 +54,13 @@ def make_settings(
             poll_interval_seconds=7,
             event_refresh_delay_ms=250,
             chime_zones=chime_zones,
+        ),
+        control=ControlSettings(
+            enabled=control_enabled,
+            keypad_enabled=keypad_control_enabled,
+            native_alarm_enabled=native_alarm_control_enabled,
+            response_timeout_seconds=3,
+            verify_delay_ms=0,
         ),
         event_history=EventHistorySettings(
             enabled=True,

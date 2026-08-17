@@ -29,10 +29,14 @@ class MqttPublisher:
         self,
         settings: Settings,
         raw_tx_callback: Callable[[bytes], tuple[bool, str]],
+        keypad_command_callback: Callable[[int, str], tuple[bool, str]] | None = None,
+        alarm_command_callback: Callable[[int, str, str], tuple[bool, str]] | None = None,
     ) -> None:
         self.settings = settings
         self.mqtt = settings.mqtt
         self.raw_tx_callback = raw_tx_callback
+        self.keypad_command_callback = keypad_command_callback
+        self.alarm_command_callback = alarm_command_callback
         self._client = mqtt.Client(
             callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
             client_id="vista128-bridge",
@@ -114,7 +118,14 @@ class MqttPublisher:
         self._publish_discovery_config(
             "alarm_control_panel",
             f"partition_{partition}",
-            partition_config(partition, self.topic),
+            partition_config(
+                partition,
+                self.topic,
+                control_enabled=(
+                    self.settings.control.enabled
+                    and self.settings.control.native_alarm_enabled
+                ),
+            ),
         )
 
     def publish_partition_state(self, partition: PartitionState) -> None:
@@ -139,9 +150,19 @@ class MqttPublisher:
             return
         prefix = f"keypad/{keypad.partition}"
         self.publish(f"{prefix}/state", keypad.ha_state, retain=True, qos=1)
+        attributes = keypad.attributes()
+        keypad_control = bool(
+            self.settings.control.enabled and self.settings.control.keypad_enabled
+        )
+        attributes["control_enabled"] = keypad_control
+        attributes["command_topic"] = (
+            self.topic(f"keypad/{keypad.partition}/command")
+            if keypad_control
+            else None
+        )
         self.publish_json(
             f"{prefix}/attributes",
-            keypad.attributes(),
+            attributes,
             retain=True,
             qos=1,
         )
@@ -289,7 +310,10 @@ class MqttPublisher:
         LOG.info("Connected to MQTT broker")
         self.publish("bridge/availability", "online", retain=True, qos=1)
         self.publish_discovery()
-        client.subscribe(self.topic("partition/+/command"), qos=1)
+        if self.settings.control.enabled and self.settings.control.native_alarm_enabled:
+            client.subscribe(self.topic("partition/+/command"), qos=1)
+        if self.settings.control.enabled and self.settings.control.keypad_enabled:
+            client.subscribe(self.topic("keypad/+/command"), qos=1)
         if self.settings.debug_raw_tx_enabled:
             client.subscribe(self.topic("debug/tx"), qos=1)
             LOG.warning("Raw transmit enabled on %s", self.topic("debug/tx"))
@@ -305,8 +329,11 @@ class MqttPublisher:
         LOG.warning("Disconnected from MQTT broker: %s", reason_code)
 
     def _on_message(self, client, userdata, message) -> None:
+        if self._is_keypad_command(message.topic):
+            self._handle_keypad_command(message.topic, message.payload)
+            return
         if self._is_partition_command(message.topic):
-            self._reject_partition_command(message.topic, message.payload)
+            self._handle_partition_command(message.topic, message.payload)
             return
         if message.topic == self.topic("debug/tx") and self.settings.debug_raw_tx_enabled:
             self._handle_raw_tx(message.payload)
@@ -314,13 +341,55 @@ class MqttPublisher:
     def _is_partition_command(self, topic: str) -> bool:
         return topic.startswith(self.topic("partition/")) and topic.endswith("/command")
 
-    def _reject_partition_command(self, topic: str, payload: bytes) -> None:
-        text = payload.decode("utf-8", errors="replace")
-        LOG.warning("Rejected alarm command on %s: %r", topic, text)
+    def _is_keypad_command(self, topic: str) -> bool:
+        return topic.startswith(self.topic("keypad/")) and topic.endswith("/command")
+
+    def _partition_from_topic(self, topic: str, category: str) -> int:
+        prefix = self.topic(category) + "/"
+        if not topic.startswith(prefix) or not topic.endswith("/command"):
+            raise ValueError("invalid command topic")
+        value = topic[len(prefix):-len("/command")]
+        partition = int(value)
+        if partition < 1 or partition > 8:
+            raise ValueError("partition must be 1..8")
+        return partition
+
+    def _publish_control_rejection(self, kind: str, partition: int | None, reason: str) -> None:
+        LOG.warning("Rejected %s control request P%s: %s", kind, partition or "?", reason)
         self.publish_json(
             "control/rejected",
-            {"topic": topic, "payload": text, "reason": "control_disabled"},
+            {"kind": kind, "partition": partition, "reason": reason},
         )
+
+    def _handle_keypad_command(self, topic: str, payload: bytes) -> None:
+        partition = None
+        try:
+            partition = self._partition_from_topic(topic, "keypad")
+            key = payload.decode("ascii", errors="strict")
+            if self.keypad_command_callback is None:
+                raise ValueError("keypad control callback unavailable")
+            accepted, detail = self.keypad_command_callback(partition, key)
+            if not accepted:
+                raise ValueError(detail)
+        except Exception as exc:
+            self._publish_control_rejection("keypad", partition, str(exc))
+
+    def _handle_partition_command(self, topic: str, payload: bytes) -> None:
+        partition = None
+        action = ""
+        try:
+            partition = self._partition_from_topic(topic, "partition")
+            request = json.loads(payload.decode("utf-8"))
+            action = str(request.get("action", "")).upper()
+            code = str(request.get("code", ""))
+            if self.alarm_command_callback is None:
+                raise ValueError("native alarm control callback unavailable")
+            accepted, detail = self.alarm_command_callback(partition, action, code)
+            if not accepted:
+                raise ValueError(detail)
+        except Exception as exc:
+            # Never include the inbound payload or credential in logs/telemetry.
+            self._publish_control_rejection("alarm", partition, str(exc))
 
     def _handle_raw_tx(self, payload: bytes) -> None:
         try:

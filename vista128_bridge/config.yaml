@@ -36,6 +36,11 @@ options:
   keypad_poll_interval_seconds: 7
   keypad_event_refresh_delay_ms: 250
   chime_zones: ""
+  control_enabled: false
+  keypad_control_enabled: false
+  native_alarm_control_enabled: false
+  control_response_timeout_seconds: 3
+  control_verify_delay_ms: 400
   event_history_enabled: true
   event_history_startup_dump_enabled: false
   event_history_recent_limit: 20
@@ -70,6 +75,11 @@ schema:
   keypad_poll_interval_seconds: int(2,300)
   keypad_event_refresh_delay_ms: int(0,5000)
   chime_zones: str
+  control_enabled: bool
+  keypad_control_enabled: bool
+  native_alarm_control_enabled: bool
+  control_response_timeout_seconds: int(1,10)
+  control_verify_delay_ms: int(0,5000)
   event_history_enabled: bool
   event_history_startup_dump_enabled: bool
   event_history_recent_limit: int(1,100)

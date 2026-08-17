@@ -262,20 +262,31 @@ def zone_summary_entities(topic: TopicFn) -> dict[str, dict]:
     }
 
 
-def partition_config(partition: int, topic: TopicFn) -> dict:
-    return {
+def partition_config(partition: int, topic: TopicFn, control_enabled: bool = False) -> dict:
+    config = {
         "name": f"Partition {partition}",
         "unique_id": f"vista128_partition_{partition}",
         "state_topic": topic(f"partition/{partition}/state"),
-        "command_topic": topic(f"partition/{partition}/command"),
         "json_attributes_topic": topic(f"partition/{partition}/attributes"),
         **panel_entity_availability(topic),
         "supported_features": [],
-        "code_arm_required": False,
-        "code_disarm_required": False,
         "device": device_info(),
         "enabled_by_default": partition == 1,
     }
+    if control_enabled:
+        config.update(
+            {
+                "command_topic": topic(f"partition/{partition}/command"),
+                "code": "REMOTE_CODE",
+                "code_arm_required": True,
+                "code_disarm_required": True,
+                "code_trigger_required": False,
+                "command_template": '{"action":"{{ action }}","code":"{{ code }}"}',
+                "supported_features": ["arm_home", "arm_away", "arm_night"],
+                "retain": False,
+            }
+        )
+    return config
 
 
 def keypad_config(partition: int, topic: TopicFn) -> dict:

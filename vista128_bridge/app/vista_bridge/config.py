@@ -82,6 +82,15 @@ class KeypadSettings:
 
 
 @dataclass(frozen=True)
+class ControlSettings:
+    enabled: bool
+    keypad_enabled: bool
+    native_alarm_enabled: bool
+    response_timeout_seconds: int
+    verify_delay_ms: int
+
+
+@dataclass(frozen=True)
 class EventHistorySettings:
     enabled: bool
     startup_dump_enabled: bool
@@ -107,6 +116,7 @@ class Settings:
     mqtt: MqttSettings
     sync: SyncSettings
     keypad: KeypadSettings
+    control: ControlSettings
     event_history: EventHistorySettings
     printer: PrinterSettings
     raw_logging: bool
@@ -160,6 +170,13 @@ class Settings:
                 ),
                 chime_zones=_zone_list(os.environ.get("CHIME_ZONES", "")),
             ),
+            control=ControlSettings(
+                enabled=_bool_env("CONTROL_ENABLED", False),
+                keypad_enabled=_bool_env("KEYPAD_CONTROL_ENABLED", False),
+                native_alarm_enabled=_bool_env("NATIVE_ALARM_CONTROL_ENABLED", False),
+                response_timeout_seconds=int(os.environ.get("CONTROL_RESPONSE_TIMEOUT_SECONDS", "3")),
+                verify_delay_ms=int(os.environ.get("CONTROL_VERIFY_DELAY_MS", "400")),
+            ),
             event_history=EventHistorySettings(
                 enabled=_bool_env("EVENT_HISTORY_ENABLED", True),
                 startup_dump_enabled=_bool_env("EVENT_HISTORY_STARTUP_DUMP_ENABLED", False),
@@ -197,6 +214,10 @@ class Settings:
             raise ValueError("keypad_poll_interval_seconds must be >= 2")
         if not 0 <= self.keypad.event_refresh_delay_ms <= 5000:
             raise ValueError("keypad_event_refresh_delay_ms must be 0..5000")
+        if not 1 <= self.control.response_timeout_seconds <= 10:
+            raise ValueError("control_response_timeout_seconds must be 1..10")
+        if not 0 <= self.control.verify_delay_ms <= 5000:
+            raise ValueError("control_verify_delay_ms must be 0..5000")
         if not self.event_history.sqlite_path:
             raise ValueError("event_history_sqlite_path must not be empty")
         if not 1 <= self.event_history.recent_limit <= 100:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 
 from .config import Settings
+from .control import VistaControlCoordinator
 from .event_store import EventStore
 from .mqtt_client import MqttPublisher
 from .printer import TransPortEventPrinter, panel_clock_offset_seconds
@@ -30,6 +31,7 @@ class ProtocolMessageHandler:
         printer: TransPortEventPrinter,
         synchronizer: VistaSynchronizer,
         event_store: EventStore | None = None,
+        control: VistaControlCoordinator | None = None,
     ) -> None:
         self.settings = settings
         self.state = state
@@ -37,6 +39,7 @@ class ProtocolMessageHandler:
         self.printer = printer
         self.synchronizer = synchronizer
         self.event_store = event_store
+        self.control = control
         self._history_dump_seen = 0
         self._history_dump_inserted = 0
         self._history_occurrences: dict[str, int] = {}
@@ -64,11 +67,15 @@ class ProtocolMessageHandler:
     def _handle_communication_on(self, data: bytes, received_at: str) -> None:
         LOG.info("VISTA reported Communication On")
         self.mqtt.publish("panel/automation_available", "ON", retain=True, qos=1)
+        if self.control is not None:
+            self.control.set_automation_available(True)
         self.synchronizer.request_full_resync("communication_on")
 
     def _handle_communication_off(self, data: bytes, received_at: str) -> None:
         LOG.info("VISTA reported Communication Off")
         self.mqtt.publish("panel/automation_available", "OFF", retain=True, qos=1)
+        if self.control is not None:
+            self.control.set_automation_available(False)
 
     def _handle_display_changed(self, data: bytes, received_at: str) -> None:
         # Some Turbo integrations document DC display-change notifications, but

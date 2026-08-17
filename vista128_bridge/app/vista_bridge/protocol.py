@@ -23,6 +23,7 @@ STARTUP_QUERIES: tuple[ProtocolQuery, ...] = (
 )
 
 STATE_SYNC_QUERIES: tuple[ProtocolQuery, ...] = STARTUP_QUERIES[:2]
+ARMING_STATUS_QUERY = STARTUP_QUERIES[0]
 EVENT_LOG_QUERY = ProtocolQuery(
     "event_log", b"08LD00A8\r\n", timeout_seconds=45, required=False
 )
@@ -115,6 +116,74 @@ class SystemEvent:
         except ValueError:
             return None
         return value.isoformat(timespec="minutes")
+
+
+KEYSTROKE_CODES = {
+    **{str(value): str(value) for value in range(10)},
+    "*": "A",
+    "#": "B",
+    "PANIC_A": "C",
+    "PANIC_B": "D",
+    "PANIC_C": "E",
+}
+
+NATIVE_ARM_COMMANDS = {
+    "ARM_AWAY": "AA",
+    "ARM_HOME": "AH",
+    "ARM_NIGHT": "AI",
+    "ARM_MAXIMUM": "AM",
+    "FORCE_ARM_AWAY": "FA",
+    "FORCE_ARM_HOME": "FH",
+    "DISARM": "AD",
+}
+
+
+def build_command_frame(command: str, data: str) -> bytes:
+    if len(command) != 2 or not command.isascii():
+        raise ValueError("VISTA command must be two ASCII characters")
+    if not data.isascii():
+        raise ValueError("VISTA command data must be ASCII")
+    body = f"{command}{data}00"
+    total_length = 2 + len(body) + 2
+    if total_length > 0xFF:
+        raise ValueError("VISTA command frame is too long")
+    prefix = f"{total_length:02X}{body}".encode("ascii")
+    checksum = (-sum(prefix)) & 0xFF
+    return prefix + f"{checksum:02X}\r\n".encode("ascii")
+
+
+def build_keypad_stroke_command(partition: int, keys) -> bytes:
+    if partition < 1 or partition > 8:
+        raise ValueError("keypad partition must be 1..8")
+    if isinstance(keys, str):
+        tokens = [keys] if keys.upper().startswith("PANIC_") else list(keys)
+    else:
+        tokens = list(keys)
+    if not 1 <= len(tokens) <= 5:
+        raise ValueError("keypad command must contain 1..5 keystrokes")
+    encoded = []
+    for token in tokens:
+        normalized = str(token).upper() if str(token).upper().startswith("PANIC_") else str(token)
+        code = KEYSTROKE_CODES.get(normalized)
+        if code is None:
+            raise ValueError(f"unsupported keypad keystroke: {token!r}")
+        encoded.append(code)
+    return build_command_frame("KS", f"{partition}{''.join(encoded)}")
+
+
+def build_native_alarm_command(action: str, code: str, partitions) -> bytes:
+    normalized_action = str(action).upper()
+    command = NATIVE_ARM_COMMANDS.get(normalized_action)
+    if command is None:
+        raise ValueError(f"unsupported native alarm action: {action!r}")
+    code = str(code)
+    if len(code) != 4 or not code.isdigit():
+        raise ValueError("VISTA user code must contain exactly four digits")
+    selected = {int(value) for value in partitions}
+    if not selected or any(value < 1 or value > 8 for value in selected):
+        raise ValueError("alarm command partitions must contain 1..8")
+    partition_mask = ''.join('1' if value in selected else '0' for value in range(1, 9))
+    return build_command_frame(command, f"00{code}{partition_mask}")
 
 
 def build_keypad_display_query(partition: int) -> ProtocolQuery:

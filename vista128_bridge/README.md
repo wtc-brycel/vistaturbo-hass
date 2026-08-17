@@ -142,3 +142,18 @@ Only **VISTA-128BPT** is currently tested. Other VISTA Turbo models are not yet 
 This App was made with the use of AI - ChatGPT Codex, specifically - during protocol research and development. VISTA Turbo automation documentation is fragmented, and Crestron integration documentation was particularly useful in understanding parts of the interface.
 
 The implementation has been tested against real panel traffic. Review the source before relying on it in your own installation.
+
+
+## Experimental panel control
+
+The next release candidate adds a gated native write path. Control remains disabled unless all required App toggles are explicitly enabled.
+
+```yaml
+control_enabled: true
+keypad_control_enabled: true
+native_alarm_control_enabled: true
+```
+
+Keypad input uses typed VISTA `KS` frames for `0-9`, `*`, and `#`. The A-D visual function keys are intentionally not transmitted as literal letters because the VISTA protocol uses those data characters for other keystroke encodings.
+
+Native Home Assistant alarm control uses the documented VISTA arm/disarm command families and Home Assistant MQTT remote-code validation. PIN values are never retained, written to App logs, or echoed in control telemetry. Control TX payloads are redacted from bridge logging.
