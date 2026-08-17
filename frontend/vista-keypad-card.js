@@ -1,4 +1,4 @@
-const VISTA_KEYPAD_CARD_VERSION = "0.3.14";
+const VISTA_KEYPAD_CARD_VERSION = "0.3.15";
 
 const MODEL_ALIASES = {
   "6160cr2": "6160cr2",
@@ -25,6 +25,35 @@ const DEFAULT_FUNCTION_KEYS = {
   "6160cr2": ["AWAY", "STAY", "POLICE", "PAGE"],
   "6160": ["", "", "", ""],
 };
+
+/*
+ * Layout metadata lives with the model instead of inside the mobile renderer.
+ * Future keypad models can opt into the compact layout by defining their
+ * annunciators here without cloning the responsive UI.
+ */
+const MODEL_PROFILES = {
+  "6160cr2": {
+    compactFunctionKeys: ["AWAY", "STAY", "POLICE", "PAGE"],
+    compactIndicators: [
+      { label: "READY", state: "ready", className: "ready", flash: "ready" },
+      { label: "ARMED", state: "armed", className: "armed", flash: "armed" },
+      { label: "PWR", state: "power", className: "power", flash: "power" },
+      { label: "FIRE", state: "fireAlarm", className: "fire-alarm", flash: "fire_alarm" },
+      { label: "SIL", state: "silenced", className: "silenced", flash: "silenced" },
+      { label: "SUPV", state: "supervisory", className: "supervisory", flash: "supervisory" },
+      { label: "TRBL", state: "trouble", className: "trouble", flash: null },
+    ],
+  },
+  "6160": {
+    compactFunctionKeys: ["A", "B", "C", "D"],
+    compactIndicators: [
+      { label: "READY", state: "ready", className: "ready", flash: "ready" },
+      { label: "ARMED", state: "armed", className: "armed", flash: "armed" },
+    ],
+  },
+};
+
+const LAYOUT_MODES = new Set(["auto", "physical", "compact"]);
 
 const MATRIX_5X7 = {
   " ":[0,0,0,0,0], "A":[0x7e,0x11,0x11,0x11,0x7e], "B":[0x7f,0x49,0x49,0x49,0x36],
@@ -164,6 +193,7 @@ class VistaKeypadCard extends HTMLElement {
       entity: "sensor.vista_partition_1_keypad",
       model: "6160cr2",
       case_color: "auto",
+      layout: "auto",
       read_only: true,
     };
   }
@@ -177,6 +207,11 @@ class VistaKeypadCard extends HTMLElement {
     const caseColor = String(config.case_color ?? "auto").toLowerCase();
     if (caseColor !== "auto" && !CASE_COLORS.has(caseColor)) {
       throw new Error("case_color must be auto, red, white, or dark");
+    }
+
+    const layout = String(config.layout ?? "auto").toLowerCase();
+    if (!LAYOUT_MODES.has(layout)) {
+      throw new Error("layout must be auto, physical, or compact");
     }
 
     const normalizeOptionalCaseColor = (value, name) => {
@@ -195,6 +230,7 @@ class VistaKeypadCard extends HTMLElement {
       title: "",
       model,
       case_color: "auto",
+      layout: "auto",
       day_case_color: null,
       night_case_color: null,
       read_only: true,
@@ -207,6 +243,7 @@ class VistaKeypadCard extends HTMLElement {
       ...config,
       model,
       case_color: caseColor,
+      layout,
       day_case_color: dayCaseColor,
       night_case_color: nightCaseColor,
     };
@@ -230,7 +267,7 @@ class VistaKeypadCard extends HTMLElement {
   getGridOptions() {
     return {
       columns: 12,
-      min_columns: 6,
+      min_columns: 4,
       max_columns: 12,
     };
   }
@@ -400,8 +437,12 @@ class VistaKeypadCard extends HTMLElement {
     return { text: fallbackText, background: "", color: "" };
   }
 
-  _functionKey(index, model) {
-    const def = this._functionDefinition(index, DEFAULT_FUNCTION_KEYS[model][index]);
+  _functionKey(index, model, compact = false) {
+    const profile = MODEL_PROFILES[model];
+    const fallbackText = compact
+      ? profile?.compactFunctionKeys?.[index] ?? DEFAULT_FUNCTION_KEYS[model][index]
+      : DEFAULT_FUNCTION_KEYS[model][index];
+    const def = this._functionDefinition(index, fallbackText);
     const style = [
       def.background ? `--key-custom-bg:${def.background}` : "",
       def.color ? `--key-custom-color:${def.color}` : "",
@@ -419,9 +460,9 @@ class VistaKeypadCard extends HTMLElement {
     </button>`;
   }
 
-  _controls(model) {
+  _controls(model, compact = false) {
     const functions = FUNCTION_IDS.map(
-      (_, i) => `<div class="grid-slot function-slot slot-r${i + 1}">${this._functionKey(i, model)}</div>`
+      (_, i) => `<div class="grid-slot function-slot slot-r${i + 1}">${this._functionKey(i, model, compact)}</div>`
     ).join("");
 
     const numeric = NUMBER_KEYS.map(([key, legend], i) => {
@@ -477,6 +518,44 @@ class VistaKeypadCard extends HTMLElement {
     return `<div class="status-6160">
       ${this._led("ARMED", display.armed, "armed", display.flashing.armed)}
       ${this._led("READY", display.ready, "ready", display.flashing.ready)}
+    </div>`;
+  }
+
+  _compactIndicator(item, display) {
+    const state = display[item.state] ?? null;
+    const flashing = item.flash ? Boolean(display.flashing?.[item.flash]) : false;
+    const status = state === null ? "unknown" : state ? "on" : "off";
+    const flashClass = state === true && flashing ? " flashing" : "";
+    const spoken = `${item.label} ${status}${flashClass ? " flashing" : ""}`;
+
+    return `<div class="compact-indicator led-row ${escapeHtml(item.className)}">
+      <span class="led ${status}${flashClass}" aria-label="${escapeHtml(spoken)}"></span>
+      <span class="compact-indicator-label">${escapeHtml(item.label)}</span>
+    </div>`;
+  }
+
+  _compactStatus(model, display) {
+    const profile = MODEL_PROFILES[model];
+    const indicators = profile?.compactIndicators ?? [];
+    if (!indicators.length) return "";
+    return `<div class="compact-status" aria-label="Keypad status">
+      ${indicators.map((item) => this._compactIndicator(item, display)).join("")}
+    </div>`;
+  }
+
+  _renderCompact(model, display) {
+    const resolvedCaseColor = this._resolvedCaseColor(model);
+    const caseClass = `case-${resolvedCaseColor}`;
+
+    return `<div class="compact-shell compact-${model} ${caseClass}" data-model="${model}" data-case-color="${escapeHtml(resolvedCaseColor)}">
+      <div class="compact-lcd-frame">
+        <canvas class="matrix-lcd"
+          data-line1="${escapeHtml(display.line1)}"
+          data-line2="${escapeHtml(display.line2)}"
+          data-lit="${display.backlight && display.available ? "1" : "0"}"></canvas>
+      </div>
+      ${this._compactStatus(model, display)}
+      <div class="compact-controls">${this._controls(model, true)}</div>
     </div>`;
   }
 
@@ -543,7 +622,7 @@ class VistaKeypadCard extends HTMLElement {
         color:var(--primary-text-color);
       }
 
-      .keypad-shell, .keypad-shell * { box-sizing:border-box; }
+      .keypad-shell, .keypad-shell *, .compact-shell, .compact-shell * { box-sizing:border-box; }
 
       .keypad-shell {
         --case-red:#d71f26;
@@ -1147,6 +1226,225 @@ class VistaKeypadCard extends HTMLElement {
         font-weight:500;
       }
 
+      /*
+       * Adaptive layout framework. AUTO preserves the physical facsimile when
+       * space is available and swaps to a touchscreen-first composition in
+       * narrow Lovelace cards. The compact renderer itself is model-agnostic;
+       * model-specific annunciators come from MODEL_PROFILES.
+       */
+      .layout-host {
+        width:100%;
+        max-width:940px;
+      }
+
+      .layout-physical-view,
+      .layout-compact-view {
+        width:100%;
+      }
+
+      .layout-mode-physical .layout-compact-view,
+      .layout-mode-compact .layout-physical-view,
+      .layout-mode-auto .layout-compact-view {
+        display:none;
+      }
+
+      .compact-shell {
+        --case-red:#d71f26;
+        --case-red-hi:#ef3a41;
+        --case-red-lo:#b90f17;
+        --case-white:#f0f0ed;
+        --case-white-lo:#d4d4cf;
+        --case-dark:#34373a;
+        --case-dark-hi:#4a4e52;
+        --case-dark-lo:#202225;
+
+        width:100%;
+        min-width:0;
+        padding:12px;
+        border:1px solid;
+        border-radius:18px;
+        overflow:hidden;
+        user-select:none;
+        -webkit-tap-highlight-color:transparent;
+        filter:drop-shadow(0 6px 8px rgba(0,0,0,.24));
+      }
+
+      .compact-shell.case-red,
+      .compact-shell.case-dark {
+        color:#f3f4f4;
+      }
+
+      .compact-shell.case-white {
+        color:#1f2020;
+      }
+
+      .compact-lcd-frame {
+        width:100%;
+        height:clamp(82px,23cqw,108px);
+        padding:5px;
+        border-radius:8px;
+        background:linear-gradient(180deg,#565953,#222520 16%,#0f100f 100%);
+        box-shadow:
+          inset 0 2px 4px rgba(0,0,0,.88),
+          0 1px 1px rgba(255,255,255,.18);
+      }
+
+      .compact-lcd-frame .matrix-lcd {
+        border-radius:3px;
+      }
+
+      .compact-status {
+        display:grid;
+        grid-template-columns:repeat(auto-fit,minmax(64px,1fr));
+        gap:6px;
+        margin-top:10px;
+      }
+
+      .compact-6160cr2 .compact-status {
+        grid-template-columns:repeat(4,minmax(0,1fr));
+      }
+
+      .compact-6160 .compact-status {
+        grid-template-columns:repeat(2,minmax(0,1fr));
+      }
+
+      .compact-indicator.led-row {
+        min-width:0;
+        min-height:30px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        gap:6px;
+        padding:4px 5px;
+        border:1px solid rgba(255,255,255,.16);
+        border-radius:7px;
+        background:rgba(0,0,0,.12);
+        font-size:10px;
+        line-height:1;
+      }
+
+      .compact-shell.case-white .compact-indicator.led-row {
+        border-color:rgba(0,0,0,.14);
+        background:rgba(0,0,0,.045);
+      }
+
+      .compact-indicator .led {
+        flex:0 0 auto;
+        width:18px;
+        height:8px;
+      }
+
+      .compact-indicator-label {
+        min-width:0;
+        overflow:hidden;
+        text-overflow:clip;
+        white-space:nowrap;
+        font:800 10px/1 "Arial Narrow","Roboto Condensed",Arial,sans-serif;
+        letter-spacing:.01em;
+      }
+
+      .compact-controls {
+        width:100%;
+        margin-top:10px;
+      }
+
+      .compact-shell .key-grid {
+        width:100%;
+        height:auto;
+        display:grid;
+        grid-template-columns:repeat(4,minmax(0,1fr));
+        grid-template-rows:repeat(4,clamp(50px,14cqw,58px));
+        column-gap:8px;
+        row-gap:8px;
+      }
+
+      .compact-shell .grid-slot {
+        width:auto;
+        height:auto;
+        min-width:0;
+        min-height:0;
+      }
+
+      .compact-shell .function-slot {
+        transform:none;
+      }
+
+      .compact-shell .physical-key {
+        min-width:0;
+        min-height:48px;
+        padding:0 4px;
+        border-width:1px;
+        border-radius:7px;
+      }
+
+      .compact-shell .physical-key:active,
+      .compact-shell .physical-key.pressed {
+        transform:translateY(1px);
+      }
+
+      .compact-shell .function-label {
+        font-size:clamp(9px,3.0cqw,13px);
+        letter-spacing:-.02em;
+      }
+
+      .compact-shell .number-key {
+        gap:clamp(2px,1.2cqw,6px);
+      }
+
+      .compact-shell .number-main {
+        font-size:clamp(22px,7.4cqw,32px);
+      }
+
+      .compact-shell .number-legend {
+        font-size:clamp(7px,2.35cqw,11px);
+      }
+
+      @container (max-width:520px) {
+        .layout-mode-auto .layout-physical-view { display:none; }
+        .layout-mode-auto .layout-compact-view { display:block; }
+      }
+
+      @container (max-width:320px) {
+        .compact-shell {
+          padding:9px;
+          border-radius:14px;
+        }
+
+        .compact-status {
+          gap:4px;
+          margin-top:8px;
+        }
+
+        .compact-indicator.led-row {
+          min-height:27px;
+          gap:4px;
+          padding:3px;
+        }
+
+        .compact-indicator .led {
+          width:15px;
+          height:7px;
+        }
+
+        .compact-indicator-label {
+          font-size:9px;
+        }
+
+        .compact-controls {
+          margin-top:8px;
+        }
+
+        .compact-shell .key-grid {
+          grid-template-rows:repeat(4,50px);
+          column-gap:5px;
+          row-gap:5px;
+        }
+
+        .compact-shell .number-legend {
+          display:none;
+        }
+      }
+
       .read-only-note {
         min-height:18px;
         opacity:0;
@@ -1181,10 +1479,13 @@ class VistaKeypadCard extends HTMLElement {
   }
 
   _drawLCD() {
-    const canvas = this.shadowRoot?.querySelector(".matrix-lcd");
-    if (!canvas) return;
+    const canvases = this.shadowRoot?.querySelectorAll(".matrix-lcd") ?? [];
+    canvases.forEach((canvas) => this._drawLCDCanvas(canvas));
+  }
 
+  _drawLCDCanvas(canvas) {
     const rect = canvas.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
     const scale = Math.max(1, window.devicePixelRatio || 1);
     canvas.width = Math.max(1, Math.round(rect.width * scale));
     canvas.height = Math.max(1, Math.round(rect.height * scale));
@@ -1256,7 +1557,7 @@ class VistaKeypadCard extends HTMLElement {
   }
 
   _observeResize() {
-    const shell = this.shadowRoot?.querySelector(".keypad-shell");
+    const shell = this.shadowRoot?.querySelector(".layout-host");
     if (!shell || typeof ResizeObserver === "undefined") return;
 
     this._resizeObserver ??= new ResizeObserver(() => {
@@ -1274,9 +1575,13 @@ class VistaKeypadCard extends HTMLElement {
     if (!this.shadowRoot || !this._config) return;
 
     const display = this._displayState();
+    const layoutClass = `layout-mode-${this._config.layout ?? "auto"}`;
     this.shadowRoot.innerHTML = `<style>${this._styles()}</style><ha-card><div class="wrap">
       ${this._config.title ? `<div class="card-title">${escapeHtml(this._config.title)}</div>` : ""}
-      ${this._renderPhysical(this._config.model, display)}
+      <div class="layout-host ${layoutClass}">
+        <div class="layout-physical-view">${this._renderPhysical(this._config.model, display)}</div>
+        <div class="layout-compact-view">${this._renderCompact(this._config.model, display)}</div>
+      </div>
       <div class="read-only-note" id="read-only-note">Read-only monitoring. Keypad control is not enabled.</div>
     </div></ha-card>`;
 
