@@ -2,7 +2,7 @@
 
 Vista Turbo HASS is a local Home Assistant integration for the native RS-232 automation interface on Honeywell/Resideo VISTA Turbo alarm panels.
 
-> **Current status:** 0.2.6-rc.1 release candidate. Read-only. Tested on a VISTA-128BPT. Keypad display polling is enabled. Arm, disarm, and keypad control commands are not sent to the panel.
+> **Current status:** 0.2.6-rc.2 release candidate. Read-only. Tested on a VISTA-128BPT. Keypad display polling is enabled. Arm, disarm, and keypad control commands are not sent to the panel.
 
 ## What it does
 
@@ -12,7 +12,7 @@ Vista Turbo HASS is a local Home Assistant integration for the native RS-232 aut
 - Decodes real-time VISTA automation events
 - Imports programmed zone alpha descriptors
 - Reads the exact 2 x 16 partition keypad display over RS-232
-- Publishes keypad Ready, Trouble, Armed, backlight, and CR-2 fire annunciator state
+- Publishes keypad Ready, Trouble, Armed, backlight, and CR-2 annunciator state
 - Includes responsive read-only 6160CR-2 and 6160 Home Assistant dashboard cards
 - Reconciles panel state periodically in case an event is missed
 - Optionally prints event receipts through TransPort
@@ -53,26 +53,26 @@ Add this repository to the Home Assistant App Store:
 https://github.com/wtc-brycel/vistaturbo-hass
 ```
 
-Install **Vista Turbo RS232**, then configure the TCP address and port of the serial server. Partition 1 keypad polling is enabled by default every 7 seconds.
+Install or update **Vista Turbo RS232** to `0.2.6-rc.2`, then configure the TCP address and port of the serial server. Partition 1 keypad polling is enabled by default every 7 seconds.
 
 The App requires the Home Assistant MQTT service.
 
 ## Install the keypad card
 
-The matching `vista-keypad-card.js` is attached to the 0.2.6-rc.1 GitHub release and is also kept in `frontend/` in this repository.
+The matching `vista-keypad-card.js` is attached to the `v0.2.6-rc.2` GitHub release and is also kept in `frontend/` in this repository.
 
 From the Home Assistant Terminal or SSH add-on:
 
 ```sh
 mkdir -p /config/www
-curl -fL "https://github.com/wtc-brycel/vistaturbo-hass/releases/download/v0.2.6-rc.1/vista-keypad-card.js" \
+curl -fL "https://github.com/wtc-brycel/vistaturbo-hass/releases/download/v0.2.6-rc.2/vista-keypad-card.js" \
   -o /config/www/vista-keypad-card.js
 ```
 
 Then add a JavaScript module resource in **Settings -> Dashboards -> Resources**:
 
 ```text
-/local/vista-keypad-card.js?v=0.3.13
+/local/vista-keypad-card.js?v=0.3.14
 ```
 
 A minimal 6160CR-2 card is:
@@ -123,6 +123,20 @@ BYPAS-RDY TO ARM
 ```
 
 The keypad entity also publishes Ready, Trouble, Armed, backlight, Power, Fire Alarm, Silenced, and Supervisory state. The native KD packet supplies Ready, Trouble, and Armed directly. The additional CR-2 annunciators are reconstructed from validated VISTA events plus keypad reconciliation. Unknown reconstructed state remains `null` rather than being guessed.
+
+RC2 additionally invalidates event-derived CR-2 states after a panel TCP gap and requires both the bridge process and panel TCP session to be available before panel entities are shown as available in Home Assistant.
+
+## Mobile and narrow dashboard behavior
+
+The keypad preserves its enclosure aspect ratio at narrow widths and uses container-relative dimensions for keys, labels, LEDs, and the LCD. Card `0.3.14` adds:
+
+- ResizeObserver-driven LCD redraws after column or orientation changes
+- touch cancellation handling so a swipe does not leave a key visually pressed
+- Home Assistant grid sizing hints with a 6-column minimum
+- render-signature filtering so unrelated Home Assistant entity updates do not rebuild the entire keypad
+- automatic light/dark case updates without requiring a panel-state change
+
+The full physical annunciator layout is still shown at narrow widths. A separate compact annunciator presentation can be added later without changing the backend entity contract.
 
 ## Compatibility
 
