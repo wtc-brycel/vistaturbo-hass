@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.2.6-rc.2
+
+- Harden the 6160/6160CR-2 card for Home Assistant mobile and narrow dashboard layouts.
+- Add ResizeObserver-driven LCD redraws so orientation and Lovelace column changes do not stretch the canvas bitmap.
+- Handle pointer cancellation so touch scrolling cannot leave a keypad key visually pressed.
+- Avoid rebuilding the keypad Shadow DOM for unrelated Home Assistant state changes.
+- Observe browser light/dark theme changes when Home Assistant does not expose an explicit dark-mode value.
+- Add Home Assistant grid sizing hints with a six-column minimum.
+- Require both the bridge MQTT availability topic and the panel TCP connection topic for panel entity availability.
+- Invalidate event-derived Power, Fire Alarm, Silenced, and Supervisory state after a TCP communication gap so stale CR-2 state cannot survive a missed restore event.
+- Stop treating generic panel power-up events as authoritative evidence that AC power is present.
+- Allow a restored fire latch to clear on a later non-fire keypad display even if an unrelated burglary zone keeps READY off.
+- Add focused regression coverage for availability, reconnect state invalidation, AC semantics, and fire-latch clearing.
+- Keep all alarm and keypad control read-only.
+
 ## 0.2.6-rc.1
 
 - Add production 6160CR-2 and 6160 Home Assistant keypad cards.
