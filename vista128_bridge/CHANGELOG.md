@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.2.6-rc.7
+
+- Add the first opt-in VISTA panel write path while keeping all control disabled by default.
+- Add a serialized `VistaControlCoordinator` sharing the existing protocol transaction lock with synchronization and keypad polling.
+- Add typed VISTA `KS` keypad commands for `0-9`, `*`, and `#`, with exact frame/checksum regression tests.
+- Add typed native VISTA arm/disarm commands for Away, Home/Stay, Instant/Night, Maximum, Force Away, Force Home, and Disarm.
+- Enable standard Home Assistant Away, Home, Night, and Disarm through MQTT remote-code validation when native alarm control is explicitly enabled.
+- Require `08XN` Automation Interface Available before any control request can be queued and stop/discard requests on `08XF`.
+- Treat `08OK` only as protocol flow-control acknowledgement and verify native alarm results with a fresh arming-status query.
+- Never replay queued commands across a panel TCP reconnect; queued requests are tied to one connection generation and expire quickly.
+- Reject retained MQTT control messages so broker reconnects cannot replay old keypad or alarm commands.
+- Redact all control TX payloads from bridge logs and never echo alarm PINs or keypad digits in control result telemetry.
+- Keep keypad code entry responsive by waiting for `08OK` per stroke and requesting a coalesced keypad refresh instead of blocking every digit on a KD transaction.
+- Keep the A-D visual function keys and panic encodings unavailable through the normal RC7 keypad control path pending explicit action and hold-to-activate semantics.
+- Add card `0.3.20` with an opt-in visual-editor keypad-input toggle and direct non-retained Home Assistant MQTT publishing.
+- Preserve the RC6 SQLite event journal, historical event-log import, event-journal card, audio, chime, and First Alert keypad features.
+
 ## 0.2.6-rc.6
 
 - Add a persistent SQLite VISTA event journal at `/data/vista128_events.sqlite3`.

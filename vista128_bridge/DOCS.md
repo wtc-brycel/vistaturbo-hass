@@ -124,6 +124,11 @@ keypad_partitions: "1"
 keypad_poll_interval_seconds: 7
 keypad_event_refresh_delay_ms: 250
 chime_zones: ""
+control_enabled: false
+keypad_control_enabled: false
+native_alarm_control_enabled: false
+control_response_timeout_seconds: 3
+control_verify_delay_ms: 400
 event_history_enabled: true
 event_history_startup_dump_enabled: false
 event_history_recent_limit: 20
@@ -144,6 +149,26 @@ debug_raw_tx_enabled: false
 The keypad display is queried every 7 seconds by default. Valid unsolicited system events also request a debounced keypad refresh for the affected configured partition. All keypad queries share the same serialized transaction lock as startup and periodic synchronization.
 
 `chime_zones` is Vista Turbo RS232's own centralized dashboard-chime policy. It is intentionally separate from any chime programming transported on the VISTA ECP bus. Supply comma-separated VISTA zone numbers and ascending ranges, for example `"1,2,5-8,27"`. Valid zones are 1 through 128. An empty string disables bridge-generated chime events. A listed zone increments `chime_sequence` only for a new false-to-faulted `F5` transition after arming state is initialized and while the resolved partition is disarmed. Duplicate fault reports and faults while armed do not chime. The keypad entity also exposes `chime_zone`, `chime_descriptor`, and `chime_at`.
+
+## Experimental keypad and native alarm control
+
+RC7 contains the first panel write path, but it remains disabled by default. Enabling one feature requires the global gate plus that feature gate:
+
+```yaml
+control_enabled: true
+keypad_control_enabled: true
+native_alarm_control_enabled: true
+```
+
+`keypad_control_enabled` permits only ordinary `0-9`, `*`, and `#` keypad strokes. A-D function buttons and panic encodings are not exposed through the normal RC7 command topic. The browser publishes each keypad stroke as a non-retained MQTT command. The bridge rejects retained control messages and ties queued commands to one panel TCP session so a reconnect cannot replay a stale key or alarm request.
+
+`native_alarm_control_enabled` adds Home Assistant Away, Home/Stay, Night/Instant, and Disarm actions to the MQTT alarm-control-panel entity. Home Assistant uses remote-code validation and passes the entered four-digit code to the bridge for the native VISTA command. The code is never stored in MQTT discovery, written to bridge logs, or included in control-result telemetry. Control TX ASCII and hex payloads are redacted from the bridge log.
+
+Every control transaction shares the same serialization lock used by state synchronization. The bridge requires the panel to have reported `08XN` Communication On / Automation Interface Available. `08XF` immediately blocks new control and discards queued requests. `08OK` is treated as flow-control acknowledgement only. Native arm/disarm is followed by a fresh arming-status query and compared with the requested mode.
+
+Keypad strokes do not perform a blocking KD query after every digit. After `08OK`, the normal keypad-refresh path is requested so rapid code entry stays responsive while the display catches up asynchronously.
+
+`control_response_timeout_seconds` defaults to 3. `control_verify_delay_ms` defaults to 400 and applies to native alarm verification.
 
 ## Event journal and historical panel log
 

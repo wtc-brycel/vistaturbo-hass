@@ -2,7 +2,7 @@
 
 Home Assistant App for the native RS-232 automation interface on Honeywell/Resideo VISTA Turbo alarm panels.
 
-> **Release candidate status:** 0.2.6-rc.6 is read-only. It has been developed and tested on a VISTA-128BPT. Keypad display polling is enabled. Arm, disarm, and keypad-control commands are not sent to the panel.
+> **Release candidate status:** 0.2.6-rc.7 adds an experimental opt-in write path. It has been developed and tested for monitoring on a VISTA-128BPT; the new keypad and native arm/disarm commands are ready for their first physical panel validation. All control gates default to off.
 
 ## What you get in Home Assistant
 
@@ -71,7 +71,7 @@ Home Assistant MQTT Discovery uses `availability_mode: all` for partitions, keyp
 
 ## Dashboard keypad card
 
-The matching read-only Lovelace card ships with this release as `vista-keypad-card.js`. Card `0.3.19` includes the keypad models and visual editor from 0.3.18 plus the responsive `custom:vista-event-log-card` for the SQLite-backed recent event window.
+The matching Lovelace card ships with this release as `vista-keypad-card.js`. Card `0.3.20` includes the keypad models and visual editor from 0.3.18 plus the responsive `custom:vista-event-log-card` for the SQLite-backed recent event window.
 
 `layout: auto` is the default. The card keeps the approved physical facsimile above 520 px card-container width and switches to a touchscreen-first compact layout at 520 px and below. `layout: physical` and `layout: compact` can force either presentation.
 
@@ -127,6 +127,9 @@ keypad_partitions: "1"
 keypad_poll_interval_seconds: 7
 keypad_event_refresh_delay_ms: 250
 chime_zones: ""
+control_enabled: false
+keypad_control_enabled: false
+native_alarm_control_enabled: false
 ```
 
 `chime_zones` is the bridge-owned dashboard chime policy, independent of ECP keypad programming. It accepts comma-separated zone numbers and ascending ranges such as `"1,2,5-8,27"`. Listed zones chime only on a new fault transition while the resolved partition is known to be disarmed.
@@ -146,7 +149,7 @@ The implementation has been tested against real panel traffic. Review the source
 
 ## Experimental panel control
 
-The next release candidate adds a gated native write path. Control remains disabled unless all required App toggles are explicitly enabled.
+RC7 adds a gated native write path. Control remains disabled unless all required App toggles are explicitly enabled.
 
 ```yaml
 control_enabled: true

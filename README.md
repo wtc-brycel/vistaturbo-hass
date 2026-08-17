@@ -2,7 +2,7 @@
 
 Vista Turbo HASS is a local Home Assistant integration for the native RS-232 automation interface on Honeywell/Resideo VISTA Turbo alarm panels.
 
-> **Current status:** 0.2.6-rc.6 release candidate. Read-only. Tested on a VISTA-128BPT. Keypad display polling is enabled. Arm, disarm, and keypad control commands are not sent to the panel.
+> **Current status:** 0.2.6-rc.7 release candidate. Tested on a VISTA-128BPT. Monitoring remains enabled by default; experimental keypad and native alarm control are available only when explicitly enabled in the App.
 
 ## What it does
 
@@ -13,7 +13,7 @@ Vista Turbo HASS is a local Home Assistant integration for the native RS-232 aut
 - Imports programmed zone alpha descriptors
 - Reads the exact 2 x 16 partition keypad display over RS-232
 - Publishes keypad Ready, Trouble, Armed, backlight, and CR-2 annunciator state
-- Includes adaptive read-only 6160CR-2, 6160, and First Alert-inspired Home Assistant dashboard cards
+- Includes adaptive 6160CR-2, 6160, and First Alert-inspired Home Assistant dashboard cards
 - Supports optional low-latency keypad chirps, alarm/chime sounds, and browser haptics
 - Includes a Home Assistant visual card editor for common keypad, appearance, sound, haptic, and function-key settings
 - Supports a centralized configurable dashboard chime-zone list
@@ -58,26 +58,26 @@ Add this repository to the Home Assistant App Store:
 https://github.com/wtc-brycel/vistaturbo-hass
 ```
 
-Install or update **Vista Turbo RS232** to `0.2.6-rc.6`, then configure the TCP address and port of the serial server. Partition 1 keypad polling is enabled by default every 7 seconds.
+Install or update **Vista Turbo RS232** to `0.2.6-rc.7`, then configure the TCP address and port of the serial server. Partition 1 keypad polling is enabled by default every 7 seconds.
 
 The App requires the Home Assistant MQTT service.
 
 ## Install the keypad card
 
-The matching `vista-keypad-card.js` is attached to the `v0.2.6-rc.6` GitHub release and is also kept in `frontend/` in this repository.
+The matching `vista-keypad-card.js` is attached to the `v0.2.6-rc.7` GitHub release and is also kept in `frontend/` in this repository.
 
 From the Home Assistant Terminal or SSH add-on:
 
 ```sh
 mkdir -p /config/www
-curl -fL "https://github.com/wtc-brycel/vistaturbo-hass/releases/download/v0.2.6-rc.6/vista-keypad-card.js" \
+curl -fL "https://github.com/wtc-brycel/vistaturbo-hass/releases/download/v0.2.6-rc.7/vista-keypad-card.js" \
   -o /config/www/vista-keypad-card.js
 ```
 
 Then add a JavaScript module resource in **Settings -> Dashboards -> Resources**:
 
 ```text
-/local/vista-keypad-card.js?v=0.3.19
+/local/vista-keypad-card.js?v=0.3.20
 ```
 
 A minimal 6160CR-2 card is:
