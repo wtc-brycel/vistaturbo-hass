@@ -1,0 +1,38 @@
+name: Apply event history
+
+on:
+  push:
+    branches:
+      - feature/event-history
+    paths:
+      - .github/workflows/apply-event-history.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/event-history
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Apply event history integration
+        run: |
+          python .github/scripts/apply_event_history.py
+          python .github/scripts/apply_event_history_tests.py
+      - name: Run backend tests
+        working-directory: vista128_bridge
+        run: python -m unittest discover -s tests -v
+      - name: Validate frontend syntax
+        run: node --check frontend/vista-keypad-card.js
+      - name: Commit verified backend integration
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add vista128_bridge
+          git commit -m "Add persistent VISTA event journal and historical dump"
+          git push origin HEAD:feature/event-history
