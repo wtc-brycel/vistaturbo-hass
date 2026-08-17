@@ -1,0 +1,39 @@
+name: Apply adaptive keypad layout
+
+on:
+  push:
+    branches:
+      - feature/adaptive-keypad-layout
+    paths:
+      - .github/workflows/apply-adaptive-keypad.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/adaptive-keypad-layout
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Apply and validate adaptive layout
+        run: |
+          git apply --check .github/adaptive-keypad.patch
+          git apply .github/adaptive-keypad.patch
+          node --check frontend/vista-keypad-card.js
+          git diff --check
+          grep -q 'VISTA_KEYPAD_CARD_VERSION = "0.3.15"' frontend/vista-keypad-card.js
+          grep -q 'layout: "auto"' frontend/vista-keypad-card.js
+          grep -q '@container (max-width:520px)' frontend/vista-keypad-card.js
+      - name: Commit validated card
+        run: |
+          rm .github/adaptive-keypad.patch .github/workflows/apply-adaptive-keypad.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Add adaptive Lovelace keypad layout"
+          git push origin HEAD:feature/adaptive-keypad-layout
