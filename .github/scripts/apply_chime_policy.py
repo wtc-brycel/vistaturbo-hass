@@ -56,7 +56,7 @@ s = s.replace(
     partitions: tuple[int, ...]
     poll_interval_seconds: int
     event_refresh_delay_ms: int
-    chime_zones: tuple[int, ...]
+    chime_zones: tuple[int, ...] = ()
 ''',
     1,
 )
