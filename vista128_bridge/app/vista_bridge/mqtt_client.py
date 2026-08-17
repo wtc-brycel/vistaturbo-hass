@@ -100,11 +100,7 @@ class MqttPublisher:
                 {**config, **availability},
             )
         for object_id, config in zone_summary_entities(self.topic).items():
-            self._publish_discovery_config(
-                "sensor",
-                object_id,
-                {**config, **availability},
-            )
+            self._publish_discovery_config("sensor", object_id, config)
         if self.settings.keypad.enabled:
             for partition in self.settings.keypad.partitions:
                 self.publish_keypad_discovery(partition)

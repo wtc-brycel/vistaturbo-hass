@@ -154,6 +154,10 @@ class VistaBridge:
         self._writer = writer
         self.framer = VistaStreamFramer()
         self.synchronizer.reset_connection_state()
+        self.state.reset_connection_derived_annunciators()
+        for keypad in self.state.keypads.values():
+            if keypad.initialized:
+                self.mqtt.publish_keypad_state(keypad)
         self._panel_connected.set()
         LOG.info("Panel TCP connection established")
         self.mqtt.publish("panel/connected", "ON", retain=True)

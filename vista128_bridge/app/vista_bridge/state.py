@@ -51,8 +51,6 @@ SUPERVISORY_START_CODES = set(SUPERVISORY_RESTORE_TO_START.values())
 AC_POWER_EVENT_STATES = {
     "1B": False,  # AC loss
     "1C": True,   # AC restore
-    "0E": True,   # power-up report
-    "3E": True,   # power-up report
 }
 
 FIRE_DISPLAY_TOKENS = ("FIRE ALARM", "SMOKE ALARM", "WATERFLOW ALARM")
@@ -200,6 +198,18 @@ class VistaState:
         self.zone_status_initialized = False
         self.zone_partition_initialized = False
 
+    def reset_connection_derived_annunciators(self) -> None:
+        self.ac_power = None
+        for partition in self.partitions.values():
+            partition.active_fire_tokens.clear()
+            partition.active_supervisory_tokens.clear()
+            partition.fire_silenced = False
+        for keypad in self.keypads.values():
+            keypad.power_led = None
+            keypad.fire_alarm_led = None
+            keypad.silenced_led = None
+            keypad.supervisory_led = None
+
     def assigned_zones_with(self, attribute: str) -> list[ZoneState]:
         if attribute not in ZONE_STATUS_BITS:
             raise ValueError(f"{attribute} is not a zone-status condition")
@@ -262,9 +272,12 @@ class VistaState:
 
         if partition_state.fire_alarm_active or explicit_fire:
             keypad.fire_alarm_led = True
+        elif keypad.fire_alarm_led is True:
+            # With all initiating fire events restored, a later non-fire KD is reset/
+            # normalization evidence. Burglary READY is intentionally not required.
+            keypad.fire_alarm_led = False
+            partition_state.fire_silenced = False
         elif normal_ready:
-            # FIRE ALARM intentionally remains latched across detector restores and
-            # clears only when the keypad itself has returned to a normal/reset state.
             keypad.fire_alarm_led = False
             partition_state.fire_silenced = False
 

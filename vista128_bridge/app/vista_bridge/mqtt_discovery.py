@@ -45,6 +45,24 @@ def device_info() -> dict:
     }
 
 
+def panel_entity_availability(topic: TopicFn) -> dict:
+    return {
+        "availability": [
+            {
+                "topic": topic("bridge/availability"),
+                "payload_available": "online",
+                "payload_not_available": "offline",
+            },
+            {
+                "topic": topic("panel/connected"),
+                "payload_available": "ON",
+                "payload_not_available": "OFF",
+            },
+        ],
+        "availability_mode": "all",
+    }
+
+
 def diagnostic_entities(topic: TopicFn) -> dict[str, tuple[str, dict]]:
     return {
         "connection": (
@@ -211,6 +229,8 @@ def zone_summary_entities(topic: TopicFn) -> dict[str, dict]:
             "state_topic": topic(f"zone_summary/{key}/count"),
             "json_attributes_topic": topic(f"zone_summary/{key}/attributes"),
             "icon": spec["icon"],
+            "device": device_info(),
+            **panel_entity_availability(topic),
         }
         for key, spec in ZONE_CONDITION_SPECS.items()
     }
@@ -223,9 +243,7 @@ def partition_config(partition: int, topic: TopicFn) -> dict:
         "state_topic": topic(f"partition/{partition}/state"),
         "command_topic": topic(f"partition/{partition}/command"),
         "json_attributes_topic": topic(f"partition/{partition}/attributes"),
-        "availability_topic": topic("panel/connected"),
-        "payload_available": "ON",
-        "payload_not_available": "OFF",
+        **panel_entity_availability(topic),
         "supported_features": [],
         "code_arm_required": False,
         "code_disarm_required": False,
@@ -240,9 +258,7 @@ def keypad_config(partition: int, topic: TopicFn) -> dict:
         "unique_id": f"vista128_keypad_{partition}",
         "state_topic": topic(f"keypad/{partition}/state"),
         "json_attributes_topic": topic(f"keypad/{partition}/attributes"),
-        "availability_topic": topic("panel/connected"),
-        "payload_available": "ON",
-        "payload_not_available": "OFF",
+        **panel_entity_availability(topic),
         "icon": "mdi:alarm-panel-outline",
         "device": device_info(),
     }
@@ -262,9 +278,7 @@ def zone_condition_configs(zone: ZoneState, topic: TopicFn) -> dict[str, dict]:
             "payload_on": "ON",
             "payload_off": "OFF",
             "json_attributes_topic": topic(f"zone/{zone.zone:03d}/attributes"),
-            "availability_topic": topic("panel/connected"),
-            "payload_available": "ON",
-            "payload_not_available": "OFF",
+            **panel_entity_availability(topic),
             "icon": spec["icon"],
             "device": device_info(),
         }
