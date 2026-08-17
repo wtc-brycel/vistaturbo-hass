@@ -32,7 +32,7 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: Run frontend browser regression tests
         working-directory: frontend
-        run: npm test
+        run: npm run test:render
       - name: Commit verified patch
         run: |
           rm .github/workflows/apply-firstalert-style.yml .github/scripts/apply_firstalert_style.py
