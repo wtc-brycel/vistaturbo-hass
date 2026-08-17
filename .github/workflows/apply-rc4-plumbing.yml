@@ -27,6 +27,7 @@ jobs:
         run: |
           python .github/scripts/apply_rc4_plumbing.py
           python .github/scripts/fix_rc4_generated_tests.py
+          python .github/scripts/fix_rc4_frontend_tests.py
       - name: Run backend tests
         working-directory: vista128_bridge
         run: python -m unittest discover -s tests -v
@@ -43,7 +44,7 @@ jobs:
         run: npm run test:render
       - name: Commit verified integration
         run: |
-          rm .github/workflows/apply-rc4-plumbing.yml .github/scripts/apply_rc4_plumbing.py .github/scripts/fix_rc4_generated_tests.py
+          rm .github/workflows/apply-rc4-plumbing.yml .github/scripts/apply_rc4_plumbing.py .github/scripts/fix_rc4_generated_tests.py .github/scripts/fix_rc4_frontend_tests.py
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
