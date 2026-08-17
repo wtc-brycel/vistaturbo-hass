@@ -39,6 +39,7 @@ class ProtocolMessageHandler:
         self.event_store = event_store
         self._history_dump_seen = 0
         self._history_dump_inserted = 0
+        self._history_occurrences: dict[str, int] = {}
         self.last_panel_clock_offset_seconds: int | None = None
         self.last_event_received_at = ""
         self._handlers = {
@@ -81,8 +82,15 @@ class ProtocolMessageHandler:
             return
         self._history_dump_seen += 1
         descriptor = self.state.zones.get(event.zone).descriptor if event.zone in self.state.zones else ""
+        fingerprint = EventStore.fingerprint(event)
+        occurrence = self._history_occurrences.get(fingerprint, 0) + 1
+        self._history_occurrences[fingerprint] = occurrence
         if self.event_store is not None and self.event_store.record(
-            event, source="history", received_at=received_at, descriptor=descriptor
+            event,
+            source="history",
+            received_at=received_at,
+            descriptor=descriptor,
+            occurrence=occurrence,
         ):
             self._history_dump_inserted += 1
 
@@ -102,6 +110,7 @@ class ProtocolMessageHandler:
         self.publish_event_history_snapshot()
         self._history_dump_seen = 0
         self._history_dump_inserted = 0
+        self._history_occurrences.clear()
 
     def _handle_arming_status(self, data: bytes, received_at: str) -> None:
         report = parse_arming_status(data)
@@ -175,6 +184,10 @@ class ProtocolMessageHandler:
         if zone is None or not zone.partition:
             return
         LOG.info("Zone %03d descriptor: %s", report.zone, report.descriptor)
+        if self.event_store is not None:
+            updated = self.event_store.update_descriptor(report.zone, report.descriptor)
+            if updated:
+                self.publish_event_history_snapshot()
         self.mqtt.publish_zone_discovery(zone)
         self.mqtt.publish_zone_state(zone)
 

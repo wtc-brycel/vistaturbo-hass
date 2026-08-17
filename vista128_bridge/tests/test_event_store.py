@@ -42,6 +42,7 @@ class EventStoreTests(unittest.TestCase):
                     event,
                     source="history",
                     received_at="2026-08-17T10:00:00-04:00",
+                    occurrence=1,
                 )
             )
 
@@ -51,6 +52,25 @@ class EventStoreTests(unittest.TestCase):
             self.assertEqual(recent[0]["source"], "both")
             self.assertEqual(recent[0]["event_code"], "B7")
             self.assertEqual(recent[0]["panel_timestamp"], "2026-08-15T03:21")
+
+    def test_repeated_same_minute_events_are_preserved_by_occurrence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = EventStore(os.path.join(tmp, "events.sqlite3"))
+            event = sample_event()
+            self.assertTrue(store.record(event, source="history", received_at="2026-08-17T10:00:00-04:00", occurrence=1))
+            self.assertTrue(store.record(event, source="history", received_at="2026-08-17T10:00:01-04:00", occurrence=2))
+            self.assertFalse(store.record(event, source="history", received_at="2026-08-17T10:01:00-04:00", occurrence=1))
+            self.assertEqual(store.stats().count, 2)
+            self.assertEqual([row["occurrence"] for row in store.recent(20)], [2, 1])
+
+    def test_descriptor_backfill_updates_existing_rows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = EventStore(os.path.join(tmp, "events.sqlite3"))
+            event = sample_event()
+            event = SystemEvent(**{**event.__dict__, "zone": 27})
+            store.record(event, source="history", received_at="2026-08-17T10:00:00-04:00", occurrence=1)
+            self.assertEqual(store.update_descriptor(27, "FRONT DOOR"), 1)
+            self.assertEqual(store.recent(1)[0]["descriptor"], "FRONT DOOR")
 
     def test_history_dump_metadata_persists(self):
         with tempfile.TemporaryDirectory() as tmp:
