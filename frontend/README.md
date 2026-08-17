@@ -8,26 +8,26 @@ The card currently implements three keypad models:
 - `6160`, modeled after the standard alpha keypad
 - `firstalert`, a First Alert-inspired adaptive skin that uses a horizontal composition when wide and a portrait composition when narrow
 
-Both models use the same live VISTA data. The LCD is rendered from the exact 16-character `line_1` and `line_2` attributes from `sensor.vista_partition_1_keypad`.
+All three models use the same live VISTA data. The LCD is rendered from the exact 16-character `line_1` and `line_2` attributes from `sensor.vista_partition_1_keypad`.
 
 The card is **read-only** while Vista Turbo RS232 remains read-only. Keys depress visually, but no panel command is sent.
 
 ## Install in Home Assistant
 
-Release `v0.2.6-rc.3` attaches card `0.3.15` as `vista-keypad-card.js`.
+Release `v0.2.6-rc.4` attaches card `0.3.17` as `vista-keypad-card.js`.
 
 From the Home Assistant Terminal or SSH add-on:
 
 ```sh
 mkdir -p /config/www
-curl -fL "https://github.com/wtc-brycel/vistaturbo-hass/releases/download/v0.2.6-rc.3/vista-keypad-card.js" \
+curl -fL "https://github.com/wtc-brycel/vistaturbo-hass/releases/download/v0.2.6-rc.4/vista-keypad-card.js" \
   -o /config/www/vista-keypad-card.js
 ```
 
 Then add the card as a Lovelace JavaScript module under **Settings -> Dashboards -> Resources**:
 
 ```text
-/local/vista-keypad-card.js?v=0.3.15
+/local/vista-keypad-card.js?v=0.3.17
 ```
 
 The version suffix is intentional. Change it whenever the JavaScript file is replaced so Home Assistant and mobile browsers do not reuse a stale cached copy.
@@ -48,9 +48,19 @@ entity: sensor.vista_partition_1_keypad
 model: 6160
 ```
 
+For the First Alert-inspired skin:
+
+```yaml
+type: custom:vista-keypad-card
+entity: sensor.vista_partition_1_keypad
+model: firstalert
+```
+
+The RC4 release also attaches `vista-keypad-simulator.html`. Place it beside the card in `/config/www` and open `/local/vista-keypad-simulator.html` to exercise all three layouts, widths, annunciators, chime/alarm states, and audio behavior without changing the real panel.
+
 ## Adaptive layout
 
-Card `0.3.15` includes a model-agnostic adaptive layout system for Lovelace dashboards.
+Card `0.3.17` includes a model-agnostic adaptive layout system for Lovelace dashboards.
 
 ```yaml
 layout: auto
@@ -105,14 +115,14 @@ The default AUTO enclosure mapping is white in light mode and dark in dark mode.
 
 ## Case colors and theme following
 
-Both `6160cr2` and `6160` support the same enclosure colors:
+All three models support the same enclosure colors:
 
 - `red`
 - `white`
 - `dark` for charcoal/dark gray
 - `auto` to choose a day or night case color from Home Assistant's current theme
 
-`case_color: auto` is the default for both keypad models.
+`case_color: auto` is the default for all keypad models.
 
 Default AUTO mappings are model-specific:
 
@@ -120,6 +130,7 @@ Default AUTO mappings are model-specific:
 | --- | --- | --- |
 | `6160cr2` | `red` | `dark` |
 | `6160` | `white` | `dark` |
+| `firstalert` | `white` | `dark` |
 
 The day and night colors are independently optional:
 
@@ -145,13 +156,13 @@ The adaptive layout retains the mobile hardening introduced in card 0.3.14:
 - unrelated Home Assistant state changes do not rebuild the full card
 - browser light/dark changes are observed when Home Assistant does not expose an explicit theme mode
 
-Version 0.3.15 renders both physical and compact LCD canvases from the same state and redraws whichever layout becomes visible after a container breakpoint change.
+Version 0.3.17 renders both physical and compact LCD canvases from the same state and redraws whichever layout becomes visible after a container breakpoint change.
 
 The repository CI also runs Chromium browser regression tests for wide/compact switching, touch-target dimensions, both model profiles, forced layout modes, theme-aware case colors, and Lovelace grid sizing.
 
 ## Optional audio and haptic feedback
 
-Card `0.3.16` adds optional synthesized keypad feedback. It is disabled by default and does not require audio files or network requests. Web Audio tones are created locally with an interactive-latency context.
+Card `0.3.17` adds optional synthesized keypad feedback. It is disabled by default and does not require audio files or network requests. Web Audio tones are created locally with an interactive-latency context.
 
 Example:
 
@@ -165,14 +176,12 @@ sound:
   state_sounds: true
   volume: 0.035
   alarm_volume: 0.065
-  alarm_entity: alarm_control_panel.your_partition
-  aux_entity: binary_sensor.your_aux_alarm
 haptic:
   enabled: true
   keypress_ms: 10
 ```
 
-Set `alarm_entity` and `aux_entity` only when those Home Assistant entities should drive the corresponding continuous sound profiles. Do not use the example entity IDs literally.
+The bridge publishes native `burglary_alarm`, `auxiliary_alarm`, and `sound_mode` attributes, so extra Home Assistant entities are not required for normal alarm audio. Optional `alarm_entity` and `aux_entity` mappings remain available as advanced overrides.
 
 Supported synthesized profiles are:
 
@@ -184,7 +193,7 @@ Supported synthesized profiles are:
 - continuous burglary alarm
 - repeating high/low auxiliary alarm
 
-Continuous sound priority is unsilenced fire, then `alarm_entity`, then `aux_entity`. A silenced fire condition keeps the fire/silenced annunciators but stops the local fire tone. Trouble, supervisory, and chime are one-shot transition sounds.
+Continuous sound priority is unsilenced fire, then audible burglary, then 24-hour auxiliary. A silenced fire condition keeps the fire/silenced annunciators but stops the local fire tone. Trouble, supervisory, and chime are one-shot transition sounds. Continuous sound stops when the keypad entity becomes unavailable.
 
 The tones model conventional keypad behavior; exact Honeywell/Resideo piezo frequencies are not claimed.
 
@@ -196,7 +205,7 @@ The card does not guess panel ECP chime programming and does not watch individua
 chime_zones: "1,2,5-8,27"
 ```
 
-An empty value disables bridge-generated chimes. When a configured zone produces the validated real-time `F5` Fault event, the bridge increments `chime_sequence` on the affected partition keypad entity and publishes `chime_zone`, `chime_descriptor`, and `chime_at`. Every card using that keypad entity can then react to the same authoritative chime event without maintaining a separate list.
+An empty value disables bridge-generated chimes. A listed zone increments `chime_sequence` only when a validated `F5` event represents a new false-to-faulted transition, the partition arming state has been initialized, and that partition is disarmed. Duplicate `F5` reports and faults while armed do not chime. The keypad entity also publishes `chime_zone`, `chime_descriptor`, and `chime_at`.
 
 Audio autoplay restrictions still apply. When sound is enabled, the card listens for the first pointer or keyboard interaction anywhere on the Lovelace page and uses that user gesture to unlock its AudioContext. A small `AUDIO` flag remains visible only while audio is still blocked and can be tapped as an explicit fallback. Haptic feedback is best-effort and only runs when the browser exposes `navigator.vibrate()`.
 
@@ -211,6 +220,9 @@ Vista Turbo RS232 publishes the CR-2 annunciator state directly on the keypad en
 - `fire_alarm` latched from fire/smoke/waterflow state and cleared after keypad reset/normalization
 - `silenced` reconstructed from the keypad display while a fire alarm is latched
 - `supervisory` reconstructed from supervisory start/restore events and keypad display reconciliation
+- `burglary_alarm` reconstructed only from audible/perimeter/interior burglary families, not silent or duress events
+- `auxiliary_alarm` reconstructed from the 24-hour auxiliary alarm family
+- `sound_mode` normalized to `none`, `fire`, `burglary`, `auxiliary`, or `unknown`
 
 Unknown reconstructed states are JSON `null`; the card renders those lamps as unknown rather than inventing a state.
 

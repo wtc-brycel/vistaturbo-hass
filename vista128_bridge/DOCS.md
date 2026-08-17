@@ -140,7 +140,7 @@ debug_raw_tx_enabled: false
 
 The keypad display is queried every 7 seconds by default. Valid unsolicited system events also request a debounced keypad refresh for the affected configured partition. All keypad queries share the same serialized transaction lock as startup and periodic synchronization.
 
-`chime_zones` is Vista Turbo RS232's own centralized dashboard-chime policy. It is intentionally separate from any chime programming transported on the VISTA ECP bus. Supply comma-separated VISTA zone numbers and ascending ranges, for example `"1,2,5-8,27"`. Valid zones are 1 through 128. An empty string disables bridge-generated chime events. When a listed zone produces the validated `F5` Fault event, the affected keypad entity increments `chime_sequence` and exposes `chime_zone`, `chime_descriptor`, and `chime_at`. The frontend can use that sequence change to play one chime without polling or subscribing to every zone entity.
+`chime_zones` is Vista Turbo RS232's own centralized dashboard-chime policy. It is intentionally separate from any chime programming transported on the VISTA ECP bus. Supply comma-separated VISTA zone numbers and ascending ranges, for example `"1,2,5-8,27"`. Valid zones are 1 through 128. An empty string disables bridge-generated chime events. A listed zone increments `chime_sequence` only for a new false-to-faulted `F5` transition after arming state is initialized and while the resolved partition is disarmed. Duplicate fault reports and faults while armed do not chime. The keypad entity also exposes `chime_zone`, `chime_descriptor`, and `chime_at`.
 
 ## Startup synchronization
 
@@ -260,11 +260,25 @@ display: |-
 ready: true
 trouble: false
 armed: false
+power: true
+fire_alarm: false
+silenced: false
+supervisory: false
+burglary_alarm: false
+auxiliary_alarm: false
+sound_mode: none
+chime_sequence: 0
+chime_zone: null
+chime_descriptor: ""
 backlight: true
 led_status: "1"
 raw_display_hex: "d0 31 ..."
 updated_at: "2026-08-16T13:22:28-04:00"
 ```
+
+The bridge classifies continuous keypad sound state separately from the generic partition `triggered` state. `31/32`, `41/42`, and `51/52` drive audible burglary state; `B1/B2` drive 24-hour auxiliary state. Silent alarm and duress events do not drive the burglary sound classifier. `sound_mode` is `fire`, `burglary`, `auxiliary`, `none`, or `unknown`.
+
+Burglary and auxiliary sound state is event-derived. A panel TCP disconnect invalidates it to unknown, and the frontend stops continuous sound while the keypad entity is unavailable. A subsequent normal READY keypad display can reconcile those states false.
 
 ### Zone conditions
 

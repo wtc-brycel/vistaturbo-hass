@@ -2,14 +2,15 @@
 
 Home Assistant App for the native RS-232 automation interface on Honeywell/Resideo VISTA Turbo alarm panels.
 
-> **Release candidate status:** 0.2.6-rc.3 is read-only. It has been developed and tested on a VISTA-128BPT. Keypad display polling is enabled. Arm, disarm, and keypad-control commands are not sent to the panel.
+> **Release candidate status:** 0.2.6-rc.4 is read-only. It has been developed and tested on a VISTA-128BPT. Keypad display polling is enabled. Arm, disarm, and keypad-control commands are not sent to the panel.
 
 ## What you get in Home Assistant
 
 - Partition alarm state
 - Exact 2 x 16 partition keypad display
 - Keypad Ready, Trouble, Armed, and backlight state
-- 6160CR-2 Power, Fire Alarm, Silenced, and Supervisory annunciator state on the keypad entity
+- Power, Fire Alarm, Silenced, Supervisory, Burglary Alarm, Auxiliary Alarm, and normalized sound-mode state on the keypad entity
+- Centralized configurable dashboard chime-zone events
 - Four binary sensors per assigned zone: **Fault, Alarm, Check, Bypass**
 - Aggregate Fault Zones, Alarm Zones, Check Zones, and Bypass Zones sensors
 - Programmed zone alpha descriptors
@@ -52,11 +53,11 @@ P1   DISARMED
 BYPAS-RDY TO ARM
 ```
 
-Home Assistant receives a **Partition 1 Keypad** sensor. Its attributes preserve the exact two 16-character lines plus Ready, Trouble, Armed, Power, Fire Alarm, Silenced, Supervisory, backlight, raw LED state, raw display bytes, and the last update time.
+Home Assistant receives a **Partition 1 Keypad** sensor. Its attributes preserve the exact two 16-character lines plus Ready, Trouble, Armed, Power, Fire Alarm, Silenced, Supervisory, Burglary Alarm, Auxiliary Alarm, normalized sound mode, configured chime metadata, backlight, raw LED state, raw display bytes, and the last update time.
 
 The dedicated Power, Fire Alarm, Silenced, and Supervisory attributes are reconstructed from validated VISTA real-time events plus keypad-display reconciliation. Unknown reconstructed state is published as JSON `null` rather than guessed.
 
-Event-derived CR-2 states are invalidated across a panel TCP disconnect so stale fire, supervisory, or AC information is not carried across a communication gap. Fresh KD and event traffic reconstructs them after reconnect.
+Event-derived states are invalidated across a panel TCP disconnect so stale fire, supervisory, AC, burglary, or auxiliary information is not carried across a communication gap. Fresh KD and event traffic reconstructs them after reconnect.
 
 ## MQTT availability
 
@@ -69,17 +70,18 @@ Home Assistant MQTT Discovery uses `availability_mode: all` for partitions, keyp
 
 ## Dashboard keypad card
 
-The matching read-only 6160CR-2 and 6160 Lovelace card ships with this release as `vista-keypad-card.js`. Card `0.3.15` adds the adaptive layout used for mobile and narrow Home Assistant dashboards.
+The matching read-only Lovelace card ships with this release as `vista-keypad-card.js`. Card `0.3.17` supports 6160CR-2, standard 6160, and First Alert-inspired skins plus optional synthesized audio and haptics.
 
 `layout: auto` is the default. The card keeps the approved physical facsimile above 520 px card-container width and switches to a touchscreen-first compact layout at 520 px and below. `layout: physical` and `layout: compact` can force either presentation.
 
-Both models use the same adaptive framework, and future keypad models can declare their compact annunciators and function-key labels in `MODEL_PROFILES` without implementing a new mobile renderer.
+All three models use the same adaptive framework. The First Alert-inspired skin is horizontal when wide and portrait at the compact breakpoint. Future keypad models can declare their responsive behavior without implementing a separate mobile renderer.
 
 The card supports red, white, and dark enclosure colors for either model. `case_color: auto` is the default. AUTO follows the Home Assistant light/dark theme and defaults to:
 
 ```text
 6160CR-2: red by day, dark at night
 6160:     white by day, dark at night
+First Alert style: white by day, dark at night
 ```
 
 Optional `day_case_color` and `night_case_color` settings can override either side of AUTO mode. See `frontend/README.md` for full card installation and configuration.
@@ -115,7 +117,10 @@ keypad_display_enabled: true
 keypad_partitions: "1"
 keypad_poll_interval_seconds: 7
 keypad_event_refresh_delay_ms: 250
+chime_zones: ""
 ```
+
+`chime_zones` is the bridge-owned dashboard chime policy, independent of ECP keypad programming. It accepts comma-separated zone numbers and ascending ranges such as `"1,2,5-8,27"`. Listed zones chime only on a new fault transition while the resolved partition is known to be disarmed.
 
 Full configuration and MQTT details are in `DOCS.md`.
 

@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.2.6-rc.4
+
+- Add card `0.3.17` with optional low-latency synthesized Web Audio keypad feedback and best-effort browser haptics.
+- Add immediate keypress chirps plus chime, trouble, supervisory, fire, burglary, and auxiliary sound profiles.
+- Add page-level audio unlocking and a small `AUDIO` flag while browser playback remains blocked.
+- Add the First Alert-inspired keypad model with horizontal wide and portrait compact compositions.
+- Add centralized App-level `chime_zones` configuration with zone/range syntax.
+- Generate chimes only for new configured-zone fault transitions while the resolved partition is known to be disarmed; suppress duplicate and armed-state chimes.
+- Add native `burglary_alarm`, `auxiliary_alarm`, and normalized `sound_mode` keypad attributes from validated event families.
+- Keep silent alarm and duress events out of the audible burglary classifier.
+- Invalidate native audible state across panel TCP gaps and stop continuous frontend audio while the keypad entity is unavailable.
+- Make chime counters restart-safe so a bridge sequence reset does not replay a stale chime.
+- Add checked-in browser audio tests and expand Chromium coverage to all three keypad styles.
+- Add an interactive keypad simulator and attach it to release-candidate releases.
+- Ignore generated Node and Playwright test artifacts while retaining a deterministic frontend package lock.
+- Keep all alarm and keypad control read-only.
+
 ## 0.2.6-rc.3
 
 - Add card `0.3.15` with a model-agnostic adaptive Lovelace layout system.
