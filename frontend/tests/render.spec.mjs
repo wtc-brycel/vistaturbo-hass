@@ -302,3 +302,30 @@ test("visual editor emits clean nested config changes", async ({ page }) => {
   expect(last.function_keys.a).toBe("PANIC");
   expect(last.entity).toBe(ENTITY);
 });
+
+
+test("visual editor understands boolean sound and haptic shorthand", async ({ page }) => {
+  await page.setContent(`<!doctype html><html><body></body></html>`);
+  await page.evaluate(() => {
+    if (!customElements.get("ha-card")) customElements.define("ha-card", class extends HTMLElement {});
+  });
+  await page.addScriptTag({ content: cardSource });
+
+  const result = await page.evaluate(async ({ entity }) => {
+    const ctor = customElements.get("vista-keypad-card");
+    const editor = await ctor.getConfigElement();
+    document.body.append(editor);
+    editor.setConfig({
+      type: "custom:vista-keypad-card",
+      entity,
+      sound: true,
+      haptic: true,
+    });
+    return {
+      sound: editor.shadowRoot.querySelector("[data-sound=enabled]").checked,
+      haptic: editor.shadowRoot.querySelector("[data-haptic=enabled]").checked,
+    };
+  }, { entity: ENTITY });
+
+  expect(result).toEqual({ sound: true, haptic: true });
+});

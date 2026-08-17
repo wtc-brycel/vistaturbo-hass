@@ -432,8 +432,11 @@ class VistaKeypadCardEditor extends HTMLElement {
     const layout = LAYOUT_MODES.has(String(this._config.layout ?? "auto").toLowerCase())
       ? String(this._config.layout ?? "auto").toLowerCase()
       : "auto";
-    const caseColor = String(this._config.case_color ?? "auto").toLowerCase();
-    const soundInput = this._config.sound && typeof this._config.sound === "object" ? this._config.sound : {};
+    const requestedCaseColor = String(this._config.case_color ?? "auto").toLowerCase();
+    const caseColor = requestedCaseColor === "auto" || CASE_COLORS.has(requestedCaseColor) ? requestedCaseColor : "auto";
+    const soundInput = this._config.sound === true
+      ? { enabled: true }
+      : this._config.sound && typeof this._config.sound === "object" ? this._config.sound : {};
     const sound = {
       enabled: false,
       keypress: true,
@@ -447,7 +450,9 @@ class VistaKeypadCardEditor extends HTMLElement {
       aux_entity: "",
       ...soundInput,
     };
-    const hapticInput = this._config.haptic && typeof this._config.haptic === "object" ? this._config.haptic : {};
+    const hapticInput = this._config.haptic === true
+      ? { enabled: true }
+      : this._config.haptic && typeof this._config.haptic === "object" ? this._config.haptic : {};
     const haptic = { enabled: false, keypress_ms: 10, ...hapticInput };
     const defaultFunctions = MODEL_PROFILES[model]?.compactFunctionKeys ?? DEFAULT_FUNCTION_KEYS[model] ?? ["A", "B", "C", "D"];
     const sensorIds = Object.keys(this._hass?.states ?? {}).filter((entityId) => entityId.startsWith("sensor.")).sort();
