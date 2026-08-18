@@ -69,12 +69,14 @@ PARTITION_TROUBLE_RESTORE_TO_START = {
     "04": "03",
     "54": "53",
     "64": "63",
+    "8A": "89",
     "A2": "A1",
     "A4": "A3",
     "C4": "C3",
     "D4": "D3",
     "E4": "E3",
     "F4": "F3",
+    "B4": "B3",
     "FE": "FD",
 }
 PARTITION_TROUBLE_START_CODES = set(PARTITION_TROUBLE_RESTORE_TO_START.values())
@@ -347,9 +349,8 @@ class VistaState:
 
         display = f"{report.line_1} {report.line_2}".upper()
 
-        # AC is panel-global. A displayed AC failure is definitive. Conversely, a
-        # keypad with no TROUBLE LED cannot currently be in AC-loss trouble, so it
-        # gives us a safe startup reconciliation path for the POWER annunciator.
+        # AC is panel-global. A displayed AC failure is definitive. Quiet KD
+        # pages are not positive AC evidence because the panel cycles status pages.
         if self._contains_any(display, AC_LOSS_DISPLAY_TOKENS):
             self._set_ac_power(False)
         keypad.power_led = self.ac_power
@@ -430,6 +431,7 @@ class VistaState:
             zone.partition = partition_number
             changed.add(zone_number)
         self._reconcile_partition_zone_alarms()
+        self._reconcile_all_keypad_trouble()
         return changed
 
     def set_descriptor(self, zone_number: int, descriptor: str) -> bool:
@@ -647,7 +649,7 @@ class VistaState:
         if partition is not None and partition.active_trouble_tokens:
             return True
         return any(
-            zone.partition == partition_number and (zone.trouble or zone.low_battery or zone.tamper)
+            zone.partition == partition_number and zone.trouble
             for zone in self.zones.values()
         )
 

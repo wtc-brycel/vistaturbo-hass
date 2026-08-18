@@ -108,6 +108,7 @@ class VistaBridge:
             await asyncio.gather(*background, return_exceptions=True)
             self.mqtt.publish("panel/connected", "OFF", retain=True)
             self.mqtt.publish("panel/automation_available", "OFF", retain=True)
+            self.mqtt.publish("panel/automation_availability_source", "offline", retain=True)
             self.mqtt.stop()
 
     async def _connection_loop(self) -> None:

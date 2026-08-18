@@ -93,6 +93,28 @@ class ReadinessTests(unittest.TestCase):
         self.assertFalse(state.partitions[1].active_supervisory_tokens)
         self.assertTrue(keypad.ready_led)
 
+    def test_reconnect_discards_event_only_low_battery_and_tamper_trouble(self):
+        state = VistaState()
+        state.zones[21].partition = 1
+        keypad = state.apply_keypad_display(
+            1,
+            keypad_report("P1   DISARMED   ", "READY TO ARM    "),
+            "2026-08-17T17:00:00-04:00",
+        )
+        state.apply_system_event(event("89", zone=21))
+        state.apply_system_event(event("B3", zone=21))
+        self.assertTrue(keypad.trouble_led)
+        self.assertTrue(state.partitions[1].active_trouble_tokens)
+
+        state.reset_connection_derived_annunciators()
+        state.apply_keypad_display(
+            1,
+            keypad_report("P1   DISARMED   ", "READY TO ARM    "),
+            "2026-08-17T17:01:00-04:00",
+        )
+        self.assertFalse(state.partitions[1].active_trouble_tokens)
+        self.assertFalse(keypad.trouble_led)
+
     def test_fire_latch_clears_after_restore_when_burglary_not_ready(self):
         state = VistaState()
         keypad = state.apply_keypad_display(1, keypad_report(), "2026-08-16T13:22:28-04:00")

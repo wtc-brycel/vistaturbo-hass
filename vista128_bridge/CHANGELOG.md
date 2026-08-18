@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.2.6-rc.8
+
+- Infer Automation Interface Available after a successful structured VISTA transaction when the panel does not emit `08XN` during ordinary operation.
+- Preserve `08XF` Communication Off as an explicit same-session control block that ordinary `08OK` replies cannot override.
+- Add the **Automation Availability Source** diagnostic with `unknown`, `inferred`, `explicit`, `communication_off`, and `offline` states.
+- Stop treating a quiet KD page or a false raw TROUBLE lamp bit as evidence that AC power is present. POWER remains unknown after reconnect until explicit AC evidence is observed.
+- Split semantic keypad `trouble` from `trouble_led_raw`; semantic TROUBLE remains active across the VISTA's rotating display pages while known trouble conditions remain active.
+- Track validated trouble families, system battery, RF low battery, and sensor tamper with reconnect-invalidated trouble state.
+- Treat both `D` and `N` arming snapshots as authoritative disarmed states when clearing stale alarm tokens.
+- Publish individual virtual-keypad presses at MQTT QoS 0 with retain disabled to avoid at-least-once duplicate digits.
+- Remove entered keypad digits from the frontend `vista-keypad-key` DOM event detail.
+- Report the partition `control_enabled` attribute from actual bridge configuration instead of a hard-coded false value.
+- Close every SQLite event-journal connection deterministically and add regression coverage for connection closure.
+- Add card `0.3.21`; keypad function keys A-D remain intentionally unmapped pending explicit action and hold semantics.
+
 ## 0.2.6-rc.7
 
 - Add the first opt-in VISTA panel write path while keeping all control disabled by default.

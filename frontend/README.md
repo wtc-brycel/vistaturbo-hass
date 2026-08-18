@@ -10,24 +10,24 @@ The card currently implements three keypad models:
 
 All three models use the same live VISTA data. The LCD is rendered from the exact 16-character `line_1` and `line_2` attributes from `sensor.vista_partition_1_keypad`.
 
-The card remains read-only by default. Card `0.3.20` can send ordinary keypad input only when bridge control is explicitly enabled and **Keypad input** is enabled in the card editor.
+The card remains read-only by default. Card `0.3.21` can send ordinary keypad input only when bridge control is explicitly enabled and **Keypad input** is enabled in the card editor.
 
 ## Install in Home Assistant
 
-Release `v0.2.6-rc.7` attaches card `0.3.20` as `vista-keypad-card.js`.
+Release `v0.2.6-rc.8` attaches card `0.3.21` as `vista-keypad-card.js`.
 
 From the Home Assistant Terminal or SSH add-on:
 
 ```sh
 mkdir -p /config/www
-curl -fL "https://github.com/wtc-brycel/vistaturbo-hass/releases/download/v0.2.6-rc.7/vista-keypad-card.js" \
+curl -fL "https://github.com/wtc-brycel/vistaturbo-hass/releases/download/v0.2.6-rc.8/vista-keypad-card.js" \
   -o /config/www/vista-keypad-card.js
 ```
 
 Then add the card as a Lovelace JavaScript module under **Settings -> Dashboards -> Resources**:
 
 ```text
-/local/vista-keypad-card.js?v=0.3.20
+/local/vista-keypad-card.js?v=0.3.21
 ```
 
 The version suffix is intentional. Change it whenever the JavaScript file is replaced so Home Assistant and mobile browsers do not reuse a stale cached copy.
@@ -56,12 +56,12 @@ entity: sensor.vista_partition_1_keypad
 model: firstalert
 ```
 
-The RC7 release also attaches `vista-keypad-simulator.html`. Place it beside the card in `/config/www` and open `/local/vista-keypad-simulator.html` to exercise all three layouts, widths, annunciators, chime/alarm states, and audio behavior without changing the real panel.
+The RC8 release also attaches `vista-keypad-simulator.html`. Place it beside the card in `/config/www` and open `/local/vista-keypad-simulator.html` to exercise all three layouts, widths, annunciators, chime/alarm states, and audio behavior without changing the real panel.
 
 
 ## Visual editor
 
-Card `0.3.20` implements Home Assistant's custom-card visual editor contract through `getConfigElement()`. The dashboard editor can configure the normal installation without hand-editing YAML:
+Card `0.3.21` implements Home Assistant's custom-card visual editor contract through `getConfigElement()`. The dashboard editor can configure the normal installation without hand-editing YAML:
 
 - keypad entity
 - 6160CR-2, 6160, or First Alert style
@@ -77,7 +77,7 @@ The visual editor includes an opt-in **Keypad input** toggle; the bridge-side co
 
 ## Adaptive layout
 
-Card `0.3.20` includes the model-agnostic adaptive layout system for Lovelace dashboards.
+Card `0.3.21` includes the model-agnostic adaptive layout system for Lovelace dashboards.
 
 ```yaml
 layout: auto
@@ -280,4 +280,4 @@ The App intentionally publishes only a small configurable recent window to Home 
 
 ### Keypad input
 
-Card `0.3.20` can publish real keypad input when both the bridge and card are explicitly enabled for control. Enable the App's `control_enabled` and `keypad_control_enabled`, then enable **Keypad input** in the card visual editor. Numeric keys, `*`, and `#` publish non-retained MQTT commands through Home Assistant's MQTT publish action. A-D function buttons remain intentionally unmapped pending explicit action/hold semantics.
+Card `0.3.21` can publish real keypad input when both the bridge and card are explicitly enabled for control. Enable the App's `control_enabled` and `keypad_control_enabled`, then enable **Keypad input** in the card visual editor. Numeric keys, `*`, and `#` publish non-retained MQTT commands through Home Assistant's MQTT publish action. A-D function buttons remain intentionally unmapped pending explicit action/hold semantics.
