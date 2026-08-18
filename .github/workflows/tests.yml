@@ -42,43 +42,63 @@ jobs:
         run: npm run test:render
 
   rc8-package:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.event.head_commit.message == 'Run RC8 package validation'
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main' && github.event.head_commit.message == 'Run RC8 package validation') ||
+      (github.event_name == 'pull_request' && github.head_ref == 'release/rc8-package')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: main
+          ref: release/rc8-package
+      - id: detect
+        name: Detect whether packaging is still needed
+        run: |
+          if grep -q '0.2.6-rc.7' vista128_bridge/app/vista_bridge/version.py; then
+            echo 'needed=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'needed=false' >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/setup-python@v5
+        if: steps.detect.outputs.needed == 'true'
         with:
           python-version: "3.13"
       - uses: actions/setup-node@v4
+        if: steps.detect.outputs.needed == 'true'
         with:
           node-version: "22"
       - name: Apply RC8 package metadata
+        if: steps.detect.outputs.needed == 'true'
         run: python .github/scripts/package_rc8.py
       - name: Keep release trigger on RC7 until validation completes
+        if: steps.detect.outputs.needed == 'true'
         run: |
           grep -q 'v0.2.6-rc.7' release/rc.json
           grep -q '0.2.6-rc.8' vista128_bridge/app/vista_bridge/version.py
           grep -q '0.3.21' frontend/vista-keypad-card.js
       - name: Run backend tests
+        if: steps.detect.outputs.needed == 'true'
         working-directory: vista128_bridge
         run: python -m unittest discover -s tests -v
       - name: Validate frontend syntax
+        if: steps.detect.outputs.needed == 'true'
         run: node --check frontend/vista-keypad-card.js
       - name: Install frontend dependencies
+        if: steps.detect.outputs.needed == 'true'
         working-directory: frontend
         run: npm ci --no-audit --no-fund
       - name: Install Chromium
+        if: steps.detect.outputs.needed == 'true'
         working-directory: frontend
         run: npx playwright install --with-deps chromium
       - name: Run browser regression tests
+        if: steps.detect.outputs.needed == 'true'
         working-directory: frontend
         run: npm run test:render
       - name: Commit packaged RC8 tree
+        if: steps.detect.outputs.needed == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add README.md frontend/README.md frontend/vista-keypad-card.js frontend/vista-keypad-simulator.html vista128_bridge release/0.2.6-rc.8.md
           git commit -m "Package Vista Turbo RS232 0.2.6 RC8"
-          git push origin HEAD:main
+          git push origin HEAD:release/rc8-package
