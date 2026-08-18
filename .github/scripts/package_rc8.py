@@ -24,7 +24,7 @@ def replace(path: str, old: str, new: str, count: int = -1) -> None:
 replace("vista128_bridge/config.yaml", 'version: "0.2.6-rc.7"', 'version: "0.2.6-rc.8"', 1)
 replace("vista128_bridge/app/vista_bridge/version.py", 'VERSION = "0.2.6-rc.7"', 'VERSION = "0.2.6-rc.8"', 1)
 replace("frontend/vista-keypad-card.js", 'const VISTA_KEYPAD_CARD_VERSION = "0.3.20";', 'const VISTA_KEYPAD_CARD_VERSION = "0.3.21";', 1)
-replace("frontend/vista-keypad-simulator.html", "Vista Keypad 0.3.17 simulator", "Vista Keypad 0.3.21 simulator")
+replace("frontend/vista-keypad-simulator.html", "Vista Keypad 0.3.20 simulator", "Vista Keypad 0.3.21 simulator")
 
 # Small state hardening found during the RC8 review. Event-only low battery and
 # tamper conditions must participate in the reconnect-invalidated trouble token
