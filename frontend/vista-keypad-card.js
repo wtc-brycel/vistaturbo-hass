@@ -1,4 +1,4 @@
-const VISTA_KEYPAD_CARD_VERSION = "0.3.20";
+const VISTA_KEYPAD_CARD_VERSION = "0.3.21";
 
 const MODEL_ALIASES = {
   "6160cr2": "6160cr2",

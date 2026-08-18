@@ -186,6 +186,17 @@ Historical entries are decoded from `ld` packets and the transaction completes o
 
 The protocol parser also recognizes `08XF` (Communication Off) and `10DC` (Display Changed). `08XF` drives the **Automation Interface Available** diagnostic. `10DC` is logged passively only until it is observed and validated on the current panel.
 
+
+## Automation availability and control gating
+
+Each new panel TCP session starts with control availability unknown. A valid structured VISTA transaction that completes with `08OK` is sufficient to mark the automation interface available with source `inferred`; an explicit `08XN` changes the source to `explicit`. If `08XF` Communication Off is received, control is blocked for the remainder of that TCP session and pending control requests are discarded. Ordinary `08OK` replies do not override an `08XF` block. A new TCP session clears the block and begins again at unknown.
+
+Home Assistant exposes both **Automation Interface Available** and **Automation Availability Source** diagnostics. The latter can be `unknown`, `inferred`, `explicit`, `communication_off`, or `offline`.
+
+The keypad entity exposes both semantic `trouble` and `trouble_led_raw`. The raw value is the literal KD lamp bit from the currently displayed page. The semantic value also considers authoritative zone Check/Trouble state and validated event-derived trouble families because the VISTA rotates display pages and can report a raw TROUBLE bit of zero while another trouble page remains active.
+
+POWER is conservative. `1B` and explicit AC-loss display text establish AC loss; `1C` establishes AC restore. A quiet KD page is not treated as positive AC evidence. After a communication gap POWER may therefore remain unknown until fresh AC evidence is received.
+
 ## Startup synchronization
 
 A new TCP session requests:

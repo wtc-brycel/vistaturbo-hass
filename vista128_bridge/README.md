@@ -2,7 +2,7 @@
 
 Home Assistant App for the native RS-232 automation interface on Honeywell/Resideo VISTA Turbo alarm panels.
 
-> **Release candidate status:** 0.2.6-rc.7 adds an experimental opt-in write path. It has been developed and tested for monitoring on a VISTA-128BPT; the new keypad and native arm/disarm commands are ready for their first physical panel validation. All control gates default to off.
+> **Release candidate status:** 0.2.6-rc.8 adds an experimental opt-in write path. It has been developed and tested for monitoring on a VISTA-128BPT; the new keypad and native arm/disarm commands are ready for their first physical panel validation. All control gates default to off.
 
 ## What you get in Home Assistant
 
@@ -71,7 +71,7 @@ Home Assistant MQTT Discovery uses `availability_mode: all` for partitions, keyp
 
 ## Dashboard keypad card
 
-The matching Lovelace card ships with this release as `vista-keypad-card.js`. Card `0.3.20` includes the keypad models and visual editor from 0.3.18 plus the responsive `custom:vista-event-log-card` for the SQLite-backed recent event window.
+The matching Lovelace card ships with this release as `vista-keypad-card.js`. Card `0.3.21` includes the keypad models and visual editor from 0.3.18 plus the responsive `custom:vista-event-log-card` for the SQLite-backed recent event window.
 
 `layout: auto` is the default. The card keeps the approved physical facsimile above 520 px card-container width and switches to a touchscreen-first compact layout at 520 px and below. `layout: physical` and `layout: compact` can force either presentation.
 
@@ -149,7 +149,7 @@ The implementation has been tested against real panel traffic. Review the source
 
 ## Experimental panel control
 
-RC7 adds a gated native write path. Control remains disabled unless all required App toggles are explicitly enabled.
+RC8 adds a gated native write path. Control remains disabled unless all required App toggles are explicitly enabled.
 
 ```yaml
 control_enabled: true
