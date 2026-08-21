@@ -4,6 +4,9 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: write
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -37,3 +40,38 @@ jobs:
       - name: Run keypad browser regression tests
         working-directory: frontend
         run: npm run test:render
+
+  apply-editor-focus-fix:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/editor-focus-stability
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Apply focus stability patch
+        run: python tools/apply_editor_focus_fix.py
+      - name: Syntax check
+        run: node --check frontend/vista-keypad-card.js
+      - name: Install frontend test dependencies
+        working-directory: frontend
+        run: npm install --no-audit --no-fund
+      - name: Install Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Run frontend regression suite
+        working-directory: frontend
+        run: npm run test:render
+      - name: Commit validated editor fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Keep Lovelace editors focused during updates"
+          git push origin HEAD:fix/editor-focus-stability
