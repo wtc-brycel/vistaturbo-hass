@@ -1,4 +1,4 @@
-const VISTA_KEYPAD_CARD_VERSION = "0.3.21";
+const VISTA_KEYPAD_CARD_VERSION = "0.3.22";
 
 const MODEL_ALIASES = {
   "6160cr2": "6160cr2",
@@ -351,16 +351,22 @@ class VistaKeypadCardEditor extends HTMLElement {
     this.attachShadow({ mode: "open" });
     this._config = {};
     this._hass = null;
+    this._rendered = false;
+    this._hasHass = false;
   }
 
   set hass(hass) {
+    const shouldRender = !this._rendered || !this._hasHass;
     this._hass = hass;
-    this._render();
+    this._hasHass = true;
+    if (shouldRender) this._render();
   }
 
   setConfig(config) {
-    this._config = cloneEditorConfig(config ?? {});
-    this._render();
+    const next = cloneEditorConfig(config ?? {});
+    const changed = JSON.stringify(next) !== JSON.stringify(this._config);
+    this._config = next;
+    if (!this._rendered || changed) this._render();
   }
 
   _emit(config) {
@@ -370,7 +376,6 @@ class VistaKeypadCardEditor extends HTMLElement {
       bubbles: true,
       composed: true,
     }));
-    this._render();
   }
 
   _topLevel(name, value) {
@@ -563,6 +568,7 @@ class VistaKeypadCardEditor extends HTMLElement {
     this.shadowRoot.querySelectorAll("[data-function]").forEach((el) => {
       el.addEventListener("change", () => this._functionLabel(el.dataset.function, el.value));
     });
+    this._rendered = true;
   }
 }
 
@@ -2579,16 +2585,22 @@ class VistaEventLogCardEditor extends HTMLElement {
     this.attachShadow({ mode: "open" });
     this._config = {};
     this._hass = null;
+    this._rendered = false;
+    this._hasHass = false;
   }
 
   set hass(hass) {
+    const shouldRender = !this._rendered || !this._hasHass;
     this._hass = hass;
-    this._render();
+    this._hasHass = true;
+    if (shouldRender) this._render();
   }
 
   setConfig(config) {
-    this._config = { ...(config ?? {}) };
-    this._render();
+    const next = { ...(config ?? {}) };
+    const changed = JSON.stringify(next) !== JSON.stringify(this._config);
+    this._config = next;
+    if (!this._rendered || changed) this._render();
   }
 
   _emit(name, value) {
@@ -2603,7 +2615,6 @@ class VistaEventLogCardEditor extends HTMLElement {
       bubbles: true,
       composed: true,
     }));
-    this._render();
   }
 
   _render() {
@@ -2641,6 +2652,7 @@ class VistaEventLogCardEditor extends HTMLElement {
         this._emit(el.dataset.field, value);
       });
     });
+    this._rendered = true;
   }
 }
 
