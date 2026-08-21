@@ -351,16 +351,120 @@ class VistaKeypadCardEditor extends HTMLElement {
     this.attachShadow({ mode: "open" });
     this._config = {};
     this._hass = null;
+    this._entityOptionsSignature = "";
   }
 
   set hass(hass) {
     this._hass = hass;
-    this._render();
+    if (!this.shadowRoot?.querySelector(".editor")) {
+      this._render();
+      return;
+    }
+    this._refreshEntityOptions();
   }
 
   setConfig(config) {
     this._config = cloneEditorConfig(config ?? {});
-    this._render();
+    if (!this.shadowRoot?.querySelector(".editor")) {
+      this._render();
+      return;
+    }
+    this._syncControlsFromConfig();
+  }
+
+  _refreshEntityOptions() {
+    const datalist = this.shadowRoot?.getElementById("keypad-entities");
+    if (!datalist) return;
+    const sensorIds = Object.keys(this._hass?.states ?? {})
+      .filter((entityId) => entityId.startsWith("sensor."))
+      .sort();
+    const signature = sensorIds.join("\n");
+    if (signature === this._entityOptionsSignature) return;
+    this._entityOptionsSignature = signature;
+    datalist.innerHTML = sensorIds
+      .map((entityId) => `<option value="${escapeHtml(entityId)}"></option>`)
+      .join("");
+  }
+
+  _syncControlsFromConfig() {
+    if (!this.shadowRoot?.querySelector(".editor")) return;
+    const active = this.shadowRoot.activeElement;
+    const setValue = (selector, value) => {
+      const el = this.shadowRoot.querySelector(selector);
+      if (!el || el === active) return;
+      const next = String(value ?? "");
+      if (el.value !== next) el.value = next;
+    };
+    const setChecked = (selector, value) => {
+      const el = this.shadowRoot.querySelector(selector);
+      if (!el || el === active) return;
+      const next = Boolean(value);
+      if (el.checked !== next) el.checked = next;
+    };
+
+    const model = MODEL_ALIASES[String(this._config.model ?? "6160cr2").toLowerCase()] ?? "6160cr2";
+    const layout = LAYOUT_MODES.has(String(this._config.layout ?? "auto").toLowerCase())
+      ? String(this._config.layout ?? "auto").toLowerCase()
+      : "auto";
+    const requestedCaseColor = String(this._config.case_color ?? "auto").toLowerCase();
+    const caseColor = requestedCaseColor === "auto" || CASE_COLORS.has(requestedCaseColor) ? requestedCaseColor : "auto";
+    const soundInput = this._config.sound === true
+      ? { enabled: true }
+      : this._config.sound && typeof this._config.sound === "object" ? this._config.sound : {};
+    const sound = {
+      enabled: false,
+      keypress: true,
+      state_sounds: false,
+      volume: 0.035,
+      alarm_volume: 0.065,
+      chime: true,
+      trouble: true,
+      supervisory: true,
+      alarm_entity: "",
+      aux_entity: "",
+      ...soundInput,
+    };
+    const hapticInput = this._config.haptic === true
+      ? { enabled: true }
+      : this._config.haptic && typeof this._config.haptic === "object" ? this._config.haptic : {};
+    const haptic = { enabled: false, keypress_ms: 10, ...hapticInput };
+
+    setValue('[data-top="entity"]', this._config.entity ?? "");
+    setValue('[data-top="model"]', model);
+    setValue('[data-top="layout"]', layout);
+    setValue('[data-top="title"]', this._config.title ?? "");
+    setChecked('[data-top="show_card_background"]', Boolean(this._config.show_card_background));
+    setChecked("[data-control-toggle]", this._config.read_only === false);
+    setValue('[data-top="case_color"]', caseColor);
+    setValue('[data-top="day_case_color"]', this._config.day_case_color ?? "");
+    setValue('[data-top="night_case_color"]', this._config.night_case_color ?? "");
+
+    for (const name of ["enabled", "keypress", "state_sounds", "chime", "trouble", "supervisory"]) {
+      const fallback = ["keypress", "chime", "trouble", "supervisory"].includes(name);
+      setChecked(`[data-sound="${name}"]`, Boolean(sound[name] ?? fallback));
+    }
+    for (const name of ["volume", "alarm_volume"]) {
+      setValue(`[data-sound="${name}"]`, sound[name]);
+      const el = this.shadowRoot.querySelector(`[data-sound="${name}"]`);
+      const label = el?.parentElement?.querySelector(".value");
+      if (label) label.textContent = Number(sound[name]).toFixed(3);
+    }
+    setValue('[data-sound="alarm_entity"]', sound.alarm_entity ?? "");
+    setValue('[data-sound="aux_entity"]', sound.aux_entity ?? "");
+    setChecked('[data-haptic="enabled"]', Boolean(haptic.enabled));
+    setValue('[data-haptic="keypress_ms"]', haptic.keypress_ms);
+
+    const defaultFunctions = MODEL_PROFILES[model]?.compactFunctionKeys ?? DEFAULT_FUNCTION_KEYS[model] ?? ["A", "B", "C", "D"];
+    FUNCTION_IDS.forEach((id, index) => {
+      const el = this.shadowRoot.querySelector(`[data-function="${id}"]`);
+      if (!el) return;
+      el.placeholder = defaultFunctions[index] ?? id.toUpperCase();
+      if (el !== active) {
+        const next = this._functionText(id);
+        if (el.value !== next) el.value = next;
+      }
+    });
+    this._refreshEntityOptions();
   }
 
   _emit(config) {
@@ -370,7 +474,6 @@ class VistaKeypadCardEditor extends HTMLElement {
       bubbles: true,
       composed: true,
     }));
-    this._render();
   }
 
   _topLevel(name, value) {
@@ -456,6 +559,7 @@ class VistaKeypadCardEditor extends HTMLElement {
     const haptic = { enabled: false, keypress_ms: 10, ...hapticInput };
     const defaultFunctions = MODEL_PROFILES[model]?.compactFunctionKeys ?? DEFAULT_FUNCTION_KEYS[model] ?? ["A", "B", "C", "D"];
     const sensorIds = Object.keys(this._hass?.states ?? {}).filter((entityId) => entityId.startsWith("sensor.")).sort();
+    this._entityOptionsSignature = sensorIds.join("\n");
     const entityOptions = sensorIds.map((entityId) => `<option value="${escapeHtml(entityId)}"></option>`).join("");
     const checked = (value) => value ? "checked" : "";
 
@@ -549,6 +653,12 @@ class VistaKeypadCardEditor extends HTMLElement {
       });
     });
     this.shadowRoot.querySelectorAll("[data-sound]").forEach((el) => {
+      if (el.type === "range") {
+        el.addEventListener("input", () => {
+          const valueLabel = el.parentElement?.querySelector(".value");
+          if (valueLabel) valueLabel.textContent = Number(el.value).toFixed(3);
+        });
+      }
       el.addEventListener("change", () => {
         const value = el.type === "checkbox" ? el.checked : el.dataset.number ? Number(el.value) : el.value || null;
         this._nested("sound", el.dataset.sound, value);
@@ -2579,16 +2689,66 @@ class VistaEventLogCardEditor extends HTMLElement {
     this.attachShadow({ mode: "open" });
     this._config = {};
     this._hass = null;
+    this._entityOptionsSignature = "";
   }
 
   set hass(hass) {
     this._hass = hass;
-    this._render();
+    if (!this.shadowRoot?.querySelector(".editor")) {
+      this._render();
+      return;
+    }
+    this._refreshEntityOptions();
   }
 
   setConfig(config) {
     this._config = { ...(config ?? {}) };
-    this._render();
+    if (!this.shadowRoot?.querySelector(".editor")) {
+      this._render();
+      return;
+    }
+    this._syncControlsFromConfig();
+  }
+
+  _refreshEntityOptions() {
+    const datalist = this.shadowRoot?.getElementById("event-journal-entities");
+    if (!datalist) return;
+    const sensorIds = Object.keys(this._hass?.states ?? {})
+      .filter((entityId) => entityId.startsWith("sensor."))
+      .sort();
+    const signature = sensorIds.join("\n");
+    if (signature === this._entityOptionsSignature) return;
+    this._entityOptionsSignature = signature;
+    datalist.innerHTML = sensorIds
+      .map((entityId) => `<option value="${escapeHtml(entityId)}"></option>`)
+      .join("");
+  }
+
+  _syncControlsFromConfig() {
+    if (!this.shadowRoot?.querySelector(".editor")) return;
+    const active = this.shadowRoot.activeElement;
+    const setValue = (selector, value) => {
+      const el = this.shadowRoot.querySelector(selector);
+      if (!el || el === active) return;
+      const next = String(value ?? "");
+      if (el.value !== next) el.value = next;
+    };
+    const setChecked = (selector, value) => {
+      const el = this.shadowRoot.querySelector(selector);
+      if (!el || el === active) return;
+      const next = Boolean(value);
+      if (el.checked !== next) el.checked = next;
+    };
+
+    const rows = Math.max(1, Math.min(100, Number(this._config.rows ?? 20) || 20));
+    const partition = Math.max(0, Math.min(8, Number(this._config.partition ?? 0) || 0));
+    setValue('[data-field="entity"]', this._config.entity ?? "");
+    setValue('[data-field="title"]', this._config.title ?? "");
+    setValue('[data-field="rows"]', rows);
+    setValue('[data-field="partition"]', partition);
+    setChecked('[data-field="show_source"]', this._config.show_source !== false);
+    setChecked('[data-field="show_user"]', this._config.show_user !== false);
+    this._refreshEntityOptions();
   }
 
   _emit(name, value) {
@@ -2603,7 +2763,6 @@ class VistaEventLogCardEditor extends HTMLElement {
       bubbles: true,
       composed: true,
     }));
-    this._render();
   }
 
   _render() {
@@ -2611,6 +2770,7 @@ class VistaEventLogCardEditor extends HTMLElement {
     const sensorIds = Object.keys(this._hass?.states ?? {})
       .filter((entityId) => entityId.startsWith("sensor."))
       .sort();
+    this._entityOptionsSignature = sensorIds.join("\n");
     const options = sensorIds.map((entityId) => `<option value="${escapeHtml(entityId)}"></option>`).join("");
     const rows = Math.max(1, Math.min(100, Number(this._config.rows ?? 20) || 20));
     const partition = Math.max(0, Math.min(8, Number(this._config.partition ?? 0) || 0));
