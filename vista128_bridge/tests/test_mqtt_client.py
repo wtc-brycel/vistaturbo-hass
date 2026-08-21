@@ -100,7 +100,10 @@ class MqttPublisherTests(unittest.TestCase):
             burglary_alarm_led=False,
             auxiliary_alarm_led=False,
         )
+        state = VistaState()
+        state.keypads[1] = keypad
         self.publisher.publish_keypad_state(keypad)
+        self.publisher.publish_alarm_states(state)
         published = {item[0]: item[1] for item in self.publisher._client.published}
         self.assertEqual(published["vista128/keypad/1/alarm/fire"], "ON")
         self.assertEqual(published["vista128/keypad/1/alarm/burglary"], "OFF")
@@ -112,13 +115,68 @@ class MqttPublisherTests(unittest.TestCase):
 
     def test_keypad_alarm_binary_sensors_are_unavailable_while_state_is_unknown(self):
         keypad = KeypadState(partition=1, initialized=True)
+        state = VistaState()
+        state.keypads[1] = keypad
         self.publisher.publish_keypad_state(keypad)
+        self.publisher.publish_alarm_states(state)
         published = {item[0]: item[1] for item in self.publisher._client.published}
         for alarm_type in ("fire", "burglary", "auxiliary", "active"):
             self.assertEqual(
                 published[f"vista128/keypad/1/alarm/{alarm_type}/available"],
                 "OFF",
             )
+
+    def test_global_alarm_sensors_or_across_all_partitions(self):
+        self.publisher.publish_discovery()
+        configs = {
+            item[0]: json.loads(item[1])
+            for item in self.publisher._client.published
+            if item[1]
+        }
+        for alarm_type, name in {
+            "fire": "Fire Alarm",
+            "burglary": "Burglary Alarm",
+            "auxiliary": "Auxiliary Alarm",
+            "active": "Alarm Active",
+        }.items():
+            topic = f"homeassistant/binary_sensor/vista128_bridge/alarm_{alarm_type}/config"
+            self.assertIn(topic, configs)
+            self.assertEqual(configs[topic]["name"], name)
+
+        state = VistaState()
+        state.keypads[1].fire_alarm_led = False
+        state.keypads[1].burglary_alarm_led = False
+        state.keypads[1].auxiliary_alarm_led = False
+        # Partition 4 is not a configured keypad partition, but a live alarm there
+        # must still drive the panel-level aggregate immediately.
+        state.keypads[4].fire_alarm_led = True
+        self.publisher.publish_alarm_states(state)
+        published = {item[0]: item[1] for item in self.publisher._client.published}
+        self.assertEqual(published["vista128/alarm/fire"], "ON")
+        self.assertEqual(published["vista128/alarm/fire/available"], "ON")
+        self.assertEqual(published["vista128/alarm/active"], "ON")
+        attrs = json.loads(published["vista128/alarm/fire/attributes"])
+        self.assertEqual(attrs["active_partitions"], [4])
+        aggregate = json.loads(published["vista128/alarm/active/attributes"])
+        self.assertEqual(aggregate["active_types"], ["fire"])
+        self.assertEqual(aggregate["fire_partitions"], [4])
+
+    def test_global_alarm_off_requires_configured_partition_known_false(self):
+        state = VistaState()
+        self.publisher.publish_alarm_states(state)
+        published = {item[0]: item[1] for item in self.publisher._client.published}
+        self.assertEqual(published["vista128/alarm/fire/available"], "OFF")
+        self.assertEqual(published["vista128/alarm/active/available"], "OFF")
+
+        state.keypads[1].fire_alarm_led = False
+        state.keypads[1].burglary_alarm_led = False
+        state.keypads[1].auxiliary_alarm_led = False
+        self.publisher.publish_alarm_states(state)
+        published = {item[0]: item[1] for item in self.publisher._client.published}
+        self.assertEqual(published["vista128/alarm/fire/available"], "ON")
+        self.assertEqual(published["vista128/alarm/fire"], "OFF")
+        self.assertEqual(published["vista128/alarm/active/available"], "ON")
+        self.assertEqual(published["vista128/alarm/active"], "OFF")
 
     def test_zone_discovery_publishes_four_literal_conditions(self):
         zone = ZoneState(21, partition=1, descriptor="FRONT DOOR")

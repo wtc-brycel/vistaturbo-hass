@@ -5,7 +5,7 @@ import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "app"))
 
 from vista_bridge.mqtt_discovery import keypad_config, partition_config, zone_summary_entities
-from vista_bridge.protocol import KeypadDisplayReport, SystemEvent
+from vista_bridge.protocol import ArmingStatusReport, KeypadDisplayReport, SystemEvent
 from vista_bridge.state import VistaState
 
 
@@ -132,6 +132,20 @@ class ReadinessTests(unittest.TestCase):
         )
         self.assertFalse(keypad.fire_alarm_led)
 
+
+    def test_authoritative_not_ready_disarmed_clears_stale_burglary_class(self):
+        state = VistaState()
+        partition = state.partitions[1]
+        keypad = state.keypads[1]
+        partition.active_alarm_tokens.add("021:41")
+        partition.active_burglary_tokens.add("021:41")
+        keypad.burglary_alarm_led = True
+        report = ArmingStatusReport(raw_modes=("N", "D", "D", "D", "D", "D", "D", "D"))
+        changed = state.apply_arming_status(report)
+        self.assertIn(1, changed)
+        self.assertFalse(partition.active_alarm_tokens)
+        self.assertFalse(partition.active_burglary_tokens)
+        self.assertFalse(keypad.burglary_alarm_led)
 
 if __name__ == "__main__":
     unittest.main()

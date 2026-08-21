@@ -320,9 +320,17 @@ class VistaState:
             if partition.raw_mode != raw_mode:
                 partition.raw_mode = raw_mode
                 changed.add(partition_number)
-            if raw_mode in {"D", "N"} and partition.active_alarm_tokens:
-                partition.active_alarm_tokens.clear()
-                changed.add(partition_number)
+            if raw_mode in {"D", "N"}:
+                if partition.active_alarm_tokens:
+                    partition.active_alarm_tokens.clear()
+                    changed.add(partition_number)
+                if partition.active_burglary_tokens:
+                    partition.active_burglary_tokens.clear()
+                    changed.add(partition_number)
+                keypad = self.keypads.get(partition_number)
+                if keypad is not None and keypad.burglary_alarm_led is True:
+                    keypad.burglary_alarm_led = False
+                    changed.add(partition_number)
         return changed
 
     def apply_keypad_display(

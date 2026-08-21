@@ -33,6 +33,9 @@ class FakeMqtt:
     def publish_keypad_state(self, keypad):
         self.keypad_states.append(keypad)
 
+    def publish_alarm_states(self, state):
+        pass
+
     def publish_zone_discovery(self, zone):
         pass
 

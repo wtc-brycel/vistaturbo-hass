@@ -195,6 +195,7 @@ class VistaBridge:
         for keypad in self.state.keypads.values():
             if keypad.initialized:
                 self.mqtt.publish_keypad_state(keypad)
+        self.mqtt.publish_alarm_states(self.state)
         self._panel_connected.set()
         LOG.info("Panel TCP connection established")
         self.mqtt.publish("panel/connected", "ON", retain=True)
