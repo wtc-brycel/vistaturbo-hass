@@ -46,8 +46,9 @@ async function loadEditors(page) {
 test("keypad editor keeps text focus and draft value across hass refreshes", async ({ page }) => {
   await loadEditors(page);
 
-  const title = page.locator("#keypad-editor").evaluateHandle((host) => host.shadowRoot.querySelector("#title"));
-  await title.asElement().focus();
+  await page.evaluate(() => {
+    document.getElementById("keypad-editor").shadowRoot.querySelector("#title").focus();
+  });
   await page.keyboard.type("Garage keypad");
 
   await page.evaluate(() => {
