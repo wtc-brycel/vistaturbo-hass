@@ -8,10 +8,12 @@ import paho.mqtt.client as mqtt
 
 from .config import Settings
 from .mqtt_discovery import (
+    KEYPAD_ALARM_SPECS,
     ZONE_CONDITION_SPECS,
     device_info,
     diagnostic_entities,
     event_history_config,
+    keypad_alarm_configs,
     keypad_config,
     partition_config,
     zone_condition_configs,
@@ -148,6 +150,12 @@ class MqttPublisher:
             f"keypad_{partition}",
             keypad_config(partition, self.topic),
         )
+        for alarm_type, config in keypad_alarm_configs(partition, self.topic).items():
+            self._publish_discovery_config(
+                "binary_sensor",
+                f"keypad_{partition}_alarm_{alarm_type}",
+                config,
+            )
 
     def publish_keypad_state(self, keypad: KeypadState) -> None:
         if not keypad.initialized:
@@ -167,6 +175,59 @@ class MqttPublisher:
         self.publish_json(
             f"{prefix}/attributes",
             attributes,
+            retain=True,
+            qos=1,
+        )
+        self._publish_keypad_alarm_states(keypad)
+
+    def _publish_keypad_alarm_states(self, keypad: KeypadState) -> None:
+        prefix = f"keypad/{keypad.partition}/alarm"
+        values: dict[str, bool | None] = {}
+        for alarm_type, spec in KEYPAD_ALARM_SPECS.items():
+            value = getattr(keypad, spec["attribute"])
+            values[alarm_type] = value
+            available = value is not None
+            self.publish(
+                f"{prefix}/{alarm_type}/available",
+                "ON" if available else "OFF",
+                retain=True,
+                qos=1,
+            )
+            if available:
+                self.publish(
+                    f"{prefix}/{alarm_type}",
+                    "ON" if value else "OFF",
+                    retain=True,
+                    qos=1,
+                )
+
+        active_types = [
+            alarm_type for alarm_type, value in values.items() if value is True
+        ]
+        all_known = all(value is not None for value in values.values())
+        aggregate_available = bool(active_types) or all_known
+        self.publish(
+            f"{prefix}/active/available",
+            "ON" if aggregate_available else "OFF",
+            retain=True,
+            qos=1,
+        )
+        if aggregate_available:
+            self.publish(
+                f"{prefix}/active",
+                "ON" if active_types else "OFF",
+                retain=True,
+                qos=1,
+            )
+        self.publish_json(
+            f"{prefix}/active/attributes",
+            {
+                "active_types": active_types,
+                "fire_alarm": values["fire"],
+                "burglary_alarm": values["burglary"],
+                "auxiliary_alarm": values["auxiliary"],
+                "sound_mode": keypad.sound_mode,
+            },
             retain=True,
             qos=1,
         )
