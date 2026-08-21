@@ -4,9 +4,6 @@ on:
   push:
   pull_request:
 
-permissions:
-  contents: write
-
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -40,44 +37,3 @@ jobs:
       - name: Run keypad browser regression tests
         working-directory: frontend
         run: npm run test:render
-
-  apply-global-alarm-sensors:
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'feature/alarm-binary-sensors' && github.actor != 'github-actions[bot]'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: feature/alarm-binary-sensors
-          fetch-depth: 0
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-      - name: Apply global alarm patches
-        run: |
-          python scripts/patch_global_alarm_sensors.py
-          python scripts/fix_global_alarm_test_import.py
-          python scripts/fix_global_alarm_tests.py
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-      - name: Run backend tests
-        working-directory: vista128_bridge
-        run: python -m unittest discover -s tests -v
-      - name: Syntax check frontend
-        run: node --check frontend/vista-keypad-card.js
-      - name: Install frontend dependencies
-        working-directory: frontend
-        run: npm install --no-audit --no-fund
-      - name: Install Chromium
-        working-directory: frontend
-        run: npx playwright install --with-deps chromium
-      - name: Run frontend regression suite
-        working-directory: frontend
-        run: npm run test:render
-      - name: Commit validated changes
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add vista128_bridge/app/vista_bridge/mqtt_discovery.py vista128_bridge/app/vista_bridge/mqtt_client.py vista128_bridge/app/vista_bridge/message_handler.py vista128_bridge/app/vista_bridge/bridge.py vista128_bridge/app/vista_bridge/state.py vista128_bridge/tests/test_message_handler.py vista128_bridge/tests/test_mqtt_client.py vista128_bridge/tests/test_readiness.py
-          git commit -m "Add panel-wide alarm binary sensors"
-          git push origin HEAD:feature/alarm-binary-sensors
