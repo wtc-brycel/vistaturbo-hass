@@ -136,6 +136,7 @@ class ProtocolMessageHandler:
         for partition in self.state.partitions.values():
             self.mqtt.publish_partition_discovery(partition.partition)
             self.mqtt.publish_partition_state(partition)
+        self.mqtt.publish_alarm_states(self.state)
 
     def _handle_zone_status(self, data: bytes, received_at: str) -> None:
         report = parse_zone_status(data)
@@ -222,6 +223,7 @@ class ProtocolMessageHandler:
         )
         self.mqtt.publish_keypad_discovery(partition)
         self.mqtt.publish_keypad_state(keypad)
+        self.mqtt.publish_alarm_states(self.state)
 
     def _handle_system_event(self, data: bytes, received_at: str) -> None:
         event = parse_system_event(data)
@@ -291,6 +293,7 @@ class ProtocolMessageHandler:
         # Publish initialized keypad entities immediately so AC/fire/supervisory
         # changes are visible without waiting for the next KD polling interval.
         self._publish_initialized_keypads()
+        self.mqtt.publish_alarm_states(self.state)
 
         self.printer.enqueue_event(
             event=event,

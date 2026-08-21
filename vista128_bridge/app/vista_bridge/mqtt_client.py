@@ -8,11 +8,14 @@ import paho.mqtt.client as mqtt
 
 from .config import Settings
 from .mqtt_discovery import (
+    KEYPAD_ALARM_SPECS,
     ZONE_CONDITION_SPECS,
     device_info,
     diagnostic_entities,
     event_history_config,
+    keypad_alarm_configs,
     keypad_config,
+    panel_alarm_configs,
     partition_config,
     zone_condition_configs,
     zone_summary_entities,
@@ -106,6 +109,10 @@ class MqttPublisher:
             )
         for object_id, config in zone_summary_entities(self.topic).items():
             self._publish_discovery_config("sensor", object_id, config)
+        for alarm_type, config in panel_alarm_configs(self.topic).items():
+            self._publish_discovery_config(
+                "binary_sensor", f"alarm_{alarm_type}", config
+            )
         if self.settings.event_history.enabled:
             self._publish_discovery_config(
                 "sensor", "event_journal", event_history_config(self.topic)
@@ -148,6 +155,12 @@ class MqttPublisher:
             f"keypad_{partition}",
             keypad_config(partition, self.topic),
         )
+        for alarm_type, config in keypad_alarm_configs(partition, self.topic).items():
+            self._publish_discovery_config(
+                "binary_sensor",
+                f"keypad_{partition}_alarm_{alarm_type}",
+                config,
+            )
 
     def publish_keypad_state(self, keypad: KeypadState) -> None:
         if not keypad.initialized:
@@ -167,6 +180,153 @@ class MqttPublisher:
         self.publish_json(
             f"{prefix}/attributes",
             attributes,
+            retain=True,
+            qos=1,
+        )
+
+    def publish_alarm_states(self, state: VistaState) -> None:
+        if self.settings.keypad.enabled:
+            for partition in self.settings.keypad.partitions:
+                keypad = state.keypads.get(partition)
+                if keypad is not None:
+                    self._publish_keypad_alarm_states(keypad)
+        self._publish_panel_alarm_states(state)
+
+    def _publish_keypad_alarm_states(self, keypad: KeypadState) -> None:
+        prefix = f"keypad/{keypad.partition}/alarm"
+        values: dict[str, bool | None] = {}
+        for alarm_type, spec in KEYPAD_ALARM_SPECS.items():
+            value = getattr(keypad, spec["attribute"])
+            values[alarm_type] = value
+            available = value is not None
+            self.publish(
+                f"{prefix}/{alarm_type}/available",
+                "ON" if available else "OFF",
+                retain=True,
+                qos=1,
+            )
+            if available:
+                self.publish(
+                    f"{prefix}/{alarm_type}",
+                    "ON" if value else "OFF",
+                    retain=True,
+                    qos=1,
+                )
+
+        active_types = [
+            alarm_type for alarm_type, value in values.items() if value is True
+        ]
+        all_known = all(value is not None for value in values.values())
+        aggregate_available = bool(active_types) or all_known
+        self.publish(
+            f"{prefix}/active/available",
+            "ON" if aggregate_available else "OFF",
+            retain=True,
+            qos=1,
+        )
+        if aggregate_available:
+            self.publish(
+                f"{prefix}/active",
+                "ON" if active_types else "OFF",
+                retain=True,
+                qos=1,
+            )
+        self.publish_json(
+            f"{prefix}/active/attributes",
+            {
+                "active_types": active_types,
+                "fire_alarm": values["fire"],
+                "burglary_alarm": values["burglary"],
+                "auxiliary_alarm": values["auxiliary"],
+                "sound_mode": keypad.sound_mode,
+            },
+            retain=True,
+            qos=1,
+        )
+
+    def _publish_panel_alarm_states(self, state: VistaState) -> None:
+        prefix = "alarm"
+        configured = (
+            tuple(self.settings.keypad.partitions)
+            if self.settings.keypad.enabled and self.settings.keypad.partitions
+            else tuple(range(1, 9))
+        )
+        global_values: dict[str, bool | None] = {}
+        active_partitions_by_type: dict[str, list[int]] = {}
+
+        for alarm_type, spec in KEYPAD_ALARM_SPECS.items():
+            values = {
+                partition: getattr(keypad, spec["attribute"])
+                for partition, keypad in state.keypads.items()
+            }
+            active_partitions = sorted(
+                partition for partition, value in values.items() if value is True
+            )
+            active_partitions_by_type[alarm_type] = active_partitions
+            configured_values = [values[partition] for partition in configured]
+            available = bool(active_partitions) or all(
+                value is not None for value in configured_values
+            )
+            value: bool | None = True if active_partitions else (False if available else None)
+            global_values[alarm_type] = value
+
+            self.publish(
+                f"{prefix}/{alarm_type}/available",
+                "ON" if available else "OFF",
+                retain=True,
+                qos=1,
+            )
+            if available:
+                self.publish(
+                    f"{prefix}/{alarm_type}",
+                    "ON" if value else "OFF",
+                    retain=True,
+                    qos=1,
+                )
+            self.publish_json(
+                f"{prefix}/{alarm_type}/attributes",
+                {
+                    "active_partitions": active_partitions,
+                    "configured_partitions": list(configured),
+                    "partition_states": {
+                        str(partition): values[partition]
+                        for partition in sorted(values)
+                    },
+                },
+                retain=True,
+                qos=1,
+            )
+
+        active_types = [
+            alarm_type
+            for alarm_type, value in global_values.items()
+            if value is True
+        ]
+        aggregate_available = bool(active_types) or all(
+            value is not None for value in global_values.values()
+        )
+        self.publish(
+            f"{prefix}/active/available",
+            "ON" if aggregate_available else "OFF",
+            retain=True,
+            qos=1,
+        )
+        if aggregate_available:
+            self.publish(
+                f"{prefix}/active",
+                "ON" if active_types else "OFF",
+                retain=True,
+                qos=1,
+            )
+        self.publish_json(
+            f"{prefix}/active/attributes",
+            {
+                "active_types": active_types,
+                "fire_partitions": active_partitions_by_type["fire"],
+                "burglary_partitions": active_partitions_by_type["burglary"],
+                "auxiliary_partitions": active_partitions_by_type["auxiliary"],
+                "configured_partitions": list(configured),
+            },
             retain=True,
             qos=1,
         )

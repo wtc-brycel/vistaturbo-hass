@@ -35,6 +35,128 @@ ZONE_CONDITION_SPECS = {
 }
 
 
+KEYPAD_ALARM_SPECS = {
+    "fire": {
+        "attribute": "fire_alarm_led",
+        "label": "Fire Alarm",
+        "icon": "mdi:fire-alert",
+    },
+    "burglary": {
+        "attribute": "burglary_alarm_led",
+        "label": "Burglary Alarm",
+        "icon": "mdi:shield-alert-outline",
+    },
+    "auxiliary": {
+        "attribute": "auxiliary_alarm_led",
+        "label": "Auxiliary Alarm",
+        "icon": "mdi:alarm-light-outline",
+    },
+}
+
+
+def keypad_alarm_availability(partition: int, alarm_type: str, topic: TopicFn) -> dict:
+    return {
+        "availability": [
+            {
+                "topic": topic("bridge/availability"),
+                "payload_available": "online",
+                "payload_not_available": "offline",
+            },
+            {
+                "topic": topic("panel/connected"),
+                "payload_available": "ON",
+                "payload_not_available": "OFF",
+            },
+            {
+                "topic": topic(f"keypad/{partition}/alarm/{alarm_type}/available"),
+                "payload_available": "ON",
+                "payload_not_available": "OFF",
+            },
+        ],
+        "availability_mode": "all",
+    }
+
+
+def keypad_alarm_configs(partition: int, topic: TopicFn) -> dict[str, dict]:
+    configs = {
+        alarm_type: {
+            "name": f"Partition {partition} {spec['label']}",
+            "unique_id": f"vista128_keypad_{partition}_{alarm_type}_alarm",
+            "state_topic": topic(f"keypad/{partition}/alarm/{alarm_type}"),
+            "payload_on": "ON",
+            "payload_off": "OFF",
+            **keypad_alarm_availability(partition, alarm_type, topic),
+            "icon": spec["icon"],
+            "device": device_info(),
+        }
+        for alarm_type, spec in KEYPAD_ALARM_SPECS.items()
+    }
+    configs["active"] = {
+        "name": f"Partition {partition} Alarm Active",
+        "unique_id": f"vista128_keypad_{partition}_alarm_active",
+        "state_topic": topic(f"keypad/{partition}/alarm/active"),
+        "payload_on": "ON",
+        "payload_off": "OFF",
+        "json_attributes_topic": topic(f"keypad/{partition}/alarm/active/attributes"),
+        **keypad_alarm_availability(partition, "active", topic),
+        "icon": "mdi:alarm-light",
+        "device": device_info(),
+    }
+    return configs
+
+
+def panel_alarm_availability(alarm_type: str, topic: TopicFn) -> dict:
+    return {
+        "availability": [
+            {
+                "topic": topic("bridge/availability"),
+                "payload_available": "online",
+                "payload_not_available": "offline",
+            },
+            {
+                "topic": topic("panel/connected"),
+                "payload_available": "ON",
+                "payload_not_available": "OFF",
+            },
+            {
+                "topic": topic(f"alarm/{alarm_type}/available"),
+                "payload_available": "ON",
+                "payload_not_available": "OFF",
+            },
+        ],
+        "availability_mode": "all",
+    }
+
+
+def panel_alarm_configs(topic: TopicFn) -> dict[str, dict]:
+    configs = {
+        alarm_type: {
+            "name": spec["label"],
+            "unique_id": f"vista128_{alarm_type}_alarm",
+            "state_topic": topic(f"alarm/{alarm_type}"),
+            "payload_on": "ON",
+            "payload_off": "OFF",
+            "json_attributes_topic": topic(f"alarm/{alarm_type}/attributes"),
+            **panel_alarm_availability(alarm_type, topic),
+            "icon": spec["icon"],
+            "device": device_info(),
+        }
+        for alarm_type, spec in KEYPAD_ALARM_SPECS.items()
+    }
+    configs["active"] = {
+        "name": "Alarm Active",
+        "unique_id": "vista128_alarm_active",
+        "state_topic": topic("alarm/active"),
+        "payload_on": "ON",
+        "payload_off": "OFF",
+        "json_attributes_topic": topic("alarm/active/attributes"),
+        **panel_alarm_availability("active", topic),
+        "icon": "mdi:alarm-light",
+        "device": device_info(),
+    }
+    return configs
+
+
 def device_info() -> dict:
     return {
         "identifiers": ["vista128_bridge"],
