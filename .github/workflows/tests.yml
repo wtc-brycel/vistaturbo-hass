@@ -24,108 +24,95 @@ jobs:
           path = Path("frontend/vista-keypad-card.js")
           source = path.read_text(encoding="utf-8")
 
-          helper_anchor = '''function safeCssColor(value, fallback = "") {
-            if (typeof value !== "string") return fallback;
-            const text = value.trim();
-            if (!text || /[;{}]/.test(text)) return fallback;
-            return text;
-          }
-          '''
-          helper = helper_anchor + '''
-          function editorEntityOptions(hass, currentValue = "", domains = null, allowEmpty = false) {
-            const states = hass?.states ?? {};
-            const allowedDomains = Array.isArray(domains) && domains.length ? new Set(domains) : null;
-            const current = String(currentValue ?? "");
-            const entityIds = Object.keys(states).filter((entityId) => {
-              const dot = entityId.indexOf(".");
-              const domain = dot === -1 ? "" : entityId.slice(0, dot);
-              return !allowedDomains || allowedDomains.has(domain);
-            });
-
-            if (current && !entityIds.includes(current)) entityIds.push(current);
-            entityIds.sort((left, right) => {
-              const leftName = String(states[left]?.attributes?.friendly_name ?? left);
-              const rightName = String(states[right]?.attributes?.friendly_name ?? right);
-              return leftName.localeCompare(rightName) || left.localeCompare(right);
-            });
-
-            const emptyOption = allowEmpty
-              ? `<option value="" ${current ? "" : "selected"}>None</option>`
-              : current ? "" : '<option value="" selected disabled>Select an entity</option>';
-            const options = entityIds.map((entityId) => {
-              const friendlyName = String(states[entityId]?.attributes?.friendly_name ?? "").trim();
-              const label = friendlyName && friendlyName !== entityId
-                ? `${friendlyName} (${entityId})`
-                : entityId;
-              return `<option value="${escapeHtml(entityId)}" ${entityId === current ? "selected" : ""}>${escapeHtml(label)}</option>`;
-            }).join("");
-            return `${emptyOption}${options}`;
-          }
-          '''
+          helper_anchor = (
+              'function safeCssColor(value, fallback = "") {\n'
+              '  if (typeof value !== "string") return fallback;\n'
+              '  const text = value.trim();\n'
+              '  if (!text || /[;{}]/.test(text)) return fallback;\n'
+              '  return text;\n'
+              '}\n'
+          )
+          helper = helper_anchor + (
+              '\n'
+              'function editorEntityOptions(hass, currentValue = "", domains = null, allowEmpty = false) {\n'
+              '  const states = hass?.states ?? {};\n'
+              '  const allowedDomains = Array.isArray(domains) && domains.length ? new Set(domains) : null;\n'
+              '  const current = String(currentValue ?? "");\n'
+              '  const entityIds = Object.keys(states).filter((entityId) => {\n'
+              '    const dot = entityId.indexOf(".");\n'
+              '    const domain = dot === -1 ? "" : entityId.slice(0, dot);\n'
+              '    return !allowedDomains || allowedDomains.has(domain);\n'
+              '  });\n'
+              '\n'
+              '  if (current && !entityIds.includes(current)) entityIds.push(current);\n'
+              '  entityIds.sort((left, right) => {\n'
+              '    const leftName = String(states[left]?.attributes?.friendly_name ?? left);\n'
+              '    const rightName = String(states[right]?.attributes?.friendly_name ?? right);\n'
+              '    return leftName.localeCompare(rightName) || left.localeCompare(right);\n'
+              '  });\n'
+              '\n'
+              '  const emptyOption = allowEmpty\n'
+              '    ? `<option value="" ${current ? "" : "selected"}>None</option>`\n'
+              '    : current ? "" : \'<option value="" selected disabled>Select an entity</option>\';\n'
+              '  const options = entityIds.map((entityId) => {\n'
+              '    const friendlyName = String(states[entityId]?.attributes?.friendly_name ?? "").trim();\n'
+              '    const label = friendlyName && friendlyName !== entityId\n'
+              '      ? `${friendlyName} (${entityId})`\n'
+              '      : entityId;\n'
+              '    return `<option value="${escapeHtml(entityId)}" ${entityId === current ? "selected" : ""}>${escapeHtml(label)}</option>`;\n'
+              '  }).join("");\n'
+              '  return `${emptyOption}${options}`;\n'
+              '}\n'
+          )
 
           replacements = [
-            (helper_anchor, helper),
-            (
-              '''    const sensorIds = Object.keys(this._hass?.states ?? {}).filter((entityId) => entityId.startsWith("sensor.")).sort();
-              const entityOptions = sensorIds.map((entityId) => `<option value="${escapeHtml(entityId)}"></option>`).join("");
-              ''',
-              '''    const keypadEntityOptions = editorEntityOptions(this._hass, this._config.entity, ["sensor"]);
-              const alarmEntityOptions = editorEntityOptions(this._hass, sound.alarm_entity, null, true);
-              const auxEntityOptions = editorEntityOptions(this._hass, sound.aux_entity, null, true);
-              ''',
-            ),
-            (
-              '''          <div class="field full"><label for="entity">Keypad entity</label><input id="entity" data-top="entity" type="text" list="keypad-entities" value="${escapeHtml(this._config.entity ?? "")}" placeholder="sensor.vista_partition_1_keypad"><datalist id="keypad-entities">${entityOptions}</datalist></div>
-              ''',
-              '''          <div class="field full"><label for="entity">Keypad entity</label><select id="entity" data-top="entity">${keypadEntityOptions}</select></div>
-              ''',
-            ),
-            (
-              '''          <div class="field"><label>Burglary entity override</label><input data-sound="alarm_entity" type="text" value="${escapeHtml(sound.alarm_entity ?? "")}" placeholder="Optional"></div>
-                        <div class="field"><label>Auxiliary entity override</label><input data-sound="aux_entity" type="text" value="${escapeHtml(sound.aux_entity ?? "")}" placeholder="Optional"></div>
-              ''',
-              '''          <div class="field"><label>Burglary entity override</label><select data-sound="alarm_entity">${alarmEntityOptions}</select></div>
-                        <div class="field"><label>Auxiliary entity override</label><select data-sound="aux_entity">${auxEntityOptions}</select></div>
-              ''',
-            ),
-            (
-              '''    const sensorIds = Object.keys(this._hass?.states ?? {})
-                    .filter((entityId) => entityId.startsWith("sensor."))
-                    .sort();
-                  const options = sensorIds.map((entityId) => `<option value="${escapeHtml(entityId)}"></option>`).join("");
-              ''',
-              '''    const entityOptions = editorEntityOptions(this._hass, this._config.entity, ["sensor"]);
-              ''',
-            ),
-            (
-              '''      <div class="field"><label>Event journal entity</label><input data-field="entity" list="event-journal-entities" value="${escapeHtml(this._config.entity ?? "")}" placeholder="sensor.vista_128bpt_event_journal"><datalist id="event-journal-entities">${options}</datalist></div>
-              ''',
-              '''      <div class="field"><label>Event journal entity</label><select data-field="entity">${entityOptions}</select></div>
-              ''',
-            ),
+              (
+                  helper_anchor,
+                  helper,
+              ),
+              (
+                  '    const sensorIds = Object.keys(this._hass?.states ?? {}).filter((entityId) => entityId.startsWith("sensor.")).sort();\n'
+                  '    const entityOptions = sensorIds.map((entityId) => `<option value="${escapeHtml(entityId)}"></option>`).join("");\n',
+                  '    const keypadEntityOptions = editorEntityOptions(this._hass, this._config.entity, ["sensor"]);\n'
+                  '    const alarmEntityOptions = editorEntityOptions(this._hass, sound.alarm_entity, null, true);\n'
+                  '    const auxEntityOptions = editorEntityOptions(this._hass, sound.aux_entity, null, true);\n',
+              ),
+              (
+                  '          <div class="field full"><label for="entity">Keypad entity</label><input id="entity" data-top="entity" type="text" list="keypad-entities" value="${escapeHtml(this._config.entity ?? "")}" placeholder="sensor.vista_partition_1_keypad"><datalist id="keypad-entities">${entityOptions}</datalist></div>\n',
+                  '          <div class="field full"><label for="entity">Keypad entity</label><select id="entity" data-top="entity">${keypadEntityOptions}</select></div>\n',
+              ),
+              (
+                  '          <div class="field"><label>Burglary entity override</label><input data-sound="alarm_entity" type="text" value="${escapeHtml(sound.alarm_entity ?? "")}" placeholder="Optional"></div>\n',
+                  '          <div class="field"><label>Burglary entity override</label><select data-sound="alarm_entity">${alarmEntityOptions}</select></div>\n',
+              ),
+              (
+                  '          <div class="field"><label>Auxiliary entity override</label><input data-sound="aux_entity" type="text" value="${escapeHtml(sound.aux_entity ?? "")}" placeholder="Optional"></div>\n',
+                  '          <div class="field"><label>Auxiliary entity override</label><select data-sound="aux_entity">${auxEntityOptions}</select></div>\n',
+              ),
+              (
+                  '    const sensorIds = Object.keys(this._hass?.states ?? {})\n'
+                  '      .filter((entityId) => entityId.startsWith("sensor."))\n'
+                  '      .sort();\n'
+                  '    const options = sensorIds.map((entityId) => `<option value="${escapeHtml(entityId)}"></option>`).join("");\n',
+                  '    const entityOptions = editorEntityOptions(this._hass, this._config.entity, ["sensor"]);\n',
+              ),
+              (
+                  '      <div class="field"><label>Event journal entity</label><input data-field="entity" list="event-journal-entities" value="${escapeHtml(this._config.entity ?? "")}" placeholder="sensor.vista_128bpt_event_journal"><datalist id="event-journal-entities">${options}</datalist></div>\n',
+                  '      <div class="field"><label>Event journal entity</label><select data-field="entity">${entityOptions}</select></div>\n',
+              ),
           ]
 
-          changed = False
           for old, new in replacements:
-            count = source.count(old)
-            if count == 1:
+              count = source.count(old)
+              if count != 1:
+                  raise SystemExit(f"Expected exactly one match, found {count}: {old[:100]!r}")
               source = source.replace(old, new)
-              changed = True
-            elif count == 0 and new in source:
-              pass
-            else:
-              raise SystemExit(f"Expected exactly one match, found {count}: {old[:90]!r}")
 
-          if changed:
-            path.write_text(source, encoding="utf-8")
+          path.write_text(source, encoding="utf-8")
           PY
       - name: Commit entity dropdown patch
         shell: bash
         run: |
-          if git diff --quiet -- frontend/vista-keypad-card.js; then
-            echo "Entity dropdown patch already applied."
-            exit 0
-          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add frontend/vista-keypad-card.js
