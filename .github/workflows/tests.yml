@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   apply-entity-dropdowns:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/frontend/entity-dropdowns'
+    if: github.event_name == 'pull_request' && github.head_ref == 'frontend/entity-dropdowns'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -64,10 +64,7 @@ jobs:
           '''
 
           replacements = [
-            (
-              helper_anchor,
-              helper,
-            ),
+            (helper_anchor, helper),
             (
               '''    const sensorIds = Object.keys(this._hass?.states ?? {}).filter((entityId) => entityId.startsWith("sensor.")).sort();
               const entityOptions = sensorIds.map((entityId) => `<option value="${escapeHtml(entityId)}"></option>`).join("");
