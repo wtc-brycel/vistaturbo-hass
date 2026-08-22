@@ -126,6 +126,36 @@ function safeCssColor(value, fallback = "") {
   return text;
 }
 
+function editorEntityOptions(hass, currentValue = "", domains = null, allowEmpty = false) {
+  const states = hass?.states ?? {};
+  const allowedDomains = Array.isArray(domains) && domains.length ? new Set(domains) : null;
+  const current = String(currentValue ?? "");
+  const entityIds = Object.keys(states).filter((entityId) => {
+    const dot = entityId.indexOf(".");
+    const domain = dot === -1 ? "" : entityId.slice(0, dot);
+    return !allowedDomains || allowedDomains.has(domain);
+  });
+
+  if (current && !entityIds.includes(current)) entityIds.push(current);
+  entityIds.sort((left, right) => {
+    const leftName = String(states[left]?.attributes?.friendly_name ?? left);
+    const rightName = String(states[right]?.attributes?.friendly_name ?? right);
+    return leftName.localeCompare(rightName) || left.localeCompare(right);
+  });
+
+  const emptyOption = allowEmpty
+    ? `<option value="" ${current ? "" : "selected"}>None</option>`
+    : current ? "" : '<option value="" selected disabled>Select an entity</option>';
+  const options = entityIds.map((entityId) => {
+    const friendlyName = String(states[entityId]?.attributes?.friendly_name ?? "").trim();
+    const label = friendlyName && friendlyName !== entityId
+      ? `${friendlyName} (${entityId})`
+      : entityId;
+    return `<option value="${escapeHtml(entityId)}" ${entityId === current ? "selected" : ""}>${escapeHtml(label)}</option>`;
+  }).join("");
+  return `${emptyOption}${options}`;
+}
+
 /*
  * Synthesized keypad feedback. Cadences are intentionally modeled after
  * conventional VISTA keypad behavior, but exact factory piezo frequencies are
@@ -460,8 +490,9 @@ class VistaKeypadCardEditor extends HTMLElement {
       : this._config.haptic && typeof this._config.haptic === "object" ? this._config.haptic : {};
     const haptic = { enabled: false, keypress_ms: 10, ...hapticInput };
     const defaultFunctions = MODEL_PROFILES[model]?.compactFunctionKeys ?? DEFAULT_FUNCTION_KEYS[model] ?? ["A", "B", "C", "D"];
-    const sensorIds = Object.keys(this._hass?.states ?? {}).filter((entityId) => entityId.startsWith("sensor.")).sort();
-    const entityOptions = sensorIds.map((entityId) => `<option value="${escapeHtml(entityId)}"></option>`).join("");
+    const keypadEntityOptions = editorEntityOptions(this._hass, this._config.entity, ["sensor"]);
+    const alarmEntityOptions = editorEntityOptions(this._hass, sound.alarm_entity, null, true);
+    const auxEntityOptions = editorEntityOptions(this._hass, sound.aux_entity, null, true);
     const checked = (value) => value ? "checked" : "";
 
     this.shadowRoot.innerHTML = `<style>
@@ -489,7 +520,7 @@ class VistaKeypadCardEditor extends HTMLElement {
       <section class="section">
         <h3>Keypad</h3>
         <div class="grid">
-          <div class="field full"><label for="entity">Keypad entity</label><input id="entity" data-top="entity" type="text" list="keypad-entities" value="${escapeHtml(this._config.entity ?? "")}" placeholder="sensor.vista_partition_1_keypad"><datalist id="keypad-entities">${entityOptions}</datalist></div>
+          <div class="field full"><label for="entity">Keypad entity</label><select id="entity" data-top="entity">${keypadEntityOptions}</select></div>
           <div class="field"><label for="model">Style</label><select id="model" data-top="model">${this._option("6160cr2", "6160CR-2", model)}${this._option("6160", "6160", model)}${this._option("firstalert", "First Alert", model)}</select></div>
           <div class="field"><label for="layout">Layout</label><select id="layout" data-top="layout">${this._option("auto", "Auto", layout)}${this._option("physical", "Physical", layout)}${this._option("compact", "Compact", layout)}</select></div>
           <div class="field full"><label for="title">Title</label><input id="title" data-top="title" type="text" value="${escapeHtml(this._config.title ?? "")}" placeholder="Optional"></div>
@@ -520,8 +551,8 @@ class VistaKeypadCardEditor extends HTMLElement {
           <div class="toggle"><span class="label">Supervisory</span><input data-sound="supervisory" type="checkbox" ${checked(sound.supervisory !== false)}></div>
           <div class="field"><label>Key chirp volume</label><div class="range-row"><input data-sound="volume" data-number="1" type="range" min="0" max="0.20" step="0.005" value="${escapeHtml(sound.volume)}"><span class="value">${Number(sound.volume).toFixed(3)}</span></div></div>
           <div class="field"><label>Alarm volume</label><div class="range-row"><input data-sound="alarm_volume" data-number="1" type="range" min="0" max="0.20" step="0.005" value="${escapeHtml(sound.alarm_volume)}"><span class="value">${Number(sound.alarm_volume).toFixed(3)}</span></div></div>
-          <div class="field"><label>Burglary entity override</label><input data-sound="alarm_entity" type="text" value="${escapeHtml(sound.alarm_entity ?? "")}" placeholder="Optional"></div>
-          <div class="field"><label>Auxiliary entity override</label><input data-sound="aux_entity" type="text" value="${escapeHtml(sound.aux_entity ?? "")}" placeholder="Optional"></div>
+          <div class="field"><label>Burglary entity override</label><select data-sound="alarm_entity">${alarmEntityOptions}</select></div>
+          <div class="field"><label>Auxiliary entity override</label><select data-sound="aux_entity">${auxEntityOptions}</select></div>
         </div>
         <div class="note">The bridge-native <code>sound_mode</code> remains preferred. Entity overrides are only for installations that need an alternate Home Assistant source.</div>
       </section>
@@ -2619,10 +2650,7 @@ class VistaEventLogCardEditor extends HTMLElement {
 
   _render() {
     if (!this.shadowRoot) return;
-    const sensorIds = Object.keys(this._hass?.states ?? {})
-      .filter((entityId) => entityId.startsWith("sensor."))
-      .sort();
-    const options = sensorIds.map((entityId) => `<option value="${escapeHtml(entityId)}"></option>`).join("");
+    const entityOptions = editorEntityOptions(this._hass, this._config.entity, ["sensor"]);
     const rows = Math.max(1, Math.min(100, Number(this._config.rows ?? 20) || 20));
     const partition = Math.max(0, Math.min(8, Number(this._config.partition ?? 0) || 0));
     const checked = (value) => value ? "checked" : "";
@@ -2632,7 +2660,7 @@ class VistaEventLogCardEditor extends HTMLElement {
       *{box-sizing:border-box}.editor{display:grid;gap:12px}.field{display:grid;gap:5px}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
       label,.label{font-size:12px;color:var(--secondary-text-color)}input,select{width:100%;min-height:40px;padding:7px 9px;border:1px solid var(--divider-color,#aaa);border-radius:7px;background:var(--card-background-color,#fff);color:var(--primary-text-color,#111);font:inherit}.toggle{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:36px}.toggle input{width:20px;height:20px}@media(max-width:520px){.grid{grid-template-columns:1fr}}
     </style><div class="editor">
-      <div class="field"><label>Event journal entity</label><input data-field="entity" list="event-journal-entities" value="${escapeHtml(this._config.entity ?? "")}" placeholder="sensor.vista_128bpt_event_journal"><datalist id="event-journal-entities">${options}</datalist></div>
+      <div class="field"><label>Event journal entity</label><select data-field="entity">${entityOptions}</select></div>
       <div class="field"><label>Title</label><input data-field="title" value="${escapeHtml(this._config.title ?? "")}" placeholder="VISTA Event Journal"></div>
       <div class="grid">
         <div class="field"><label>Rows</label><input data-field="rows" data-number="1" type="number" min="1" max="100" value="${rows}"></div>
