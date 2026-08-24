@@ -4,7 +4,46 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: write
+
 jobs:
+  apply-abcd-defaults:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/frontend/abcd-defaults'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: frontend/abcd-defaults
+      - name: Set A-D function key defaults
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("frontend/vista-keypad-card.js")
+          source = path.read_text(encoding="utf-8")
+          replacements = {
+              '  "6160cr2": ["AWAY", "STAY", "POLICE", "PAGE"],\n': '  "6160cr2": ["A", "B", "C", "D"],\n',
+              '  "6160": ["", "", "", ""],\n': '  "6160": ["A", "B", "C", "D"],\n',
+              '    compactFunctionKeys: ["AWAY", "STAY", "POLICE", "PAGE"],\n': '    compactFunctionKeys: ["A", "B", "C", "D"],\n',
+          }
+          for old, new in replacements.items():
+              count = source.count(old)
+              if count != 1:
+                  raise SystemExit(f"Expected exactly one match, found {count}: {old!r}")
+              source = source.replace(old, new)
+          path.write_text(source, encoding="utf-8")
+          PY
+      - name: Commit A-D defaults
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/vista-keypad-card.js
+          git commit -m "Use A-D as default function key labels"
+          git push origin HEAD:frontend/abcd-defaults
+
   test:
     runs-on: ubuntu-latest
     defaults:
