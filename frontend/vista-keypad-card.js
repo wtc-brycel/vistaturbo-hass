@@ -34,8 +34,8 @@ const FIRST_ALERT_NUMBER_KEYS = [
 
 const FUNCTION_IDS = ["a", "b", "c", "d"];
 const DEFAULT_FUNCTION_KEYS = {
-  "6160cr2": ["AWAY", "STAY", "POLICE", "PAGE"],
-  "6160": ["", "", "", ""],
+  "6160cr2": ["A", "B", "C", "D"],
+  "6160": ["A", "B", "C", "D"],
   "firstalert": ["A", "B", "C", "D"],
 };
 
@@ -46,7 +46,7 @@ const DEFAULT_FUNCTION_KEYS = {
  */
 const MODEL_PROFILES = {
   "6160cr2": {
-    compactFunctionKeys: ["AWAY", "STAY", "POLICE", "PAGE"],
+    compactFunctionKeys: ["A", "B", "C", "D"],
     compactIndicators: [
       { label: "READY", state: "ready", className: "ready", flash: "ready" },
       { label: "ARMED", state: "armed", className: "armed", flash: "armed" },
