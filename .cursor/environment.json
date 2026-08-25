@@ -1,0 +1,4 @@
+{
+  "name": "Vista Turbo HASS",
+  "install": "bash .cursor/install.sh"
+}
