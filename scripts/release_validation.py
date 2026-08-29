@@ -24,7 +24,7 @@ RELEASE_TAG_RE = re.compile(r"^v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$")
 RELEASE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 .:_()/-]{0,119}$")
 COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 APPROVED_KEYS = frozenset({"tag", "name", "notes"})
-REQUIRED_CHECKS = frozenset({"test", "frontend-render"})
+REQUIRED_CHECKS = frozenset({"test", "frontend-render", "repository-security"})
 ASSET_SOURCES = (
     ("vista-keypad-card.js", Path("frontend/vista-keypad-card.js")),
     ("vista-keypad-simulator.html", Path("frontend/vista-keypad-simulator.html")),

@@ -78,10 +78,11 @@ class ReleaseValidationTests(unittest.TestCase):
         checks = [
             {"id": 10, "name": "test", "status": "completed", "conclusion": "success", "app": {"slug": "github-actions"}},
             {"id": 11, "name": "frontend-render", "status": "completed", "conclusion": "success", "app": {"slug": "github-actions"}},
+            {"id": 12, "name": "repository-security", "status": "completed", "conclusion": "success", "app": {"slug": "github-actions"}},
         ]
         self.assertTrue(successful_required_checks(checks))
         checks.append(
-            {"id": 12, "name": "test", "status": "completed", "conclusion": "failure", "app": {"slug": "github-actions"}}
+            {"id": 13, "name": "test", "status": "completed", "conclusion": "failure", "app": {"slug": "github-actions"}}
         )
         self.assertFalse(successful_required_checks(checks))
 
@@ -90,6 +91,7 @@ class ReleaseValidationTests(unittest.TestCase):
         self.assertFalse(successful_required_checks([
             {"id": 1, "name": "test", "status": "completed", "conclusion": "success", "app": {"slug": "other"}},
             {"id": 2, "name": "frontend-render", "status": "queued", "conclusion": None, "app": {"slug": "github-actions"}},
+            {"id": 3, "name": "repository-security", "status": "completed", "conclusion": "success", "app": {"slug": "github-actions"}},
         ]))
 
     def test_mismatched_tag_and_release_identity_is_rejected(self):
