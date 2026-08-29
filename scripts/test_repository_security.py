@@ -39,6 +39,13 @@ class RepositorySecurityTests(unittest.TestCase):
         self.assertTrue(any("contents: write" in error for error in errors))
         self.assertTrue(any("persist-credentials" in error for error in errors))
 
+    def test_rejects_write_all_permissions_outside_release_boundary(self):
+        self.write_workflow(
+            """permissions: write-all\njobs:\n  test:\n    steps:\n      - uses: actions/checkout@1111111111111111111111111111111111111111 # v4.2.2\n        with:\n          persist-credentials: false\n"""
+        )
+        errors = check_repository(self.root)
+        self.assertTrue(any("permissions: write-all" in error for error in errors))
+
     def test_rejects_latest_production_base(self):
         (self.root / "Dockerfile").write_text("FROM example/base:latest\n", encoding="utf-8")
         self.write_workflow(
