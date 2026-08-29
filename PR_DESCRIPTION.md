@@ -92,5 +92,6 @@ Local commands and results:
 - `cd frontend && npx playwright install --with-deps chromium`: **blocked by the managed container's apt privilege restrictions** (`setgroups/setegid/seteuid` and apt archive permission errors).
 - `cd frontend && npm run test:render`: **49 tests attempted; browser launch was unavailable because Chromium was not installed**, so no frontend assertions executed locally. CI must run the full Chromium suite before merge.
 - `git diff --check`: **passed**.
+- GitHub Actions run **463** on the published head passed all jobs: `test`, `repository-security`, and `frontend-render`; the frontend job completed **49/49 Playwright tests passed**.
 
 The PR is intentionally left open for review and CI; it is not merged here.
