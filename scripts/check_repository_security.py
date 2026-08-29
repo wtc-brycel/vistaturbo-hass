@@ -18,6 +18,9 @@ from scripts.release_validation import ReleaseValidationError, load_release_meta
 ACTION_USE_RE = re.compile(r"^\s*(?:-\s*)?uses:\s*([^\s#]+)(?:\s+#\s*(.*))?\s*$")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 CHECKOUT_RE = re.compile(r"actions/checkout@")
+WRITE_ALL_PERMISSIONS_RE = re.compile(
+    r"^\s*permissions:\s*write-all\s*(?:#.*)?$", re.IGNORECASE | re.MULTILINE
+)
 
 
 def _workflow_files(root: Path) -> list[Path]:
@@ -58,6 +61,8 @@ def _check_checkout_credentials(path: Path, text: str, errors: list[str]) -> Non
 def _check_workflow(path: Path, text: str, errors: list[str]) -> None:
     _check_action_pins(path, text, errors)
     _check_checkout_credentials(path, text, errors)
+    if path.name != "publish-release-candidate.yml" and WRITE_ALL_PERMISSIONS_RE.search(text):
+        errors.append(f"{path}: non-release workflow may not grant permissions: write-all")
     if path.name == "tests.yml":
         if re.search(r"contents:\s*write\b", text, re.IGNORECASE):
             errors.append(f"{path}: normal test workflow grants contents: write")
