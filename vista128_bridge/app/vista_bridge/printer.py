@@ -119,7 +119,14 @@ class TransPortEventPrinter:
         self.panel_timezone = settings.panel.timezone
         self.enabled = self.settings.enabled
         self.metrics = PrinterMetrics(status="initializing" if self.enabled else "disabled")
-        self.store = PrintQueueStore(self.settings.spool_path) if self.enabled else None
+        self.store = (
+            PrintQueueStore(
+                self.settings.spool_path,
+                max_terminal_rows=self.settings.queue_max,
+            )
+            if self.enabled
+            else None
+        )
         if self.store is not None:
             self._refresh_queue_depth()
             self.metrics.status = "idle"

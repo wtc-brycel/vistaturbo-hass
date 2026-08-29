@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.6-rc.11
+
+- Coordinate the #16, #17, and #18 security hardening pass across alarm state, synchronization, MQTT, persistence, and the keypad card; #19 is intentionally separate.
+- Add fail-safe panel alarm aggregation for fire, burglary, auxiliary, silent, duress, supervisory, and untyped alarm evidence. Alarm OFF remains unavailable until the complete session snapshot is fresh.
+- Invalidate connection-derived security state on reconnect while preserving configuration and event history. Do not republish stale READY, DISARMED, keypad, or alarm state as current.
+- Correlate protocol acknowledgements and keypad responses with their pending transactions and serialize logical keypad sequences.
+- Add bounded normal/raw TX queues, strict privileged raw-TX validation on `admin/raw_tx`, MQTT publish diagnostics, and opt-in raw frame diagnostics.
+- Add MQTT TLS verification with no plaintext fallback, bounded event-history retention, retained-topic/discovery cleanup, and trusted-network transport documentation.
+- Update the card to version `0.3.24` with explicit unavailable rendering, disabled controls, narrow CSS color validation, bounded searchable entity selection, and explicit logical keypad completion for serialized QoS 1 commands.
+
 ## 0.2.6-rc.8
 
 - Infer Automation Interface Available after a successful structured VISTA transaction when the panel does not emit `08XN` during ordinary operation.

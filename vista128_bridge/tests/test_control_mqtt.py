@@ -3,6 +3,7 @@ import os
 import sys
 import types
 import unittest
+from dataclasses import replace
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "app"))
 sys.path.insert(0, os.path.dirname(__file__))
@@ -44,7 +45,7 @@ class ControlMqttTests(unittest.TestCase):
     def test_keypad_state_advertises_command_topic_when_enabled(self):
         settings = make_settings(control_enabled=True, keypad_control_enabled=True)
         publisher = MqttPublisher(settings, lambda data: (True, "queued"))
-        keypad = KeypadState(partition=1, initialized=True, line_1="DISARMED        ", line_2="READY TO ARM    ")
+        keypad = KeypadState(partition=1, initialized=True, session_fresh=True, line_1="DISARMED        ", line_2="READY TO ARM    ")
         publisher.publish_keypad_state(keypad)
         published = {item[0]: item[1] for item in publisher._client.published}
         attrs = json.loads(published["vista128/keypad/1/attributes"])
@@ -59,9 +60,93 @@ class ControlMqttTests(unittest.TestCase):
             lambda data: (True, "queued"),
             lambda partition, key: (received.append((partition, key)) or True, "queued"),
         )
-        message = types.SimpleNamespace(topic="vista128/keypad/1/command", payload=b"7")
+        message = types.SimpleNamespace(topic="vista128/keypad/1/command", payload=b'{"keys":"7"}')
         publisher._on_message(None, None, message)
         self.assertEqual(received, [(1, "7")])
+
+    def test_legacy_one_byte_keypad_message_remains_compatible(self):
+        received = []
+        settings = make_settings(control_enabled=True, keypad_control_enabled=True)
+        publisher = MqttPublisher(
+            settings,
+            lambda data: (True, "queued"),
+            lambda partition, key: (received.append((partition, key)) or True, "queued"),
+        )
+        publisher._on_message(
+            None,
+            None,
+            types.SimpleNamespace(
+                topic="vista128/keypad/1/command",
+                payload=b"7",
+                retain=False,
+            ),
+        )
+        self.assertEqual(received, [(1, "7")])
+
+    def test_keypad_message_carries_compact_actor_metadata_for_audit(self):
+        received = []
+        settings = make_settings(control_enabled=True, keypad_control_enabled=True)
+        publisher = MqttPublisher(
+            settings,
+            lambda data: (True, "queued"),
+            lambda partition, key, metadata: (received.append((partition, key, metadata)) or True, "queued"),
+        )
+        publisher._on_message(
+            None,
+            None,
+            types.SimpleNamespace(
+                topic="vista128/keypad/2/command",
+                payload=(
+                    b'{"keys":"1234","transaction_id":"interaction-1",'
+                    b'"source":"ha_frontend","actor_id":"alice-id",'
+                    b'"actor_name":"Alice"}'
+                ),
+            ),
+        )
+        self.assertEqual(received[0][0:2], (2, "1234"))
+        self.assertEqual(
+            {
+                key: value
+                for key, value in received[0][2].items()
+                if key not in {"started_at", "request_id"}
+            },
+            {
+                "interaction_id": "interaction-1",
+                "actor_id": "alice-id",
+                "actor_name": "Alice",
+                "partition": 2,
+                "source": "ha_frontend",
+                "action": "keypad_sequence",
+                "command_sequence": "1234",
+                "interaction_complete": True,
+            },
+        )
+        self.assertRegex(received[0][2]["started_at"], r"^2026-08-29T")
+        self.assertRegex(received[0][2]["request_id"], r"^[0-9a-f]{32}$")
+
+    def test_rejected_keypad_interaction_is_audited_without_envelope(self):
+        audit = []
+        settings = make_settings(control_enabled=True, keypad_control_enabled=True)
+        publisher = MqttPublisher(
+            settings,
+            lambda data: (True, "queued"),
+            lambda partition, key, metadata: (False, "control_queue_full"),
+            None,
+            audit.append,
+        )
+        publisher._on_message(
+            None,
+            None,
+            types.SimpleNamespace(
+                topic="vista128/keypad/1/command",
+                payload=b'{"keys":"1234#","transaction_id":"interaction-1"}',
+                retain=False,
+            ),
+        )
+        self.assertEqual(len(audit), 1)
+        self.assertEqual(audit[0]["command_sequence"], "1234#")
+        self.assertEqual(audit[0]["status"], "rejected")
+        self.assertNotIn("payload", audit[0])
 
     def test_alarm_message_passes_remote_code_to_callback_only(self):
         received = []
@@ -91,7 +176,7 @@ class ControlMqttTests(unittest.TestCase):
             lambda partition, key: (keypad_received.append((partition, key)) or True, "queued"),
             lambda partition, action, code: (alarm_received.append((partition, action, code)) or True, "queued"),
         )
-        publisher._on_message(None, None, types.SimpleNamespace(topic="vista128/keypad/1/command", payload=b"7", retain=True))
+        publisher._on_message(None, None, types.SimpleNamespace(topic="vista128/keypad/1/command", payload=b'{"keys":"7"}', retain=True))
         publisher._on_message(None, None, types.SimpleNamespace(topic="vista128/partition/1/command", payload=b'{"action":"DISARM","code":"1234"}', retain=True))
         self.assertEqual(keypad_received, [])
         self.assertEqual(alarm_received, [])
@@ -106,7 +191,7 @@ class ControlMqttTests(unittest.TestCase):
         publisher._on_message(None, None, types.SimpleNamespace(topic="vista128/keypad/1/command", payload=b"1234", retain=False))
         self.assertEqual(received, [])
         published = [str(item[1]) for item in publisher._client.published]
-        self.assertTrue(any("unsupported_keypad_payload" in item for item in published))
+        self.assertTrue(any("keypad_payload_must_be_object" in item for item in published))
         self.assertFalse(any("1234" in item for item in published))
 
     def test_connect_subscribes_only_enabled_control_topics(self):
@@ -120,6 +205,25 @@ class ControlMqttTests(unittest.TestCase):
         subscriptions = {topic for topic, _ in publisher._client.subscriptions}
         self.assertIn("vista128/keypad/+/command", subscriptions)
         self.assertIn("vista128/partition/+/command", subscriptions)
+
+    def test_privileged_raw_topic_is_separate_and_explicitly_opt_in(self):
+        settings = replace(make_settings(), debug_raw_tx_enabled=True)
+        sent = []
+        publisher = MqttPublisher(settings, lambda data: (sent.append(data) or (True, "queued")))
+        publisher._on_connect(publisher._client, None, None, 0, None)
+        subscriptions = {topic for topic, _ in publisher._client.subscriptions}
+        self.assertIn("vista128/admin/raw_tx", subscriptions)
+        self.assertNotIn("vista128/debug/tx", subscriptions)
+        publisher._on_message(
+            None,
+            None,
+            types.SimpleNamespace(
+                topic="vista128/admin/raw_tx",
+                payload=b'{"hex":"4142"}',
+                retain=False,
+            ),
+        )
+        self.assertEqual(sent, [b"AB"])
 
 
 if __name__ == "__main__":

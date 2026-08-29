@@ -19,8 +19,10 @@ LOG = logging.getLogger(__name__)
 SendQuery = Callable[[bytes, str, str], tuple[bool, str]]
 BoolCallback = Callable[[], bool]
 PublishResult = Callable[[dict], None]
+AuditResult = Callable[[dict], None]
 
 BASIC_KEYPAD_KEYS = frozenset("0123456789*#")
+MAX_KEYPAD_STROKES = 5
 
 
 @dataclass(frozen=True)
@@ -32,6 +34,16 @@ class ControlRequest:
     code: str
     generation: int
     enqueued_at: float
+    started_at: str = ""
+    command_sequence: str = ""
+    operands: dict | None = None
+    interaction_id: str = ""
+    actor_id: str = ""
+    actor_name: str = ""
+    source: str = "mqtt"
+    action: str = "keypad_sequence"
+    interaction_complete: bool = True
+    audit_request_id: str = ""
 
 
 EXPECTED_ARMING_MODES = {
@@ -62,6 +74,7 @@ class VistaControlCoordinator:
         is_connected: BoolCallback,
         send_query: SendQuery,
         publish_result: PublishResult,
+        audit_result: AuditResult | None = None,
     ) -> None:
         self.settings = settings
         self.state = state
@@ -69,6 +82,7 @@ class VistaControlCoordinator:
         self.is_connected = is_connected
         self.send_query = send_query
         self.publish_result = publish_result
+        self.audit_result = audit_result
         self._queue: queue.Queue[ControlRequest] = queue.Queue(maxsize=64)
         self._automation_available = threading.Event()
         self._automation_state_lock = threading.Lock()
@@ -77,6 +91,9 @@ class VistaControlCoordinator:
         self._generation_lock = threading.Lock()
         self._generation = 0
         self._request_ids = itertools.count(1)
+        self._keypad_reservation_lock = threading.Lock()
+        self._keypad_owner = ""
+        self._keypad_owner_partition = 0
 
     def automation_available(self) -> bool:
         return self._automation_available.is_set()
@@ -123,8 +140,44 @@ class VistaControlCoordinator:
             self._automation_available.clear()
             self._automation_blocked = False
             self._automation_source = "unknown"
+        with self._keypad_reservation_lock:
+            self._keypad_owner = ""
+            self._keypad_owner_partition = 0
         self.discard_pending("panel_session_reset")
         return generation
+
+    def _reserve_keypad_interaction(
+        self, partition: int, interaction_id: str
+    ) -> tuple[bool, bool]:
+        """Reserve the panel keypad for one logical interaction.
+
+        The VISTA KS path has no transaction identifier. The owner therefore
+        remains held for the complete logical interaction so two callers
+        cannot interleave segmented commands. An explicit final segment,
+        cancellation, or panel session reset releases it. There is no elapsed
+        time boundary: a slow but active interaction must not be split.
+        """
+        if not interaction_id:
+            return True, False
+        with self._keypad_reservation_lock:
+            if not self._keypad_owner:
+                self._keypad_owner = interaction_id
+                self._keypad_owner_partition = partition
+                return True, True
+            if (
+                self._keypad_owner == interaction_id
+                and self._keypad_owner_partition == partition
+            ):
+                return True, False
+            return False, False
+
+    def _release_keypad_interaction(self, interaction_id: str) -> None:
+        if not interaction_id:
+            return
+        with self._keypad_reservation_lock:
+            if self._keypad_owner == interaction_id:
+                self._keypad_owner = ""
+                self._keypad_owner_partition = 0
 
     def _current_generation(self) -> int:
         with self._generation_lock:
@@ -156,19 +209,35 @@ class VistaControlCoordinator:
             return False, "automation_interface_unavailable"
         return True, "accepted"
 
-    def enqueue_keypad(self, partition: int, key: str) -> tuple[bool, str]:
+    def enqueue_keypad(
+        self,
+        partition: int,
+        key: str,
+        metadata: dict | None = None,
+    ) -> tuple[bool, str]:
+        """Queue one or more keypad strokes as one serialized transaction."""
         ok, detail = self._preflight("keypad")
         if not ok:
             return ok, detail
-        if not isinstance(key, str) or len(key) != 1 or key not in BASIC_KEYPAD_KEYS:
+        if (
+            not isinstance(key, str)
+            or not 1 <= len(key) <= MAX_KEYPAD_STROKES
+            or any(stroke not in BASIC_KEYPAD_KEYS for stroke in key)
+        ):
             return False, "unsupported_keypad_key"
         try:
-            build_keypad_stroke_command(partition, [key])
+            build_keypad_stroke_command(partition, key)
         except ValueError:
             return False, "invalid_keypad_command"
-        return self._enqueue("keypad", partition, key, "")
+        return self._enqueue("keypad", partition, key, "", metadata)
 
-    def enqueue_alarm(self, partition: int, action: str, code: str) -> tuple[bool, str]:
+    def enqueue_alarm(
+        self,
+        partition: int,
+        action: str,
+        code: str,
+        metadata: dict | None = None,
+    ) -> tuple[bool, str]:
         ok, detail = self._preflight("alarm")
         if not ok:
             return ok, detail
@@ -176,21 +245,66 @@ class VistaControlCoordinator:
             build_native_alarm_command(action, code, (partition,))
         except ValueError as exc:
             return False, str(exc)
-        return self._enqueue("alarm", partition, str(action).upper(), str(code))
+        return self._enqueue(
+            "alarm", partition, str(action).upper(), str(code), metadata
+        )
 
-    def _enqueue(self, kind: str, partition: int, value: str, code: str) -> tuple[bool, str]:
+    def _enqueue(
+        self,
+        kind: str,
+        partition: int,
+        value: str,
+        code: str,
+        metadata: dict | None = None,
+    ) -> tuple[bool, str]:
+        metadata = metadata if isinstance(metadata, dict) else {}
+        request_id = next(self._request_ids)
+        interaction_id = str(metadata.get("interaction_id", ""))
+        reservation_created = False
+        if kind == "keypad":
+            available, reservation_created = self._reserve_keypad_interaction(
+                partition, interaction_id
+            )
+            if not available:
+                return False, "keypad_interaction_busy"
         request = ControlRequest(
-            request_id=next(self._request_ids),
+            request_id=request_id,
             kind=kind,
             partition=partition,
             value=value,
             code=code,
             generation=self._current_generation(),
             enqueued_at=time.monotonic(),
+            started_at=str(metadata.get("started_at", "")),
+            command_sequence=str(
+                metadata.get("command_sequence", value if kind == "keypad" else code)
+            ),
+            operands=(
+                dict(metadata["operands"])
+                if isinstance(metadata.get("operands"), dict)
+                else None
+            ),
+            interaction_id=interaction_id,
+            actor_id=str(metadata.get("actor_id", "")),
+            actor_name=str(metadata.get("actor_name", "")),
+            source=str(metadata.get("source", "mqtt")),
+            action=str(
+                metadata.get(
+                    "action",
+                    "keypad_sequence" if kind == "keypad" else value.lower(),
+                )
+            ),
+            interaction_complete=bool(metadata.get("interaction_complete", True)),
+            audit_request_id=str(
+                metadata.get("audit_request_id", metadata.get("request_id", ""))
+                or f"control-{request_id}"
+            ),
         )
         try:
             self._queue.put_nowait(request)
         except queue.Full:
+            if reservation_created:
+                self._release_keypad_interaction(interaction_id)
             return False, "control_queue_full"
         return True, "queued"
 
@@ -220,7 +334,7 @@ class VistaControlCoordinator:
             return
 
         if request.kind == "keypad":
-            frame = build_keypad_stroke_command(request.partition, [request.value])
+            frame = build_keypad_stroke_command(request.partition, request.value)
             label = f"keypad_p{request.partition}"
         else:
             frame = build_native_alarm_command(request.value, request.code, (request.partition,))
@@ -233,7 +347,10 @@ class VistaControlCoordinator:
             if not self.automation_available():
                 self._result(request, False, "automation_interface_unavailable")
                 return
-            self.synchronizer.begin_external_transaction()
+            transaction_started = self.synchronizer.begin_external_transaction()
+            if transaction_started is False:
+                self._result(request, False, "transaction_unavailable")
+                return
             try:
                 accepted, detail = self.send_query(frame, "control", label)
                 if not accepted:
@@ -288,3 +405,26 @@ class VistaControlCoordinator:
         if request.kind == "keypad":
             payload["action"] = "keypress"
         self.publish_result(payload)
+        if self.audit_result is not None and request.interaction_id:
+            self.audit_result(
+                {
+                    "interaction_id": request.interaction_id,
+                    "request_id": request.audit_request_id,
+                    "actor_id": request.actor_id,
+                    "actor_name": request.actor_name,
+                    "partition": request.partition,
+                    "source": request.source,
+                    "started_at": request.started_at,
+                    "action": request.action,
+                    "command_sequence": request.command_sequence,
+                    "operands": request.operands,
+                    "status": status,
+                    "ok": ok,
+                }
+            )
+        if (
+            request.kind == "keypad"
+            and status not in {"queued"}
+            and (request.interaction_complete or not ok)
+        ):
+            self._release_keypad_interaction(request.interaction_id)

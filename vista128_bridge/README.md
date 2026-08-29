@@ -2,7 +2,7 @@
 
 Home Assistant App for the native RS-232 automation interface on Honeywell/Resideo VISTA Turbo alarm panels.
 
-> **Release candidate status:** 0.2.6-rc.8 adds an experimental opt-in write path. It has been developed and tested for monitoring on a VISTA-128BPT; the new keypad and native arm/disarm commands are ready for their first physical panel validation. All control gates default to off.
+> **Release candidate status:** 0.2.6-rc.11 is the coordinated security-hardening release. It has been developed and tested for monitoring on a VISTA-128BPT; experimental control gates default to off.
 
 ## What you get in Home Assistant
 
@@ -58,20 +58,21 @@ Home Assistant receives a **Partition 1 Keypad** sensor. Its attributes preserve
 
 The dedicated Power, Fire Alarm, Silenced, and Supervisory attributes are reconstructed from validated VISTA real-time events plus keypad-display reconciliation. Unknown reconstructed state is published as JSON `null` rather than guessed.
 
-Event-derived states are invalidated across a panel TCP disconnect so stale fire, supervisory, AC, burglary, or auxiliary information is not carried across a communication gap. Fresh KD and event traffic reconstructs them after reconnect.
+Event-derived states are invalidated across a panel TCP disconnect so stale fire, supervisory, AC, burglary, or auxiliary information is not carried across a communication gap. Fresh KD and event traffic reconstructs them after reconnect. Panel-wide alarm OFF is unavailable until arming, both zone blocks, both zone-partition blocks, and all eight keypad displays are fresh. Positive alarm evidence is still published immediately, including silent and duress alarms.
 
 ## MQTT availability
 
-Panel entities require both conditions to be healthy:
+Panel entities require all three conditions to be healthy:
 
 - the Vista Turbo RS232 process is online on `bridge/availability`
 - the panel TCP session is connected on `panel/connected`
+- the panel security snapshot is complete on `panel/state_fresh`
 
-Home Assistant MQTT Discovery uses `availability_mode: all` for partitions, keypad sensors, zone condition entities, and zone summaries. This prevents a stale retained panel-connected value from making entities look available after an unclean App or MQTT failure.
+Home Assistant MQTT Discovery uses `availability_mode: all` for partitions, keypad sensors, zone condition entities, and zone summaries. This prevents a stale retained panel-connected value from making entities look available after an unclean App or MQTT failure. Alarm entities use their own fail-safe availability topic: positive alarm evidence is available immediately, while incomplete/ambiguous alarm knowledge stays unavailable instead of being shown as OFF.
 
 ## Dashboard keypad card
 
-The matching Lovelace card ships with this release as `vista-keypad-card.js`. Card `0.3.21` includes the keypad models and visual editor from 0.3.18 plus the responsive `custom:vista-event-log-card` for the SQLite-backed recent event window.
+The matching Lovelace card ships with this release as `vista-keypad-card.js`. Card `0.3.24` includes the keypad models, bounded searchable visual editors, explicit offline rendering, explicit keypad transaction completion, and the responsive `custom:vista-event-log-card` for the SQLite-backed recent event window.
 
 `layout: auto` is the default. The card keeps the approved physical facsimile above 520 px card-container width and switches to a touchscreen-first compact layout at 520 px and below. `layout: physical` and `layout: compact` can force either presentation.
 
@@ -92,6 +93,8 @@ Optional `day_case_color` and `night_case_color` settings can override either si
 When `event_history_enabled` is true, every decoded live system event is persisted in `/data/vista128_events.sqlite3`. The journal keeps event code, panel timestamp, partition, zone, user number, descriptor, and whether the row was observed live, in the historical panel log, or both. Repeated identical events within the same panel minute remain separate occurrences.
 
 The App discovers an **Event Journal** sensor whose state is the total journal row count. Its attributes contain dump metadata and only the configured recent window. The complete database is not copied into Home Assistant state.
+
+Event history and the optional local keypad-interaction audit contain sensitive panel/security information. The audit keeps one row per logical interaction, including its exact completed keypad command sequence when `keypad_audit_enabled` is true; it is not mirrored into Home Assistant. Both tables are bounded by `event_history_max_age_days` (default 90) and `event_history_max_rows` (default 10000).
 
 Set `event_history_startup_dump_enabled: true` to request the VISTA historical log once after successful startup synchronization. The first test release leaves this disabled by default pending physical VISTA-128BPT validation. Historical records are storage-only and do not mutate live panel state or generate chimes, alarm sounds, keypad refreshes, or printer receipts.
 
@@ -134,6 +137,8 @@ native_alarm_control_enabled: false
 
 `chime_zones` is the bridge-owned dashboard chime policy, independent of ECP keypad programming. It accepts comma-separated zone numbers and ascending ranges such as `"1,2,5-8,27"`. Listed zones chime only on a new fault transition while the resolved partition is known to be disarmed.
 
+MQTT's disconnected QoS outbound queue is finite by default (`mqtt_outbound_queue_max: 256`; in-flight QoS messages: `mqtt_inflight_messages_max: 20`). Publish overflow is reported rather than retried through an unbounded application queue.
+
 Full configuration and MQTT details are in `DOCS.md`.
 
 ## Compatibility
@@ -159,4 +164,4 @@ native_alarm_control_enabled: true
 
 Keypad input uses typed VISTA `KS` frames for `0-9`, `*`, and `#`. The A-D visual function keys are intentionally not transmitted as literal letters because the VISTA protocol uses those data characters for other keystroke encodings.
 
-Native Home Assistant alarm control uses the documented VISTA arm/disarm command families and Home Assistant MQTT remote-code validation. PIN values are never retained, written to App logs, or echoed in control telemetry. Control TX payloads are redacted from bridge logging.
+Native Home Assistant alarm control uses the documented VISTA arm/disarm command families and Home Assistant MQTT remote-code validation. The bounded local keypad-interaction audit stores the exact completed logical command sequence, including a four-digit PIN when it is part of the command, together with actor and outcome metadata. It is not exposed as an HA entity or MQTT telemetry, and control TX payloads remain redacted from bridge logging.

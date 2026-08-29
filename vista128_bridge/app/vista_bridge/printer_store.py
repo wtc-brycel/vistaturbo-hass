@@ -13,7 +13,8 @@ class PrintJob:
 
 
 class PrintQueueStore:
-    def __init__(self, path: str) -> None:
+    def __init__(self, path: str, *, max_terminal_rows: int = 5000) -> None:
+        self.max_terminal_rows = max(1, int(max_terminal_rows))
         db_path = Path(path)
         db_path.parent.mkdir(parents=True, exist_ok=True)
         self._db = sqlite3.connect(db_path)
@@ -38,6 +39,7 @@ class PrintQueueStore:
             "ON print_jobs(status, id)"
         )
         self._db.commit()
+        self.prune_terminal()
 
     def close(self) -> None:
         self._db.close()
@@ -89,11 +91,8 @@ class PrintQueueStore:
             "last_error='', completed_at=? WHERE id=?",
             (completed_at, job_id),
         )
-        self._db.execute(
-            "DELETE FROM print_jobs WHERE status='complete' "
-            "AND id < (SELECT COALESCE(MAX(id),0)-2000 FROM print_jobs)"
-        )
         self._db.commit()
+        self.prune_terminal()
         return completed_at
 
     def mark_uncertain(self, job_id: int, error: str) -> None:
@@ -108,3 +107,24 @@ class PrintQueueStore:
             (status, error[:500], job_id),
         )
         self._db.commit()
+        self.prune_terminal()
+
+    def prune_terminal(self, batch_size: int = 500) -> int:
+        """Bound terminal spool history without ever deleting pending work."""
+        batch = max(1, min(5000, int(batch_size)))
+        row = self._db.execute(
+            "SELECT COUNT(*) FROM print_jobs WHERE status IN ('complete','failed','uncertain')"
+        ).fetchone()
+        excess = int(row[0]) - self.max_terminal_rows if row else 0
+        if excess <= 0:
+            return 0
+        cursor = self._db.execute(
+            "DELETE FROM print_jobs WHERE id IN ("
+            "SELECT id FROM print_jobs "
+            "WHERE status IN ('complete','failed','uncertain') "
+            "ORDER BY id LIMIT ?"
+            ")",
+            (min(excess, batch),),
+        )
+        self._db.commit()
+        return int(cursor.rowcount)

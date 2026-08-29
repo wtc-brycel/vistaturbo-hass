@@ -59,6 +59,12 @@ class MqttSettings:
     password: str
     base_topic: str
     discovery_prefix: str
+    tls_enabled: bool = False
+    tls_ca: str = ""
+    tls_client_cert: str = ""
+    tls_client_key: str = ""
+    outbound_queue_max: int = 256
+    inflight_messages_max: int = 20
 
 
 @dataclass(frozen=True)
@@ -96,6 +102,9 @@ class EventHistorySettings:
     startup_dump_enabled: bool
     sqlite_path: str
     recent_limit: int
+    audit_enabled: bool = True
+    max_age_days: int = 90
+    max_rows: int = 10000
 
 
 @dataclass(frozen=True)
@@ -121,6 +130,9 @@ class Settings:
     printer: PrinterSettings
     raw_logging: bool
     debug_raw_tx_enabled: bool
+    raw_mqtt_enabled: bool = False
+    tx_queue_max: int = 128
+    raw_tx_queue_max: int = 16
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -143,6 +155,16 @@ class Settings:
                 discovery_prefix=os.environ.get(
                     "MQTT_DISCOVERY_PREFIX", "homeassistant"
                 ).strip("/"),
+                tls_enabled=_bool_env("MQTT_TLS_ENABLED", False),
+                tls_ca=os.environ.get("MQTT_TLS_CA", "").strip(),
+                tls_client_cert=os.environ.get("MQTT_TLS_CLIENT_CERT", "").strip(),
+                tls_client_key=os.environ.get("MQTT_TLS_CLIENT_KEY", "").strip(),
+                outbound_queue_max=int(
+                    os.environ.get("MQTT_OUTBOUND_QUEUE_MAX", "256")
+                ),
+                inflight_messages_max=int(
+                    os.environ.get("MQTT_INFLIGHT_MESSAGES_MAX", "20")
+                ),
             ),
             sync=SyncSettings(
                 startup_enabled=_bool_env("STARTUP_SYNC_ENABLED", True),
@@ -184,6 +206,9 @@ class Settings:
                     "EVENT_HISTORY_SQLITE_PATH", "/data/vista128_events.sqlite3"
                 ).strip(),
                 recent_limit=int(os.environ.get("EVENT_HISTORY_RECENT_LIMIT", "20")),
+                audit_enabled=_bool_env("KEYPAD_AUDIT_ENABLED", True),
+                max_age_days=int(os.environ.get("EVENT_HISTORY_MAX_AGE_DAYS", "90")),
+                max_rows=int(os.environ.get("EVENT_HISTORY_MAX_ROWS", "10000")),
             ),
             printer=PrinterSettings(
                 enabled=_bool_env("TRANSPORT_PRINT_ENABLED", False),
@@ -197,8 +222,11 @@ class Settings:
                     "TRANSPORT_PRINT_SPOOL_PATH", "/data/vista128_print_queue.sqlite3"
                 ).strip(),
             ),
-            raw_logging=_bool_env("RAW_LOGGING", True),
+            raw_logging=_bool_env("RAW_LOGGING", False),
             debug_raw_tx_enabled=_bool_env("DEBUG_RAW_TX_ENABLED", False),
+            raw_mqtt_enabled=_bool_env("RAW_MQTT_ENABLED", False),
+            tx_queue_max=int(os.environ.get("TX_QUEUE_MAX", "128")),
+            raw_tx_queue_max=int(os.environ.get("RAW_TX_QUEUE_MAX", "16")),
         )
         settings.validate()
         return settings
@@ -206,6 +234,16 @@ class Settings:
     def validate(self) -> None:
         if self.panel.reconnect_max_seconds < self.panel.reconnect_min_seconds:
             raise ValueError("reconnect_max_seconds must be >= reconnect_min_seconds")
+        if not 1 <= self.mqtt.port <= 65535:
+            raise ValueError("mqtt_port must be 1..65535")
+        if bool(self.mqtt.tls_client_cert) != bool(self.mqtt.tls_client_key):
+            raise ValueError(
+                "mqtt_tls_client_cert and mqtt_tls_client_key must be configured together"
+            )
+        if not 1 <= self.mqtt.outbound_queue_max <= 10000:
+            raise ValueError("mqtt_outbound_queue_max must be 1..10000")
+        if not 1 <= self.mqtt.inflight_messages_max <= 1000:
+            raise ValueError("mqtt_inflight_messages_max must be 1..1000")
         if self.sync.periodic_interval_seconds < 60:
             raise ValueError("periodic_sync_interval_seconds must be >= 60")
         if self.sync.reconnect_after_failures < 1:
@@ -222,6 +260,10 @@ class Settings:
             raise ValueError("event_history_sqlite_path must not be empty")
         if not 1 <= self.event_history.recent_limit <= 100:
             raise ValueError("event_history_recent_limit must be 1..100")
+        if not 1 <= self.event_history.max_age_days <= 3650:
+            raise ValueError("event_history_max_age_days must be 1..3650")
+        if not 100 <= self.event_history.max_rows <= 1_000_000:
+            raise ValueError("event_history_max_rows must be 100..1000000")
         if self.printer.enabled and not self.printer.host:
             raise ValueError("transport_host is required when transport_print_enabled is true")
         if not 1 <= self.printer.http_port <= 65535:
@@ -230,3 +272,7 @@ class Settings:
             raise ValueError("transport_print_width must be 24..64")
         if self.printer.queue_max < 1:
             raise ValueError("transport_print_queue_max must be >= 1")
+        if not 1 <= self.tx_queue_max <= 10000:
+            raise ValueError("tx_queue_max must be 1..10000")
+        if not 1 <= self.raw_tx_queue_max <= 1000:
+            raise ValueError("raw_tx_queue_max must be 1..1000")

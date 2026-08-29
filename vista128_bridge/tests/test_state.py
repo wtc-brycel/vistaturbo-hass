@@ -37,6 +37,22 @@ def keypad_report(
 
 
 class StateTests(unittest.TestCase):
+    def _authoritative_no_alarm(self, state: VistaState) -> None:
+        state.apply_arming_status(ArmingStatusReport(tuple("DDDDDDDD")))
+        for block in (1, 2):
+            state.apply_zone_partition(ZonePartitionReport(block, tuple([0] * 64)))
+            state.apply_zone_status(ZoneStatusReport(block, tuple([0] * 64)))
+        for partition in range(1, 9):
+            state.apply_keypad_display(
+                partition,
+                keypad_report(
+                    f"P{partition}   DISARMED"[:16].ljust(16),
+                    "READY TO ARM    ",
+                ),
+                "2026-08-16T13:22:28-04:00",
+            )
+        self.assertTrue(state.mark_authoritative_snapshot())
+
     def test_arming_status_maps_stay_and_not_ready(self):
         state = VistaState()
         state.apply_arming_status(ArmingStatusReport(tuple("HNDDDDDD")))
@@ -70,12 +86,12 @@ class StateTests(unittest.TestCase):
         self.assertFalse(keypad.attributes()["silenced"])
         self.assertFalse(keypad.attributes()["supervisory"])
 
-    def test_not_ready_arming_snapshot_clears_stale_alarm_tokens(self):
+    def test_not_ready_arming_snapshot_does_not_clear_active_alarm_tokens(self):
         state = VistaState()
         state.partitions[1].active_alarm_tokens.add("010:31")
         state.apply_arming_status(ArmingStatusReport(tuple("NDDDDDDD")))
-        self.assertEqual(state.partitions[1].ha_state, "disarmed")
-        self.assertFalse(state.partitions[1].active_alarm_tokens)
+        self.assertEqual(state.partitions[1].ha_state, "triggered")
+        self.assertTrue(state.partitions[1].active_alarm_tokens)
 
     def test_keypad_trouble_does_not_guess_power_without_ac_evidence(self):
         state = VistaState()
@@ -206,6 +222,55 @@ class StateTests(unittest.TestCase):
         state.apply_system_event(SystemEvent("11", "Duress Alarm", 0, 1, 1, 0, 0, 15, 8, 26))
         self.assertFalse(keypad.burglary_alarm_led)
         self.assertEqual(keypad.sound_mode, "none")
+
+    def test_silent_alarm_forces_panel_aggregate_on(self):
+        state = VistaState()
+        state.apply_system_event(SystemEvent("21", "Silent Alarm", 12, 0, 1, 0, 0, 15, 8, 26))
+        alarm = state.panel_alarm_states()
+        self.assertTrue(alarm["active"])
+        self.assertTrue(alarm["values"]["silent"])
+
+    def test_duress_alarm_forces_panel_aggregate_on(self):
+        state = VistaState()
+        state.apply_system_event(SystemEvent("11", "Duress Alarm", 0, 1, 1, 0, 0, 15, 8, 26))
+        alarm = state.panel_alarm_states()
+        self.assertTrue(alarm["active"])
+        self.assertTrue(alarm["values"]["duress"])
+
+    def test_unconfigured_partition_alarm_cannot_report_false_off(self):
+        state = VistaState()
+        state.apply_system_event(SystemEvent("31", "Audible Alarm", 9, 0, 4, 0, 0, 15, 8, 26))
+        self.assertTrue(state.panel_alarm_states()["active"])
+
+    def test_incomplete_panel_knowledge_is_unknown(self):
+        state = VistaState()
+        self.assertIsNone(state.panel_alarm_states()["active"])
+
+    def test_incomplete_keypad_alarm_knowledge_is_unknown(self):
+        state = VistaState()
+        self._authoritative_no_alarm(state)
+        state.keypads[8].supervisory_led = None
+        state.security_snapshot_complete = False
+        self.assertFalse(state.mark_authoritative_snapshot())
+        self.assertIsNone(state.panel_alarm_states()["active"])
+
+    def test_complete_no_alarm_snapshot_reports_off(self):
+        state = VistaState()
+        self._authoritative_no_alarm(state)
+        self.assertFalse(state.panel_alarm_states()["active"])
+
+    def test_reconnect_invalidates_security_freshness_without_losing_durable_state(self):
+        state = VistaState()
+        state.apply_arming_status(ArmingStatusReport(tuple("DDDDDDDD")))
+        state.keypads[1].line_1 = "P1   DISARMED   "
+        state.keypads[1].initialized = True
+        state.last_event = SystemEvent("07", "Close (Arm)", 0, 1, 1, 0, 0, 15, 8, 26)
+        state.reset_connection_derived_annunciators()
+        self.assertFalse(state.arming_initialized)
+        self.assertFalse(state.keypads[1].session_fresh)
+        self.assertIsNone(state.panel_alarm_states()["active"])
+        self.assertEqual(state.keypads[1].line_1, "P1   DISARMED   ")
+        self.assertIsNotNone(state.last_event)
 
     def test_supervisory_start_restore_drives_cr2_annunciator(self):
         state = VistaState()

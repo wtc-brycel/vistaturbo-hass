@@ -1,7 +1,9 @@
 import asyncio
 import os
 import sys
+import time
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "app"))
 
@@ -50,6 +52,7 @@ class ControlCoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.connected = True
         self.sent = []
         self.results = []
+        self.audit = []
         self.state = VistaState()
         self.sync = FakeSynchronizer()
 
@@ -71,6 +74,7 @@ class ControlCoordinatorTests(unittest.IsolatedAsyncioTestCase):
             lambda: self.connected,
             send_query,
             self.results.append,
+            self.audit.append,
         )
         control.reset_session()
         return control
@@ -115,26 +119,139 @@ class ControlCoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.results[-1]["action"], "keypress")
         self.assertNotIn("key", self.results[-1])
 
+    async def test_keypad_audit_keeps_one_exact_logical_sequence_and_operands(self):
+        control = self.make_control()
+        control.set_automation_available(True)
+        ok, reason = control.enqueue_keypad(
+            1,
+            "1234#",
+            {
+                "interaction_id": "interaction-1",
+                "started_at": "2026-08-17T09:59:59+00:00",
+                "actor_id": "alice-id",
+                "actor_name": "Alice",
+                "source": "ha_frontend",
+                "action": "keypad_sequence",
+                "command_sequence": "1234#",
+                "operands": {"zone": "7"},
+            },
+        )
+        self.assertEqual((ok, reason), (True, "queued"))
+        await control.process_next()
+        self.assertEqual(
+            {key: value for key, value in self.audit[-1].items() if key != "request_id"},
+            {
+                "interaction_id": "interaction-1",
+                "actor_id": "alice-id",
+                "actor_name": "Alice",
+                "partition": 1,
+                "source": "ha_frontend",
+                "started_at": "2026-08-17T09:59:59+00:00",
+                "action": "keypad_sequence",
+                "command_sequence": "1234#",
+                "operands": {"zone": "7"},
+                "status": "accepted",
+                "ok": True,
+            },
+        )
+        self.assertNotIn("1234", self.results[-1])
+
+    async def test_keypad_reservation_rejects_interleaved_interaction_until_complete(self):
+        control = self.make_control()
+        control.set_automation_available(True)
+        self.assertEqual(
+            control.enqueue_keypad(
+                1,
+                "12",
+                {
+                    "interaction_id": "interaction-a",
+                    "interaction_complete": False,
+                    "request_id": "segment-a-1",
+                },
+            ),
+            (True, "queued"),
+        )
+        self.assertEqual(
+            control.enqueue_keypad(
+                1,
+                "34",
+                {
+                    "interaction_id": "interaction-b",
+                    "interaction_complete": False,
+                    "request_id": "segment-b-1",
+                },
+            ),
+            (False, "keypad_interaction_busy"),
+        )
+        self.assertEqual(
+            control.enqueue_keypad(
+                1,
+                "34",
+                {
+                    "interaction_id": "interaction-a",
+                    "interaction_complete": True,
+                    "request_id": "segment-a-2",
+                },
+            ),
+            (True, "queued"),
+        )
+        await control.process_next()
+        await control.process_next()
+        self.assertEqual(
+            [item[0] for item in self.sent],
+            [b"0BKS11200FC\r\n", b"0BKS13400F8\r\n"],
+        )
+        self.assertEqual(
+            control.enqueue_keypad(
+                1,
+                "56",
+                {"interaction_id": "interaction-b", "interaction_complete": True},
+            ),
+            (True, "queued"),
+        )
+
+    async def test_keypad_reservation_survives_pause_beyond_legacy_timeout(self):
+        control = self.make_control()
+        control.set_automation_available(True)
+        self.assertEqual(
+            control.enqueue_keypad(
+                1,
+                "12345",
+                {"interaction_id": "interaction-a", "interaction_complete": False},
+            ),
+            (True, "queued"),
+        )
+        paused_time = time.monotonic() + 7.0
+        with patch("vista_bridge.control.time.monotonic", return_value=paused_time):
+            self.assertEqual(
+                control.enqueue_keypad(
+                    1,
+                    "6",
+                    {"interaction_id": "interaction-b", "interaction_complete": False},
+                ),
+                (False, "keypad_interaction_busy"),
+            )
+
     async def test_function_and_panic_tokens_are_not_exposed_by_normal_keypad_control(self):
         control = self.make_control()
         control.set_automation_available(True)
-        for key in ("A", "D", "PANIC_A", "1234"):
+        for key in ("A", "D", "PANIC_A"):
             ok, reason = control.enqueue_keypad(1, key)
             self.assertFalse(ok)
             self.assertEqual(reason, "unsupported_keypad_key")
+        self.assertTrue(control.enqueue_keypad(1, "1234")[0])
         self.assertEqual(self.sent, [])
 
     async def test_rapid_code_digits_are_not_blocked_by_direct_kd_round_trips(self):
         control = self.make_control()
         control.set_automation_available(True)
-        for key in "1234":
-            self.assertTrue(control.enqueue_keypad(1, key)[0])
-        for _ in range(4):
-            self.assertTrue(await control.process_next())
-        self.assertEqual(len(self.sent), 4)
+        self.assertTrue(control.enqueue_keypad(1, "1234")[0])
+        self.assertTrue(await control.process_next())
+        self.assertEqual(len(self.sent), 1)
+        self.assertEqual(self.sent[0][0], b"0DKS112340093\r\n")
         self.assertEqual(self.sync.direct_keypad_refreshes, [])
-        self.assertEqual(self.sync.keypad_refresh_requests, [1, 1, 1, 1])
-        self.assertTrue(all(result["ok"] for result in self.results[-4:]))
+        self.assertEqual(self.sync.keypad_refresh_requests, [1])
+        self.assertTrue(self.results[-1]["ok"])
 
     async def test_native_alarm_verifies_partition_mode(self):
         control = self.make_control()

@@ -82,8 +82,15 @@ class ProtocolMessageHandler:
     def _handle_display_changed(self, data: bytes, received_at: str) -> None:
         # Some Turbo integrations document DC display-change notifications, but
         # they have not been observed on the current VISTA-128BPT. Recognize and
-        # log them passively before attempting any refresh semantics.
-        LOG.info("VISTA reported Display Changed notification: %r", data)
+        # log them passively before attempting any refresh semantics. Do not log
+        # the untrusted panel payload unless raw diagnostics are explicitly on.
+        if self.settings.raw_logging:
+            LOG.info(
+                "VISTA reported Display Changed notification (%d bytes)",
+                len(data),
+            )
+        else:
+            LOG.info("VISTA reported Display Changed notification")
 
     def _handle_event_log_entry(self, data: bytes, received_at: str) -> None:
         event = parse_event_log_entry(data)
@@ -94,7 +101,7 @@ class ProtocolMessageHandler:
         fingerprint = EventStore.fingerprint(event)
         occurrence = self._history_occurrences.get(fingerprint, 0) + 1
         self._history_occurrences[fingerprint] = occurrence
-        if self.event_store is not None and self.event_store.record(
+        if self.settings.event_history.enabled and self.event_store is not None and self.event_store.record(
             event,
             source="history",
             received_at=received_at,
@@ -109,7 +116,7 @@ class ProtocolMessageHandler:
             self._history_dump_seen,
             self._history_dump_inserted,
         )
-        if self.event_store is not None:
+        if self.settings.event_history.enabled and self.event_store is not None:
             self.event_store.finish_history_dump(
                 completed_at=received_at,
                 seen=self._history_dump_seen,
@@ -151,11 +158,10 @@ class ProtocolMessageHandler:
             start_zone + 63,
             len(changed),
         )
-        for zone_number in changed:
-            self._publish_zone(zone_number)
-        for partition in self.state.partitions.values():
-            self.mqtt.publish_partition_state(partition)
-        self.mqtt.publish_zone_summaries(self.state)
+        if self.state.zone_snapshot_complete:
+            for zone_number in changed:
+                self._publish_zone(zone_number)
+            self.mqtt.publish_zone_summaries(self.state)
 
     def _handle_zone_partition(self, data: bytes, received_at: str) -> None:
         report = parse_zone_partition(data)
@@ -174,10 +180,11 @@ class ProtocolMessageHandler:
             report.block,
             len(assigned),
         )
-        for zone in assigned:
-            self.mqtt.publish_zone_discovery(zone)
-            self.mqtt.publish_zone_state(zone)
-        self.mqtt.publish_zone_summaries(self.state)
+        if self.state.zone_snapshot_complete:
+            for zone in assigned:
+                self.mqtt.publish_zone_discovery(zone)
+                self.mqtt.publish_zone_state(zone)
+            self.mqtt.publish_zone_summaries(self.state)
 
     def _handle_zone_descriptor(self, data: bytes, received_at: str) -> None:
         report = parse_zone_descriptor(data)
@@ -194,7 +201,7 @@ class ProtocolMessageHandler:
         if zone is None or not zone.partition:
             return
         LOG.info("Zone %03d descriptor: %s", report.zone, report.descriptor)
-        if self.event_store is not None:
+        if self.settings.event_history.enabled and self.event_store is not None:
             updated = self.event_store.update_descriptor(report.zone, report.descriptor)
             if updated:
                 self.publish_event_history_snapshot()
@@ -205,24 +212,37 @@ class ProtocolMessageHandler:
         report = parse_keypad_display(data)
         if report is None:
             return
-        partition = self.synchronizer.active_keypad_partition()
+        accept_response = getattr(self.synchronizer, "accept_keypad_response", None)
+        partition = accept_response(report) if callable(accept_response) else None
+        if not callable(accept_response):
+            partition = self.synchronizer.active_keypad_partition()
+            if partition is not None:
+                self.synchronizer.mark_keypad_response()
         if partition is None:
-            LOG.warning("Received keypad display without an active keypad query")
+            LOG.warning("Received keypad display without a matching keypad transaction")
             return
         keypad = self.state.apply_keypad_display(partition, report, received_at)
         if keypad is None:
             return
-        self.synchronizer.mark_keypad_response()
-        LOG.info(
-            "Decoded keypad display P%d: %r / %r LEDs=%X backlight=%s",
-            partition,
-            report.line_1,
-            report.line_2,
-            report.led_status,
-            report.backlight,
-        )
-        self.mqtt.publish_keypad_discovery(partition)
-        self.mqtt.publish_keypad_state(keypad)
+        if self.settings.raw_logging:
+            LOG.info(
+                "Decoded keypad display P%d: %r / %r LEDs=%X backlight=%s",
+                partition,
+                report.line_1,
+                report.line_2,
+                report.led_status,
+                report.backlight,
+            )
+        else:
+            LOG.info(
+                "Decoded keypad display P%d: LEDs=%X backlight=%s",
+                partition,
+                report.led_status,
+                report.backlight,
+            )
+        if self.settings.keypad.enabled and partition in self.settings.keypad.partitions:
+            self.mqtt.publish_keypad_discovery(partition)
+            self.mqtt.publish_keypad_state(keypad)
         self.mqtt.publish_alarm_states(self.state)
 
     def _handle_system_event(self, data: bytes, received_at: str) -> None:
@@ -243,7 +263,7 @@ class ProtocolMessageHandler:
         )
 
         descriptor = self.state.zones.get(event.zone).descriptor if event.zone in self.state.zones else ""
-        if self.event_store is not None:
+        if self.settings.event_history.enabled and self.event_store is not None:
             self.event_store.record(
                 event, source="live", received_at=received_at, descriptor=descriptor
             )
@@ -311,7 +331,7 @@ class ProtocolMessageHandler:
                 self.mqtt.publish_partition_state(partition)
 
     def publish_event_history_snapshot(self) -> None:
-        if self.event_store is None:
+        if self.event_store is None or not self.settings.event_history.enabled:
             return
         stats = self.event_store.stats()
         recent = self.event_store.recent(self.settings.event_history.recent_limit)
@@ -334,7 +354,11 @@ class ProtocolMessageHandler:
 
     def _publish_initialized_keypads(self) -> None:
         for keypad in self.state.keypads.values():
-            if keypad.initialized:
+            if (
+                keypad.initialized
+                and self.settings.keypad.enabled
+                and keypad.partition in self.settings.keypad.partitions
+            ):
                 self.mqtt.publish_keypad_state(keypad)
 
     def _publish_zone(self, zone_number: int) -> None:

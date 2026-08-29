@@ -78,6 +78,6 @@ def make_settings(
             width=32,
             spool_path=spool_path,
         ),
-        raw_logging=True,
+        raw_logging=False,
         debug_raw_tx_enabled=False,
     )
