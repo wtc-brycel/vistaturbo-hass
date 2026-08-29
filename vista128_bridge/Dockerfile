@@ -1,4 +1,5 @@
-FROM ghcr.io/home-assistant/base:latest
+# Home Assistant base 3.24; immutable multi-architecture manifest digest.
+FROM ghcr.io/home-assistant/base:3.24@sha256:93ef607824e3f27e868f11b10938283a98bf880ed57bcf8eaa81c6c2d521f6f5
 
 ARG BUILD_VERSION
 ARG BUILD_ARCH

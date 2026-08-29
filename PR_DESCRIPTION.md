@@ -1,79 +1,75 @@
-# Coordinated security hardening for #16, #17, and #18
+# Security: harden release/CI supply chain and audit historical Actions (#19)
 
-## Scope
+Closes #19. This PR starts from merged runtime/frontend hardening PR #21 and keeps issue #20 out of scope. It does not change VISTA runtime, control, or parser behavior.
 
-This behavioral and security release hardens the bridge state model, panel transaction path, MQTT boundary, local persistence, printer assumptions, and frontend. Issue #19 is deliberately out of scope. No CI, release automation, or supply-chain workflow changes are included.
+## Historical audit conclusion
 
-## Completed acceptance criteria
+The five named commits and surrounding temporary validator runs were checked against local Git history, GitHub Actions run/job metadata and hosted logs, remote branch refs, tags, and the current RC11 release. The complete note is [docs/security/historical-actions-audit.md](docs/security/historical-actions-audit.md).
 
-### Issue #16: alarm state and panel transactions
+The historical workflows had a genuine vulnerable design: branch-controlled patch/test code ran with an ephemeral `GITHUB_TOKEN` that had `contents: write`, and checkout persisted credentials. The audit found two expected bot mutations: `f0367702fa9652a5e153ae1971a0598686ab9f42` on `fix/editor-focus` and `0b16430063f01ebfb73bac7e45ef71ab0123f0e5` on `feature/alarm-binary-sensors`. Failed runs stopped before their write step. No evidence of credential misuse, unexpected repository mutation, long-lived credential exposure, tag tampering, release tampering, suspicious artifacts, or unusual network activity was found. No rotation, history rewrite, tag deletion, or release cleanup was warranted.
 
-- Panel-wide alarm state now recognizes fire, burglary, auxiliary, silent, duress, supervisory, and all existing alarm-start event tokens, independently of the configured keypad partition list.
-- Positive alarm evidence asserts ON immediately. OFF is emitted only after an authoritative arming, zone-status, zone-partition, and keypad alarm snapshot. Partial or stale knowledge is unavailable.
-- TCP reconnect invalidates connection-derived arming, keypad, zone alarm, and alarm annunciator state while retaining configuration, descriptors, last-event data, and the durable event journal.
-- Synchronization does not treat a partial multi-block snapshot as complete. Panel availability is retained as OFF until the required snapshot is complete.
-- Keypad display replies are accepted only for the pending keypad transaction and the partition marker in that reply. Delayed or ambiguous replies cannot overwrite another partition.
-- 08OK is scoped to a pending transaction and cannot complete unowned or wrong-response synchronization traffic. Unrelated acknowledgements no longer infer automation availability.
-- Keypad sequences are bounded logical commands and are serialized with panel synchronization and other controls. The frontend keeps one interaction ID until the user explicitly presses SEND; input beyond the five-key KS frame is sent as `complete:false` segments followed by one final `complete:true` segment. Inactivity never completes or splits a command. The bridge keeps ownership until the final segment, cancellation, or session reset/reconnect, so a pause cannot permit interleaving. A competing interaction is rejected rather than interleaved. Reconnects discard pending control work.
-- Control actor metadata includes interaction ID, HA user ID and name, partition, source, normalized action, exact logical command sequence, structured operands when known, timestamps, and outcome in the local audit table. PINs are intentionally present in that administrator-only local audit, but never in logs or MQTT control-result telemetry.
+## Completed #19 criteria
 
-### Issue #17: MQTT, queues, persistence, telemetry, and transport assumptions
+### Normal CI
 
-- MQTT TLS supports broker certificate verification, an optional CA, and optional client certificate/key. TLS setup or connection failure never falls back to plaintext.
-- Trusted-LAN plaintext remains available for compatibility, with documentation requiring broker ACLs in either mode.
-- Raw transmit is an explicitly opt-in administrative capability on `vista128/admin/raw_tx`, separate from normal control topics. The former confirmation phrase is not accepted as authentication. Input is strict ASCII or hex, bounded to 512 bytes, and sent through a bounded lower-priority queue.
-- Normal transmit and control queues are finite. Overflow is deterministic, logged, and reported to the caller; raw work cannot overtake normal control or synchronization traffic.
-- Important MQTT publishes check immediate Paho results, count failures, and expose a diagnostic counter. Repeated retained state is coalesced. Paho's own disconnected QoS queue and in-flight window are finite (`mqtt_outbound_queue_max: 256`, `mqtt_inflight_messages_max: 20`); the bridge adds no unbounded retry queue.
-- Discovery and retained state cleanup publishes tombstones for obsolete alarm, keypad, partition, zone, summary, diagnostic, and legacy layouts.
-- Raw frame MQTT publication and raw payload logging are both off by default. Opt-in raw frames are non-retained and valid-frame-only; default diagnostics retain metadata such as message type, validity, checksum, length, and timestamp.
-- Event history and terminal printer spool history are bounded by configuration. Pruning is batched and does not delete pending printer work.
-- Panel serial TCP is documented as unauthenticated plaintext; the VISTA checksum is documented as error detection, not authentication. Optional printer HTTP is documented as trusted-network-only unless the endpoint genuinely provides authenticated TLS, and an HTTP response is not described as proof of physical printing.
-- The local `keypad_interactions` SQLite table keeps one row per logical interaction ID, including the exact completed sequence, including a four-digit PIN when present, actor metadata, partition, source, action, structured operands, timestamps, and status. A per-segment request identity makes queued-to-accepted lifecycle updates idempotent, so segments are concatenated once. It is bounded, local-only, and creates no HA entity or Recorder stream.
+- `.github/workflows/tests.yml` now declares `contents: read` at workflow and job level.
+- Every checkout sets `persist-credentials: false`.
+- Every active third-party action is pinned to a full upstream commit SHA with its human-readable release beside it:
+  - `actions/checkout` `11bd71901bbe5b1630ceea73d27597364c9af683` (`v4.2.2`)
+  - `actions/setup-python` `a26af69be951a213d495a4c3e4e4022e16d87065` (`v5.6.0`)
+  - `actions/setup-node` `49933ea5288caeca8642d1e84afbd3f7d6820020` (`v4.4.0`)
+  - `actions/upload-artifact` `ea165f8d65b6e75b540449e92b4886f43607fa02` (`v4.6.2`)
+  - `actions/download-artifact` `634f93cb2916e3fdff6788551b99b062d0335ce0` (`v5.0.0`)
+- Normal tests do not commit or push and now use `npm ci`.
 
-### Issue #18: frontend and release compatibility
+### Release-candidate boundary
 
-- The card renders an explicit offline state and disables controls when the source HA entity is missing, unknown, or unavailable, regardless of retained attributes.
-- CSS color validation accepts a narrow grammar for common named colors, hex, rgb/rgba, and hsl/hsla values and rejects `url()`, `calc()`, `var()`, and other expressions.
-- Visual editor entity selection is domain-filtered, searchable, and bounded before friendly-name work, avoiding eager rendering of the entire HA registry.
-- Frontend keypad input uses one logical non-retained QoS 1 JSON command with interaction and actor metadata. The card exposes an explicit SEND boundary, keeps the interaction ID across five-key KS segments, and emits `complete:false` for intermediates and `complete:true` only for the final segment. The bridge still accepts the former one-byte key payload and one-key JSON payload for compatibility.
-- The card does not log, locally persist, or expose the entered sequence through its DOM event. The bridge stores the sequence only in the bounded local administrator audit described above.
-- Bridge/add-on version is `0.2.6-rc.11`; the card version is `0.3.24`, including the cache-busting migration note.
+- `validate` is read-only (`contents: read`, `checks: read`, `actions: read`), checks out the exact `github.sha` without credential persistence, validates metadata, waits for the exact commit's newest successful GitHub Actions `test`, `frontend-render`, and `repository-security` checks, and uploads a one-day artifact named for that SHA.
+- `publish` is the only job with `contents: write`; it has no checkout and executes only the fixed release publication shell path after downloading the SHA-bound artifact. It receives `actions: read` only in addition to the required contents write.
+- `release/rc.json` must contain exactly `tag`, `name`, and `notes`. Tags must match `vMAJOR.MINOR.PATCH-rc.NUMBER`; names are bounded to 120 safe printable characters; notes must be an existing regular `.md` file below `release/`, with no absolute path, traversal component, backslash, or escaping symlink. Publication uses fixed bundle names `notes.md`, `vista-keypad-card.js`, and `vista-keypad-simulator.html`.
+- Before any tag/release write, the workflow verifies the exact release SHA. Missing tags are created only at that SHA; existing lightweight or annotated tags are dereferenced and mismatches hard-fail. Existing releases must be the expected prerelease, non-draft release, and their downloaded expected assets must match the validated SHA-256 identities. Existing unrelated/mismatched releases hard-fail; a matching rerun exits idempotently.
+- The workflow no longer runs merely because the publication workflow file changes; release metadata changes remain the deliberate publication trigger.
 
-## State and transaction model
+### Supply-chain inputs
 
-The bridge now separates durable configuration and event history from connection-derived security state. Alarm state is evidence-based: positive event or keypad evidence is immediately visible, while a safe OFF value requires completeness. Synchronization uses pending transaction ownership, expected response types, and a shared serialization lock. Keypad responses must identify the pending partition. The VISTA protocol does not carry an on-wire transaction ID for 08OK, so the bridge uses the strongest safe association available from pending ownership, response ordering, session tainting, and reconnect boundaries. Keypad control additionally reserves the single panel keypad by logical interaction ID; the frontend uses an explicit SEND boundary and keeps that ID across all segmented frames until the final marker, and the bridge has no elapsed-time ownership expiry.
+- `vista128_bridge/Dockerfile` now uses Home Assistant base `3.24` with immutable multi-architecture manifest digest `sha256:93ef607824e3f27e868f11b10938283a98bf880ed57bcf8eaa81c6c2d521f6f5`, verified from GHCR. Its manifest supports Linux `amd64` and `arm64` for the add-on's `amd64` and `aarch64` targets.
+- `paho-mqtt==2.1.0` remains pinned and now uses pip `--require-hashes` for the reviewed wheel and source distributions.
+- `@playwright/test` is upgraded from `1.55.0` to `1.62.1`; the lockfile is refreshed consistently.
+- Alpine packages remain selected by the immutable Home Assistant base's supported repositories rather than brittle exact APK versions. Exact APK freezing was deliberately left incomplete because it would make routine add-on builds unreliable against those repositories; this limitation is documented in the audit note.
 
-The keypad audit receives a complete logical command from the frontend or native control path rather than individual keypress events or an MQTT envelope. Multiple short segments carrying one interaction ID are concatenated into one bounded row, while a per-segment request identity prevents a queued-to-accepted update from being appended twice. Known native action metadata is stored separately from the exact four-digit code sequence. A full semantic VISTA command parser, including future zone operand interpretation, is intentionally left for issue #20; known zone operands are normalized to three zero-padded digits when supplied to the audit layer.
+### Regression guardrails
 
-## Configuration and migration notes
+`scripts/check_repository_security.py` is a read-only repository check run by CI. It fails for mutable action refs, normal-workflow write permissions including scalar `permissions: write-all`, persisted checkout credentials, production `:latest` base images, unsafe release metadata, and ordinary test-workflow commit/push behavior. Unit tests cover valid pins, each policy failure, metadata traversal/symlink rejection, newest-check success rules, and mismatched tag/release identity handling.
 
-- New defaults are `mqtt_tls_enabled: false`, `raw_mqtt_enabled: false`, `raw_logging: false`, `keypad_audit_enabled: true`, 90-day event/audit retention, 10,000 maximum event/audit rows, `tx_queue_max: 128`, `raw_tx_queue_max: 16`, `mqtt_outbound_queue_max: 256`, and `mqtt_inflight_messages_max: 20`.
-- Existing plaintext MQTT deployments continue to work, but should be isolated and protected with broker ACLs. Enabling TLS requires the broker certificate chain to be trusted; it does not enable a plaintext fallback.
-- If raw transmit is explicitly enabled, ACLs and tooling must move from the old debug topic to `vista128/admin/raw_tx`. The old confirmation phrase was never authentication and is no longer accepted.
-- Existing one-byte keypad payloads remain accepted. New integrations should send the logical JSON form, for example `{"keys":"1234","complete":true}`, with QoS 1 and retain false. A segmented logical command must keep one interaction ID, use `complete:false` until its final segment, and send a unique request per segment.
-- Existing event databases automatically receive the audit columns/table migration, including the per-segment request identity used to make queued-to-accepted updates idempotent. The audit stores sensitive panel security information; protect the App data directory and configure retention for the deployment.
-- On MQTT reconnect, obsolete retained discovery and dynamic state topics are tombstoned before current discovery is republished. Replace the frontend resource with `vista-keypad-card.js?v=0.3.24`. Keypad users must press SEND to finish a command; inactivity no longer submits or splits it.
+## Deliberately incomplete
 
-## Deliberately incomplete criteria and rationale
+- Exact Alpine package-version pinning is not used for the concrete compatibility reason above; the base image is pinned by digest and the limitation is documented.
+- The panel runtime and the full semantic keypad parser from issue #20 are intentionally untouched.
+- GitHub's repository-level default Actions permission setting cannot be changed from repository content; workflow-level and job-level permissions now explicitly enforce read-only normal CI, with write isolated to the trusted release job.
 
-- Exact cryptographic attribution of one 08OK to one prior panel command is not implementable with the VISTA protocol exposed here because 08OK has no transaction identifier. The bridge now rejects unowned and wrong-response acknowledgements, prevents a timed-out transaction from being reused in the same session, and taints the session for reconnect, but a malicious or unusually delayed duplicate 08OK that arrives during a later valid control transaction cannot be distinguished on the wire. This limitation is not presented as solved.
-- The panel serial-server transport remains unauthenticated plaintext by design. The bridge cannot add TLS to a Vista serial server that does not speak TLS. Isolation and firewall guidance are provided instead.
-- Actor metadata is attribution, not authentication. HA identity and broker ACLs remain the trust boundary; this pass does not invent a second application authentication scheme.
-- Full semantic parsing of arbitrary keypad commands and zone operands is deferred to issue #20. The exact completed logical sequence is persisted now so that parser can be applied later.
-- Issue #19 CI, release, and supply-chain hardening is not included.
+## Migration notes
 
-## Tests run
+- No application configuration migration is required.
+- Release maintainers must keep release notes under `release/` as `.md` files and use the exact three-field `release/rc.json` schema. Moving a note outside that directory or using a non-RC tag now fails closed.
+- A release workflow-only change does not publish a release. Update `release/rc.json` deliberately when preparing the next candidate.
+- CI installs frontend dependencies from `package-lock.json` with `npm ci`; local contributors should use the same command.
 
-- `cd vista128_bridge && python -m unittest discover -s tests -v` -> 156 tests passed.
-- `cd vista128_bridge && python -m py_compile app/vista_bridge/*.py tests/*.py` -> passed.
-- `cd vista128_bridge && node --check ../frontend/vista-keypad-card.js` -> passed.
-- `cd vista128_bridge && git diff --check` -> passed.
-- `cd frontend && npm install --no-audit --no-fund` -> passed; lockfile unchanged.
-- `cd frontend && npx playwright install --with-deps chromium` -> environment failure while apt attempted restricted privilege transitions; the subsequent browser download was completed with the repository's Playwright fallback installers.
-- `cd frontend && npm run test:render` -> 49 tests passed.
+## Tests and validation
 
-## Remaining false-negative security behavior
+- `python -m unittest discover -s scripts -p 'test_*.py' -v` — 11 passed.
+- `python scripts/check_repository_security.py` — passed.
+- Both active workflow YAML files parsed successfully with PyYAML.
+- `python -m py_compile scripts/*.py` — passed.
+- `python -m pip install --dry-run --require-hashes --no-deps -r vista128_bridge/requirements.txt` — passed.
+- `cd vista128_bridge && python -m unittest discover -s tests -v` — 156 passed locally and in CI.
+- `cd vista128_bridge && python -m py_compile app/vista_bridge/*.py tests/*.py` — passed locally.
+- `cd vista128_bridge && node --check ../frontend/vista-keypad-card.js` — passed locally.
+- `cd frontend && npm ci --no-audit --no-fund` — passed locally and in CI.
+- `cd frontend && npx playwright install --with-deps chromium` — local apt dependency installation was blocked by the managed runner's restricted privilege transitions.
+- `cd frontend && npx playwright install chromium --only-shell` — local browser download timed out; the browser-only fallback could not complete in this environment.
+- `cd frontend && npm run test:render` — the local run could not start because the new browser executable was unavailable after the download failure; the GitHub Actions runner completed all 49 tests successfully.
+- GitHub Actions push run `33259796496` and PR run `33259797682` — `test`, `frontend-render`, and `repository-security` all passed; `frontend-render` reports 49 passed.
+- Docker build validation — Docker is not installed in this environment. The GHCR `3.24` manifest was inspected and confirmed to contain Linux `amd64` and `arm64` entries with the pinned digest.
+- `git diff --check` — passed locally.
 
-Within the covered bridge state paths, no known path publishes a confident READY, DISARMED, or alarm OFF value from stale, incomplete, or disconnected panel knowledge; those states are unavailable until freshness and completeness are restored. Known positive alarm evidence still surfaces immediately.
-
-The remaining false-negative risk is outside that guarantee: the unauthenticated panel TCP transport can be unavailable, malicious, or provide an unrecognized event, and the protocol has no 08OK transaction ID. Such conditions can cause missed or delayed evidence and are why the panel network isolation guidance and conservative unavailable state remain required.
+Known remaining security limitation: the panel serial-server transport remains unauthenticated plaintext by design, but that is outside #19's repository trust boundary and is documented in the runtime documentation. Within the repository/release boundary, no known path now grants normal test execution repository-write credentials or accepts a mismatched release identity.

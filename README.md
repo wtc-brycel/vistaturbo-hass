@@ -52,6 +52,14 @@ Serial settings are **9600 baud, 8 data bits, no parity, 1 stop bit, no flow con
 
 For VISTA-128BPT wiring, panel programming, protocol details, and the TB4/J9 connection notes, see [`vista128_bridge/DOCS.md`](vista128_bridge/DOCS.md).
 
+## Repository and release security
+
+The production add-on image is built from the Home Assistant base `3.24` multi-architecture image pinned by digest in `vista128_bridge/Dockerfile`. The bridge's Python dependency is hash-checked, and frontend browser tests use the locked Playwright `1.62.1` release.
+
+Normal CI is explicitly read-only and uses immutable GitHub Action commit pins. Release-candidate publication validates `release/rc.json`, waits for the required checks on the exact release commit, verifies tag/release identity and asset digests, and grants repository write access only to the final publication job. See [`docs/security/historical-actions-audit.md`](docs/security/historical-actions-audit.md) for the historical Actions audit and its threat-model conclusion.
+
+The release workflow and its metadata are intended for repository maintainers. Broker/repository ACLs remain required; a successful CI or release publication does not authenticate the panel transport.
+
 ## Install the Home Assistant App
 
 Add this repository to the Home Assistant App Store:
