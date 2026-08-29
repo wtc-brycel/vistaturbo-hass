@@ -61,13 +61,15 @@ The historical workflows had a genuine vulnerable design: branch-controlled patc
 - Both active workflow YAML files parsed successfully with PyYAML.
 - `python -m py_compile scripts/*.py` — passed.
 - `python -m pip install --dry-run --require-hashes --no-deps -r vista128_bridge/requirements.txt` — passed.
-- `cd vista128_bridge && python -m unittest discover -s tests -v` — run after this branch's changes; expected existing suite remains required.
-- `cd vista128_bridge && python -m py_compile app/vista_bridge/*.py tests/*.py` — run after this branch's changes.
-- `cd vista128_bridge && node --check ../frontend/vista-keypad-card.js` — run after this branch's changes.
-- `cd frontend && npm ci --no-audit --no-fund` — run after this branch's changes.
-- `cd frontend && npx playwright install --with-deps chromium` — run after this branch's changes; managed-environment package-install limitations will be recorded if encountered.
-- `cd frontend && npm run test:render` — run after this branch's changes.
-- Docker build validation will be attempted; if Docker is unavailable in the runner, that limitation will be recorded explicitly.
-- `git diff --check` — run after this branch's changes.
+- `cd vista128_bridge && python -m unittest discover -s tests -v` — 156 passed locally and in CI.
+- `cd vista128_bridge && python -m py_compile app/vista_bridge/*.py tests/*.py` — passed locally.
+- `cd vista128_bridge && node --check ../frontend/vista-keypad-card.js` — passed locally.
+- `cd frontend && npm ci --no-audit --no-fund` — passed locally and in CI.
+- `cd frontend && npx playwright install --with-deps chromium` — local apt dependency installation was blocked by the managed runner's restricted privilege transitions.
+- `cd frontend && npx playwright install chromium --only-shell` — local browser download timed out; the browser-only fallback could not complete in this environment.
+- `cd frontend && npm run test:render` — the local run could not start because the new browser executable was unavailable after the download failure; the GitHub Actions runner completed all 49 tests successfully.
+- GitHub Actions push run `33259517815` and PR run `33259532639` — `test`, `frontend-render`, and `repository-security` all passed; `frontend-render` reports 49 passed.
+- Docker build validation — Docker is not installed in this environment. The GHCR `3.24` manifest was inspected and confirmed to contain Linux `amd64` and `arm64` entries with the pinned digest.
+- `git diff --check` — passed locally.
 
 Known remaining security limitation: the panel serial-server transport remains unauthenticated plaintext by design, but that is outside #19's repository trust boundary and is documented in the runtime documentation. Within the repository/release boundary, no known path now grants normal test execution repository-write credentials or accepts a mismatched release identity.
