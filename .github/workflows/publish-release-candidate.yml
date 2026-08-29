@@ -7,36 +7,209 @@ on:
     paths:
       - release/rc.json
       - release/*.md
-      - .github/workflows/publish-release-candidate.yml
 
+# The validation job is read-only. The publication job below grants write access
+# only after validation and receives only a fixed-name, SHA-bound artifact.
 permissions:
-  contents: write
+  contents: read
+  checks: read
+  actions: read
 
 jobs:
+  validate:
+    permissions:
+      contents: read
+      checks: read
+      actions: read
+    runs-on: ubuntu-latest
+    outputs:
+      artifact_name: release-bundle-${{ github.sha }}
+    steps:
+      - name: Check out exact release commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.13"
+      - name: Validate metadata and create release bundle
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          python scripts/release_validation.py release/rc.json \
+            --commit "$GITHUB_SHA" \
+            --bundle-dir "$RUNNER_TEMP/release-bundle" \
+            > "$RUNNER_TEMP/release-metadata.json"
+      - name: Wait for required CI on exact release commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 30); do
+            check_runs="$(gh api \
+              --header 'Accept: application/vnd.github+json' \
+              "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/check-runs?per_page=100")"
+            if printf '%s' "$check_runs" | python scripts/release_validation.py --check-runs-stdin; then
+              echo "Required CI passed for $GITHUB_SHA"
+              exit 0
+            fi
+            echo "Required CI is not complete for $GITHUB_SHA (attempt $attempt/30)"
+            sleep 10
+          done
+          echo "Required CI did not pass for exact release commit $GITHUB_SHA" >&2
+          exit 1
+      - name: Upload SHA-bound release bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-bundle-${{ github.sha }}
+          path: ${{ runner.temp }}/release-bundle
+          if-no-files-found: error
+          retention-days: 1
+
   publish:
+    needs: validate
+    permissions:
+      contents: write
+      actions: read
     runs-on: ubuntu-latest
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Publish prerelease
+      - name: Download validated release bundle
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: ${{ needs.validate.outputs.artifact_name }}
+          path: release-bundle
+      - name: Publish verified release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          RELEASE_SHA: ${{ github.sha }}
         run: |
-          tag="$(jq -r '.tag' release/rc.json)"
-          title="$(jq -r '.name' release/rc.json)"
-          notes="$(jq -r '.notes' release/rc.json)"
+          set -euo pipefail
 
-          if gh release view "$tag" >/dev/null 2>&1; then
-            echo "Release $tag already exists"
+          manifest=release-bundle/manifest.json
+          test -f "$manifest"
+          test "$(jq -r '.schema' "$manifest")" = "1"
+          commit="$(jq -r '.commit' "$manifest")"
+          tag="$(jq -r '.tag' "$manifest")"
+          title="$(jq -r '.name' "$manifest")"
+          test "$commit" = "$RELEASE_SHA"
+          test "$(jq '.assets | length' "$manifest")" = "2"
+          [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$ ]]
+          [[ "$title" =~ ^[A-Za-z0-9][A-Za-z0-9\ .:_\(\)/-]{0,119}$ ]]
+
+          verify_bundle() {
+            if test "${2:-false}" = "true"; then
+              expected_notes="$(jq -r '.notes.sha256' "$manifest")"
+              test -n "$expected_notes"
+              test -f "$1/notes.md"
+              actual_notes="$(sha256sum "$1/notes.md" | awk '{print $1}')"
+              test "$actual_notes" = "$expected_notes"
+            fi
+            for asset in vista-keypad-card.js vista-keypad-simulator.html; do
+              expected="$(jq -r --arg asset "$asset" '.assets[] | select(.name == $asset) | .sha256' "$manifest")"
+              test -n "$expected"
+              test -f "$1/$asset"
+              actual="$(sha256sum "$1/$asset" | awk '{print $1}')"
+              test "$actual" = "$expected"
+            done
+          }
+          verify_bundle release-bundle true
+
+          api_get() {
+            local endpoint="$1"
+            local output="$2"
+            local status
+            status="$(curl --silent --show-error --location \
+              --header 'Accept: application/vnd.github+json' \
+              --header "Authorization: Bearer $GH_TOKEN" \
+              --output "$output" --write-out '%{http_code}' \
+              "${GITHUB_API_URL}/${endpoint}")"
+            case "$status" in
+              2*) return 0 ;;
+              404) return 4 ;;
+              *) echo "GitHub API GET failed with HTTP $status for $endpoint" >&2; return 1 ;;
+            esac
+          }
+
+          tag_json="$RUNNER_TEMP/tag.json"
+          tag_object_json="$RUNNER_TEMP/tag-object.json"
+          tag_sha=""
+          if api_get "repos/${GH_REPO}/git/ref/tags/${tag}" "$tag_json"; then
+            tag_type="$(jq -r '.object.type' "$tag_json")"
+            tag_sha="$(jq -r '.object.sha' "$tag_json")"
+            if test "$tag_type" = "tag"; then
+              api_get "repos/${GH_REPO}/git/tags/${tag_sha}" "$tag_object_json"
+              tag_sha="$(jq -r '.object.sha' "$tag_object_json")"
+            fi
+          else
+            tag_lookup_status=$?
+            if test "$tag_lookup_status" -ne 4; then
+              exit "$tag_lookup_status"
+            fi
+            create_status="$(curl --silent --show-error --location \
+              --header 'Accept: application/vnd.github+json' \
+              --header "Authorization: Bearer $GH_TOKEN" \
+              --header 'Content-Type: application/json' \
+              --output "$RUNNER_TEMP/create-tag.json" --write-out '%{http_code}' \
+              --request POST "${GITHUB_API_URL}/repos/${GH_REPO}/git/refs" \
+              --data "$(jq -cn --arg ref "refs/tags/$tag" --arg sha "$RELEASE_SHA" '{ref:$ref,sha:$sha}')")"
+            case "$create_status" in
+              201|422) ;;
+              *) echo "Creating release tag failed with HTTP $create_status" >&2; exit 1 ;;
+            esac
+            api_get "repos/${GH_REPO}/git/ref/tags/${tag}" "$tag_json"
+            tag_sha="$(jq -r '.object.sha' "$tag_json")"
+            if test "$(jq -r '.object.type' "$tag_json")" = "tag"; then
+              api_get "repos/${GH_REPO}/git/tags/${tag_sha}" "$tag_object_json"
+              tag_sha="$(jq -r '.object.sha' "$tag_object_json")"
+            fi
+          fi
+          test "$tag_sha" = "$RELEASE_SHA" || {
+            echo "Refusing mismatched tag $tag: resolves to $tag_sha, expected $RELEASE_SHA" >&2
+            exit 1
+          }
+
+          release_json="$RUNNER_TEMP/release.json"
+          if api_get "repos/${GH_REPO}/releases/tags/${tag}" "$release_json"; then
+            test "$(jq -r '.tag_name' "$release_json")" = "$tag"
+            test "$(jq -r '.prerelease' "$release_json")" = "true"
+            test "$(jq -r '.draft' "$release_json")" = "false"
+            rm -rf "$RUNNER_TEMP/existing-release"
+            mkdir -p "$RUNNER_TEMP/existing-release"
+            gh release download "$tag" --repo "$GH_REPO" \
+              --dir "$RUNNER_TEMP/existing-release" \
+              --pattern 'vista-keypad-card.js' \
+              --pattern 'vista-keypad-simulator.html' \
+              --clobber
+            verify_bundle "$RUNNER_TEMP/existing-release"
+            echo "Existing release $tag matches the exact commit and expected assets"
             exit 0
+          else
+            release_lookup_status=$?
+            test "$release_lookup_status" -eq 4
           fi
 
           gh release create "$tag" \
-            frontend/vista-keypad-card.js#vista-keypad-card.js \
-            frontend/vista-keypad-simulator.html#vista-keypad-simulator.html \
-            --target "$GITHUB_SHA" \
+            --repo "$GH_REPO" \
+            release-bundle/vista-keypad-card.js#vista-keypad-card.js \
+            release-bundle/vista-keypad-simulator.html#vista-keypad-simulator.html \
+            --target "$RELEASE_SHA" \
             --title "$title" \
-            --notes-file "$notes" \
+            --notes-file release-bundle/notes.md \
             --prerelease
+
+          api_get "repos/${GH_REPO}/releases/tags/${tag}" "$release_json"
+          test "$(jq -r '.tag_name' "$release_json")" = "$tag"
+          test "$(jq -r '.prerelease' "$release_json")" = "true"
+          test "$(jq -r '.draft' "$release_json")" = "false"
+          rm -rf "$RUNNER_TEMP/created-release"
+          mkdir -p "$RUNNER_TEMP/created-release"
+          gh release download "$tag" --repo "$GH_REPO" \
+            --dir "$RUNNER_TEMP/created-release" \
+            --pattern 'vista-keypad-card.js' \
+            --pattern 'vista-keypad-simulator.html' \
+            --clobber
+          verify_bundle "$RUNNER_TEMP/created-release"

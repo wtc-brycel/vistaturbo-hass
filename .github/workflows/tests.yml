@@ -4,36 +4,63 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   test:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: vista128_bridge
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.13"
       - run: python -m unittest discover -s tests -v
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "22"
       - run: node --check ../frontend/vista-keypad-card.js
 
   frontend-render:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "22"
       - name: Install frontend test dependencies
         working-directory: frontend
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
       - name: Install Chromium
         working-directory: frontend
         run: npx playwright install --with-deps chromium
       - name: Run keypad browser regression tests
         working-directory: frontend
         run: npm run test:render
+
+  repository-security:
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.13"
+      - name: Run repository security guardrails
+        run: python scripts/check_repository_security.py
+      - name: Test repository security helpers
+        run: python -m unittest discover -s scripts -p 'test_*.py' -v
