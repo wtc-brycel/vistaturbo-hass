@@ -39,7 +39,7 @@ The historical workflows had a genuine vulnerable design: branch-controlled patc
 
 ### Regression guardrails
 
-`scripts/check_repository_security.py` is a read-only repository check run by CI. It fails for mutable action refs, normal-workflow write permissions, persisted checkout credentials, production `:latest` base images, unsafe release metadata, and ordinary test-workflow commit/push behavior. Unit tests cover valid pins, each policy failure, metadata traversal/symlink rejection, newest-check success rules, and mismatched tag/release identity handling.
+`scripts/check_repository_security.py` is a read-only repository check run by CI. It fails for mutable action refs, normal-workflow write permissions including scalar `permissions: write-all`, persisted checkout credentials, production `:latest` base images, unsafe release metadata, and ordinary test-workflow commit/push behavior. Unit tests cover valid pins, each policy failure, metadata traversal/symlink rejection, newest-check success rules, and mismatched tag/release identity handling.
 
 ## Deliberately incomplete
 
@@ -56,7 +56,7 @@ The historical workflows had a genuine vulnerable design: branch-controlled patc
 
 ## Tests and validation
 
-- `python -m unittest discover -s scripts -p 'test_*.py' -v` — 10 passed.
+- `python -m unittest discover -s scripts -p 'test_*.py' -v` — 11 passed.
 - `python scripts/check_repository_security.py` — passed.
 - Both active workflow YAML files parsed successfully with PyYAML.
 - `python -m py_compile scripts/*.py` — passed.
