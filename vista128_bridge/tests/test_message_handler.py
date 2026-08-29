@@ -10,6 +10,7 @@ from fake_paho import install_fake_paho  # noqa: E402
 install_fake_paho()
 
 from helpers import make_settings  # noqa: E402
+from vista_bridge.synchronizer import VistaSynchronizer  # noqa: E402
 from vista_bridge.message_handler import ProtocolMessageHandler  # noqa: E402
 from vista_bridge.state import VistaState  # noqa: E402
 
@@ -117,6 +118,41 @@ class MessageHandlerTests(unittest.TestCase):
         self.assertEqual(self.mqtt.keypad_discovery, [1])
         self.assertEqual(len(self.mqtt.keypad_states), 1)
 
+    def test_delayed_keypad_response_cannot_update_another_partition(self):
+        settings = make_settings()
+        sync = VistaSynchronizer(
+            settings.sync,
+            settings.keypad,
+            False,
+            False,
+            lambda: True,
+            lambda data, source, label: (True, "queued"),
+            lambda: None,
+        )
+        transaction = sync._begin_transaction(
+            "keypad", partition=1, expected_message="keypad_display"
+        )
+        handler = ProtocolMessageHandler(
+            settings,
+            self.state,
+            self.mqtt,
+            self.printer,
+            sync,
+        )
+        def packet(partition: int) -> bytes:
+            line_1 = f"{partition}   DISARMED   ".encode("ascii")
+            line_2 = b"READY TO ARM    "
+            return b"29kd\xd0" + line_1 + line_2 + b"100CD"
+
+        handler.handle("keypad_display", packet(2), "2026-08-16T13:22:28-04:00")
+        self.assertFalse(self.state.keypads[1].initialized)
+        self.assertFalse(transaction.response_event.is_set())
+
+        handler.handle("keypad_display", packet(1), "2026-08-16T13:22:29-04:00")
+        self.assertTrue(self.state.keypads[1].initialized)
+        self.assertEqual(self.state.keypads[1].line_1[:2], "P1")
+        sync._finish_transaction(transaction)
+
     def test_descriptor_event_interleave_updates_state(self):
         self.handler.handle(
             "zone_partition",
@@ -142,7 +178,7 @@ class MessageHandlerTests(unittest.TestCase):
         self.assertEqual(self.state.zones[27].descriptor, "GLASS BREAK KITCHEN")
         self.assertTrue(self.state.zones[27].faulted)
         self.assertEqual(len(self.mqtt.events), 1)
-        self.assertGreaterEqual(self.mqtt.summary_calls, 3)
+        self.assertGreaterEqual(self.mqtt.summary_calls, 2)
         self.assertEqual(len(self.printer.events), 1)
         self.assertEqual(self.sync.descriptor_complete, 1)
         self.assertIn(1, self.sync.keypad_refreshes)

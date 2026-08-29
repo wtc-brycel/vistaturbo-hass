@@ -12,6 +12,7 @@ install_fake_paho()
 
 from vista_bridge.bridge import VistaBridge  # noqa: E402
 from vista_bridge.framing import RawFrame  # noqa: E402
+from vista_bridge.bridge import TxItem  # noqa: E402
 
 
 class FakeMqtt:
@@ -43,7 +44,7 @@ class BridgeFrameTests(unittest.TestCase):
         bridge = VistaBridge.__new__(VistaBridge)
         bridge.rx_frames = 0
         bridge.invalid_frames = 0
-        bridge.settings = SimpleNamespace(raw_logging=False)
+        bridge.settings = SimpleNamespace(raw_logging=False, raw_mqtt_enabled=False)
         bridge.mqtt = FakeMqtt()
         bridge.synchronizer = FakeSynchronizer()
         bridge.handler = FakeHandler()
@@ -62,6 +63,16 @@ class BridgeFrameTests(unittest.TestCase):
         self.assertEqual(bridge.synchronizer.ready_count, 1)
         self.assertEqual(bridge.invalid_frames, 0)
         self.assertEqual(len(bridge.handler.calls), 1)
+
+    def test_control_and_raw_tx_logs_redact_payloads(self):
+        bridge = self.make_bridge()
+        bridge.settings = SimpleNamespace(raw_logging=True, raw_mqtt_enabled=False)
+        with self.assertLogs("vista_bridge.bridge", level="INFO") as logs:
+            bridge._log_tx(TxItem("control", "keypad_p1", b"1234"))
+            bridge._log_tx(TxItem("debug", "raw", b"1234"))
+        output = "\n".join(logs.output)
+        self.assertNotIn("1234", output)
+        self.assertIn("payload redacted", output)
 
 
 if __name__ == "__main__":

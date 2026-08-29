@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import logging
 import queue
 import threading
@@ -34,8 +35,12 @@ class VistaBridge:
         self.framer = VistaStreamFramer()
         self.printer = TransPortEventPrinter(settings)
         self.event_store = (
-            EventStore(settings.event_history.sqlite_path)
-            if settings.event_history.enabled
+            EventStore(
+                settings.event_history.sqlite_path,
+                max_age_days=settings.event_history.max_age_days,
+                max_rows=settings.event_history.max_rows,
+            )
+            if settings.event_history.enabled or settings.event_history.audit_enabled
             else None
         )
         self.rx_frames = 0
@@ -43,7 +48,10 @@ class VistaBridge:
         self.tx_frames = 0
         self.tx_bytes = 0
         self.invalid_frames = 0
-        self._tx_queue: queue.Queue[TxItem] = queue.Queue()
+        self._tx_queue: queue.Queue[TxItem] = queue.Queue(maxsize=settings.tx_queue_max)
+        self._raw_tx_queue: queue.Queue[TxItem] = queue.Queue(
+            maxsize=settings.raw_tx_queue_max
+        )
         self._writer: asyncio.StreamWriter | None = None
         self._stop = asyncio.Event()
         self._panel_connected = threading.Event()
@@ -55,6 +63,8 @@ class VistaBridge:
             self._is_connected,
             self._send_sync_query,
             self._force_reconnect,
+            self._on_query_start,
+            self._on_snapshot_check,
         )
         self.control = VistaControlCoordinator(
             settings.control,
@@ -63,12 +73,14 @@ class VistaBridge:
             self._is_connected,
             self._send_sync_query,
             self._publish_control_result,
+            self._record_control_audit,
         )
         self.mqtt = MqttPublisher(
             settings,
             self.enqueue_raw_tx,
             self.enqueue_keypad_control,
             self.enqueue_alarm_control,
+            self._record_control_audit,
         )
         self.handler = ProtocolMessageHandler(
             settings,
@@ -83,11 +95,48 @@ class VistaBridge:
     def _publish_control_result(self, payload: dict) -> None:
         self.mqtt.publish_json("control/result", payload, qos=1)
 
-    def enqueue_keypad_control(self, partition: int, key: str) -> tuple[bool, str]:
-        return self.control.enqueue_keypad(partition, key)
+    def _record_control_audit(self, payload: dict) -> None:
+        if self.event_store is None or not self.settings.event_history.audit_enabled:
+            return
+        interaction_id = str(payload.get("interaction_id", "")).strip()
+        if not interaction_id:
+            return
+        self.event_store.record_keypad_interaction(
+            interaction_id=interaction_id,
+            observed_at=datetime.now(timezone.utc).isoformat(),
+            started_at=str(payload.get("started_at", "")),
+            actor_id=str(payload.get("actor_id", "")),
+            actor_name=str(payload.get("actor_name", "")),
+            partition=int(payload.get("partition", 0) or 0),
+            source=str(payload.get("source", "mqtt")),
+            action=str(payload.get("action", "keypad_sequence")),
+            command_sequence=str(payload.get("command_sequence", "")),
+            operands=(
+                payload.get("operands")
+                if isinstance(payload.get("operands"), dict)
+                else None
+            ),
+            status=str(payload.get("status", "unknown")),
+            ok=bool(payload.get("ok", False)),
+            request_id=str(payload.get("request_id", "")),
+        )
 
-    def enqueue_alarm_control(self, partition: int, action: str, code: str) -> tuple[bool, str]:
-        return self.control.enqueue_alarm(partition, action, code)
+    def enqueue_keypad_control(
+        self,
+        partition: int,
+        key: str,
+        metadata: dict | None = None,
+    ) -> tuple[bool, str]:
+        return self.control.enqueue_keypad(partition, key, metadata)
+
+    def enqueue_alarm_control(
+        self,
+        partition: int,
+        action: str,
+        code: str,
+        metadata: dict | None = None,
+    ) -> tuple[bool, str]:
+        return self.control.enqueue_alarm(partition, action, code, metadata)
 
     def enqueue_raw_tx(self, data: bytes) -> tuple[bool, str]:
         return self._enqueue_tx(data, source="debug", label="raw")
@@ -107,6 +156,7 @@ class VistaBridge:
                 task.cancel()
             await asyncio.gather(*background, return_exceptions=True)
             self.mqtt.publish("panel/connected", "OFF", retain=True)
+            self.mqtt.publish("panel/state_fresh", "OFF", retain=True, qos=1)
             self.mqtt.publish("panel/automation_available", "OFF", retain=True)
             self.mqtt.publish("panel/automation_availability_source", "offline", retain=True)
             self.mqtt.stop()
@@ -192,13 +242,11 @@ class VistaBridge:
         self.synchronizer.reset_connection_state()
         self.control.reset_session()
         self.state.reset_connection_derived_annunciators()
-        for keypad in self.state.keypads.values():
-            if keypad.initialized:
-                self.mqtt.publish_keypad_state(keypad)
         self.mqtt.publish_alarm_states(self.state)
         self._panel_connected.set()
         LOG.info("Panel TCP connection established")
         self.mqtt.publish("panel/connected", "ON", retain=True)
+        self.mqtt.publish("panel/state_fresh", "OFF", retain=True, qos=1)
         self.mqtt.publish("panel/automation_available", "OFF", retain=True)
         self.mqtt.publish("panel/automation_availability_source", "unknown", retain=True)
         self.handler.publish_event_history_snapshot()
@@ -207,6 +255,7 @@ class VistaBridge:
         self._panel_connected.clear()
         self.synchronizer.reset_connection_state()
         self.control.reset_session()
+        self.state.reset_connection_derived_annunciators()
         for task in tasks:
             if not task.done():
                 task.cancel()
@@ -217,6 +266,7 @@ class VistaBridge:
         if discarded:
             LOG.warning("Discarded %d pending TX request(s)", discarded)
         self.mqtt.publish("panel/connected", "OFF", retain=True)
+        self.mqtt.publish("panel/state_fresh", "OFF", retain=True, qos=1)
         self.mqtt.publish("panel/automation_available", "OFF", retain=True)
         self.mqtt.publish("panel/automation_availability_source", "offline", retain=True)
 
@@ -252,19 +302,34 @@ class VistaBridge:
     ) -> tuple[bool, str]:
         if not self._is_connected():
             return False, "panel TCP connection is offline"
+        if source == "debug" and (
+            not isinstance(data, bytes) or not 1 <= len(data) <= 512
+        ):
+            return False, "invalid_raw_tx"
         if source == "debug" and self.synchronizer.is_active():
             return False, "panel synchronization is in progress"
-        self._tx_queue.put(TxItem(source=source, label=label, data=data))
+        item = TxItem(source=source, label=label, data=data)
+        raw_queue = getattr(self, "_raw_tx_queue", self._tx_queue)
+        target = raw_queue if source == "debug" else self._tx_queue
+        try:
+            target.put_nowait(item)
+        except queue.Full:
+            reason = "raw_tx_queue_full" if source == "debug" else "tx_queue_full"
+            LOG.warning("Rejected %s because its bounded TX queue is full", source)
+            return False, reason
         return True, "queued for immediate transmit"
 
     def _discard_pending_tx(self) -> int:
         discarded = 0
-        while True:
-            try:
-                self._tx_queue.get_nowait()
-                discarded += 1
-            except queue.Empty:
-                return discarded
+        targets = (self._tx_queue, getattr(self, "_raw_tx_queue", self._tx_queue))
+        for target in targets:
+            while True:
+                try:
+                    target.get_nowait()
+                    discarded += 1
+                except queue.Empty:
+                    break
+        return discarded
 
     async def _read_loop(self, reader: asyncio.StreamReader) -> None:
         idle_seconds = self.settings.panel.frame_idle_ms / 1000
@@ -290,9 +355,14 @@ class VistaBridge:
 
     async def _write_loop(self, writer: asyncio.StreamWriter) -> None:
         while True:
-            try:
-                item = self._tx_queue.get_nowait()
-            except queue.Empty:
+            item = None
+            for target in (self._tx_queue, self._raw_tx_queue):
+                try:
+                    item = target.get_nowait()
+                    break
+                except queue.Empty:
+                    continue
+            if item is None:
                 await asyncio.sleep(0.05)
                 continue
 
@@ -302,22 +372,24 @@ class VistaBridge:
             self.tx_bytes += len(item.data)
             self._log_tx(item)
 
-    @staticmethod
-    def _log_tx(item: TxItem) -> None:
+    def _log_tx(self, item: TxItem) -> None:
         if item.source == "debug":
-            LOG.warning("RAW TX sent (%d bytes): %s", len(item.data), item.data.hex(" "))
+            LOG.warning("RAW TX sent (%d bytes; payload redacted)", len(item.data))
             return
         if item.source == "control":
             LOG.info("TX control [%s] %d bytes (payload redacted)", item.label, len(item.data))
             return
-        LOG.info(
-            "TX %s [%s] %d bytes ASCII=%r HEX=%s",
-            item.source,
-            item.label,
-            len(item.data),
-            item.data.decode("ascii", errors="replace"),
-            item.data.hex(" "),
-        )
+        if self.settings.raw_logging:
+            LOG.info(
+                "TX %s [%s] %d bytes ASCII=%r HEX=%s",
+                item.source,
+                item.label,
+                len(item.data),
+                item.data.decode("ascii", errors="replace"),
+                item.data.hex(" "),
+            )
+        else:
+            LOG.info("TX %s [%s] %d bytes", item.source, item.label, len(item.data))
 
     def _handle_frame(self, frame: RawFrame) -> None:
         self.rx_frames += 1
@@ -342,10 +414,23 @@ class VistaBridge:
         self._publish_raw_frame(frame, message_type, validation)
         if not validation.valid:
             return
+        if message_type != "keypad_display":
+            mark_protocol_message = getattr(
+                self.synchronizer, "mark_protocol_message", None
+            )
+            if callable(mark_protocol_message):
+                mark_protocol_message(message_type)
         if message_type == "ready":
-            self.synchronizer.mark_ready()
+            pending_kind = getattr(self.synchronizer, "pending_transaction_kind", None)
+            transaction_kind = pending_kind() if callable(pending_kind) else None
+            acknowledged = self.synchronizer.mark_ready()
             control = getattr(self, "control", None)
-            if control is not None and control.infer_automation_available():
+            if (
+                acknowledged
+                and transaction_kind == "control"
+                and control is not None
+                and control.infer_automation_available()
+            ):
                 LOG.info("VISTA automation interface inferred available from successful transaction")
                 self.mqtt.publish("panel/automation_available", "ON", retain=True, qos=1)
                 self.mqtt.publish("panel/automation_availability_source", "inferred", retain=True, qos=1)
@@ -375,23 +460,37 @@ class VistaBridge:
         )
 
     def _publish_raw_frame(self, frame: RawFrame, message_type: str, validation) -> None:
-        self.mqtt.publish_json(
-            "raw/frame",
-            {
-                "sequence": self.rx_frames,
-                "received_at": frame.received_at,
-                "termination": frame.termination,
-                "message_type": message_type,
-                "valid": validation.valid,
-                "length_ok": validation.length_ok,
-                "checksum_ok": validation.checksum_ok,
-                "length": len(frame.data),
-                "ascii": frame.ascii,
-                "hex": frame.hex,
-            },
-        )
-        self.mqtt.publish("raw/last_ascii", frame.ascii[:240], retain=True)
+        metadata = {
+            "sequence": self.rx_frames,
+            "received_at": frame.received_at,
+            "termination": frame.termination,
+            "message_type": message_type,
+            "valid": validation.valid,
+            "length_ok": validation.length_ok,
+            "checksum_ok": validation.checksum_ok,
+            "length": len(frame.data),
+        }
+        if getattr(self.settings, "raw_mqtt_enabled", False) and validation.valid:
+            self.mqtt.publish_json(
+                "raw/frame",
+                {**metadata, "ascii": frame.ascii, "hex": frame.hex},
+                qos=0,
+            )
+        self.mqtt.publish_json("raw/last_metadata", metadata, retain=True, qos=1)
         self.mqtt.publish("protocol/last_message_type", message_type, retain=True)
+
+    def _on_query_start(self, query) -> None:
+        self.state.begin_query_snapshot(query.name)
+        self.mqtt.publish("panel/state_fresh", "OFF", retain=True, qos=1)
+
+    def _on_snapshot_check(self) -> None:
+        complete = self.state.mark_authoritative_snapshot()
+        self.mqtt.publish(
+            "panel/state_fresh", "ON" if complete else "OFF", retain=True, qos=1
+        )
+        if complete:
+            self._publish_dynamic_state()
+            self.mqtt.publish_alarm_states(self.state)
 
     def _publish_dynamic_state(self, *, include_discovery: bool = False) -> None:
         if include_discovery:
@@ -404,13 +503,18 @@ class VistaBridge:
                 self.mqtt.publish_partition_state(partition)
 
         for keypad in self.state.keypads.values():
-            if not keypad.initialized:
+            if not keypad.initialized or not keypad.session_fresh:
+                continue
+            if (
+                not self.settings.keypad.enabled
+                or keypad.partition not in self.settings.keypad.partitions
+            ):
                 continue
             if include_discovery:
                 self.mqtt.publish_keypad_discovery(keypad.partition)
             self.mqtt.publish_keypad_state(keypad)
 
-        if self.state.zone_partition_initialized:
+        if self.state.zone_snapshot_complete:
             for zone in self.state.zones.values():
                 if not zone.partition:
                     continue
@@ -447,6 +551,7 @@ class VistaBridge:
             "stats/tx_frames": self.tx_frames,
             "stats/tx_bytes": self.tx_bytes,
             "stats/invalid_frames": self.invalid_frames,
+            "stats/mqtt_publish_errors": self.mqtt.publish_errors,
             "sync/consecutive_failures": self.synchronizer.failures_consecutive,
             "sync/failures_total": self.synchronizer.failures_total,
         }

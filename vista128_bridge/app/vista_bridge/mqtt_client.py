@@ -1,14 +1,19 @@
 from __future__ import annotations
 
 import json
+import inspect
 import logging
+import ssl
+from datetime import datetime, timezone
 from typing import Callable
+import uuid
 
 import paho.mqtt.client as mqtt
 
 from .config import Settings
 from .mqtt_discovery import (
     KEYPAD_ALARM_SPECS,
+    PANEL_ALARM_SPECS,
     ZONE_CONDITION_SPECS,
     device_info,
     diagnostic_entities,
@@ -32,19 +37,46 @@ class MqttPublisher:
         self,
         settings: Settings,
         raw_tx_callback: Callable[[bytes], tuple[bool, str]],
-        keypad_command_callback: Callable[[int, str], tuple[bool, str]] | None = None,
-        alarm_command_callback: Callable[[int, str, str], tuple[bool, str]] | None = None,
+        keypad_command_callback: Callable[..., tuple[bool, str]] | None = None,
+        alarm_command_callback: Callable[..., tuple[bool, str]] | None = None,
+        audit_interaction_callback: Callable[[dict], None] | None = None,
     ) -> None:
         self.settings = settings
         self.mqtt = settings.mqtt
         self.raw_tx_callback = raw_tx_callback
         self.keypad_command_callback = keypad_command_callback
         self.alarm_command_callback = alarm_command_callback
+        self.audit_interaction_callback = audit_interaction_callback
+        self._keypad_callback_with_metadata = self._accepts_metadata(
+            keypad_command_callback, 3
+        )
+        self._alarm_callback_with_metadata = self._accepts_metadata(
+            alarm_command_callback, 4
+        )
+        self.publish_errors = 0
+        self._retained_payloads: dict[str, tuple[str, int]] = {}
         self._client = mqtt.Client(
             callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
             client_id="vista128-bridge",
             protocol=mqtt.MQTTv311,
         )
+        # Paho otherwise defaults its disconnected QoS outbound queue to
+        # unlimited (0). Keep broker outages from turning retained/state
+        # publication into unbounded process memory growth. Paho rejects new
+        # publishes once either finite limit is reached; this bridge does not
+        # add a second retry queue.
+        self._client.max_inflight_messages_set(self.mqtt.inflight_messages_max)
+        self._client.max_queued_messages_set(self.mqtt.outbound_queue_max)
+        if self.mqtt.tls_enabled:
+            # Paho raises on unusable certificate configuration and the broker
+            # connection cannot fall back to plaintext after this point.
+            self._client.tls_set(
+                ca_certs=self.mqtt.tls_ca or None,
+                certfile=self.mqtt.tls_client_cert or None,
+                keyfile=self.mqtt.tls_client_key or None,
+                cert_reqs=ssl.CERT_REQUIRED,
+            )
+            LOG.info("MQTT TLS enabled with certificate verification")
         if self.mqtt.username:
             self._client.username_pw_set(self.mqtt.username, self.mqtt.password)
         self._client.on_connect = self._on_connect
@@ -79,8 +111,38 @@ class MqttPublisher:
         *,
         retain: bool = False,
         qos: int = 0,
-    ) -> None:
-        self._client.publish(self.topic(suffix), payload=payload, qos=qos, retain=retain)
+    ) -> bool:
+        return self._publish_topic(
+            self.topic(suffix), payload, qos=qos, retain=retain
+        )
+
+    def _publish_topic(
+        self,
+        topic: str,
+        payload: str | int,
+        *,
+        qos: int = 0,
+        retain: bool = False,
+    ) -> bool:
+        value = str(payload)
+        if retain and self._retained_payloads.get(topic) == (value, qos):
+            return True
+        try:
+            result = self._client.publish(
+                topic, payload=payload, qos=qos, retain=retain
+            )
+        except Exception as exc:
+            self.publish_errors += 1
+            LOG.error("MQTT publish failed for %s: %s", topic, type(exc).__name__)
+            return False
+        result_code = getattr(result, "rc", None)
+        if result_code not in (None, 0):
+            self.publish_errors += 1
+            LOG.error("MQTT publish rejected for %s (rc=%s)", topic, result_code)
+            return False
+        if retain:
+            self._retained_payloads[topic] = (value, qos)
+        return True
 
     def publish_json(
         self,
@@ -89,19 +151,22 @@ class MqttPublisher:
         *,
         retain: bool = False,
         qos: int = 0,
-    ) -> None:
+    ) -> bool:
         encoded = json.dumps(payload, separators=(",", ":"))
-        self.publish(suffix, encoded, retain=retain, qos=qos)
+        return self.publish(suffix, encoded, retain=retain, qos=qos)
 
     def publish_discovery(self) -> None:
         self._clear_legacy_discovery()
+        self._clear_retained_dynamic_state()
         availability = {
             "availability_topic": self.topic("bridge/availability"),
             "payload_available": "online",
             "payload_not_available": "offline",
             "device": device_info(),
         }
-        for object_id, (component, config) in diagnostic_entities(self.topic).items():
+        for object_id, (component, config) in diagnostic_entities(
+            self.topic, include_raw=self.settings.raw_mqtt_enabled
+        ).items():
             self._publish_discovery_config(
                 component,
                 object_id,
@@ -117,6 +182,8 @@ class MqttPublisher:
             self._publish_discovery_config(
                 "sensor", "event_journal", event_history_config(self.topic)
             )
+        else:
+            self._clear_discovery_config("sensor", "event_journal")
         if self.settings.keypad.enabled:
             for partition in self.settings.keypad.partitions:
                 self.publish_keypad_discovery(partition)
@@ -162,8 +229,60 @@ class MqttPublisher:
                 config,
             )
 
+    def _clear_retained_dynamic_state(self) -> None:
+        """Tombstone dynamic state before a new session can make it current."""
+        suffixes = [
+            "panel/state_fresh",
+            "raw/last_ascii",
+            "raw/last_metadata",
+        ]
+        for partition in range(1, 9):
+            suffixes.extend(
+                (
+                    f"partition/{partition}/state",
+                    f"partition/{partition}/attributes",
+                    f"keypad/{partition}/state",
+                    f"keypad/{partition}/attributes",
+                )
+            )
+            for alarm_type in KEYPAD_ALARM_SPECS:
+                suffixes.extend(
+                    (
+                        f"keypad/{partition}/alarm/{alarm_type}",
+                        f"keypad/{partition}/alarm/{alarm_type}/available",
+                    )
+                )
+            suffixes.extend(
+                (
+                    f"keypad/{partition}/alarm/active",
+                    f"keypad/{partition}/alarm/active/available",
+                    f"keypad/{partition}/alarm/active/attributes",
+                )
+            )
+        for zone in range(1, 129):
+            for condition in ZONE_CONDITION_SPECS:
+                suffixes.append(f"zone/{zone:03d}/{condition}")
+            suffixes.append(f"zone/{zone:03d}/attributes")
+        for condition in ZONE_CONDITION_SPECS:
+            suffixes.extend(
+                (
+                    f"zone_summary/{condition}/count",
+                    f"zone_summary/{condition}/attributes",
+                )
+            )
+        for alarm_type in (*PANEL_ALARM_SPECS, "active"):
+            suffixes.extend(
+                (
+                    f"alarm/{alarm_type}",
+                    f"alarm/{alarm_type}/available",
+                    f"alarm/{alarm_type}/attributes",
+                )
+            )
+        for suffix in suffixes:
+            self.publish(suffix, "", retain=True, qos=1)
+
     def publish_keypad_state(self, keypad: KeypadState) -> None:
-        if not keypad.initialized:
+        if not keypad.initialized or not keypad.session_fresh:
             return
         prefix = f"keypad/{keypad.partition}"
         self.publish(f"{prefix}/state", keypad.ha_state, retain=True, qos=1)
@@ -188,11 +307,14 @@ class MqttPublisher:
         if self.settings.keypad.enabled:
             for partition in self.settings.keypad.partitions:
                 keypad = state.keypads.get(partition)
-                if keypad is not None:
-                    self._publish_keypad_alarm_states(keypad)
+                partition_state = state.partitions.get(partition)
+                if keypad is not None and partition_state is not None:
+                    self._publish_keypad_alarm_states(keypad, partition_state)
         self._publish_panel_alarm_states(state)
 
-    def _publish_keypad_alarm_states(self, keypad: KeypadState) -> None:
+    def _publish_keypad_alarm_states(
+        self, keypad: KeypadState, partition: PartitionState
+    ) -> None:
         prefix = f"keypad/{keypad.partition}/alarm"
         values: dict[str, bool | None] = {}
         for alarm_type, spec in KEYPAD_ALARM_SPECS.items():
@@ -216,8 +338,10 @@ class MqttPublisher:
         active_types = [
             alarm_type for alarm_type, value in values.items() if value is True
         ]
+        if partition.has_active_alarm and "alarm" not in active_types:
+            active_types.append("alarm")
         all_known = all(value is not None for value in values.values())
-        aggregate_available = bool(active_types) or all_known
+        aggregate_available = bool(active_types) or (keypad.session_fresh and all_known)
         self.publish(
             f"{prefix}/active/available",
             "ON" if aggregate_available else "OFF",
@@ -238,6 +362,7 @@ class MqttPublisher:
                 "fire_alarm": values["fire"],
                 "burglary_alarm": values["burglary"],
                 "auxiliary_alarm": values["auxiliary"],
+                "partition_alarm_active": partition.has_active_alarm,
                 "sound_mode": keypad.sound_mode,
             },
             retain=True,
@@ -246,30 +371,13 @@ class MqttPublisher:
 
     def _publish_panel_alarm_states(self, state: VistaState) -> None:
         prefix = "alarm"
-        configured = (
-            tuple(self.settings.keypad.partitions)
-            if self.settings.keypad.enabled and self.settings.keypad.partitions
-            else tuple(range(1, 9))
-        )
-        global_values: dict[str, bool | None] = {}
-        active_partitions_by_type: dict[str, list[int]] = {}
+        alarm_state = state.panel_alarm_states()
+        values = alarm_state["values"]
+        active_partitions_by_type = alarm_state["active_partitions_by_type"]
 
-        for alarm_type, spec in KEYPAD_ALARM_SPECS.items():
-            values = {
-                partition: getattr(keypad, spec["attribute"])
-                for partition, keypad in state.keypads.items()
-            }
-            active_partitions = sorted(
-                partition for partition, value in values.items() if value is True
-            )
-            active_partitions_by_type[alarm_type] = active_partitions
-            configured_values = [values[partition] for partition in configured]
-            available = bool(active_partitions) or all(
-                value is not None for value in configured_values
-            )
-            value: bool | None = True if active_partitions else (False if available else None)
-            global_values[alarm_type] = value
-
+        for alarm_type in PANEL_ALARM_SPECS:
+            value = values.get(alarm_type)
+            available = value is not None
             self.publish(
                 f"{prefix}/{alarm_type}/available",
                 "ON" if available else "OFF",
@@ -286,25 +394,15 @@ class MqttPublisher:
             self.publish_json(
                 f"{prefix}/{alarm_type}/attributes",
                 {
-                    "active_partitions": active_partitions,
-                    "configured_partitions": list(configured),
-                    "partition_states": {
-                        str(partition): values[partition]
-                        for partition in sorted(values)
-                    },
+                    "active_partitions": active_partitions_by_type.get(alarm_type, []),
+                    "complete": alarm_state["complete"],
                 },
                 retain=True,
                 qos=1,
             )
 
-        active_types = [
-            alarm_type
-            for alarm_type, value in global_values.items()
-            if value is True
-        ]
-        aggregate_available = bool(active_types) or all(
-            value is not None for value in global_values.values()
-        )
+        aggregate = alarm_state["active"]
+        aggregate_available = aggregate is not None
         self.publish(
             f"{prefix}/active/available",
             "ON" if aggregate_available else "OFF",
@@ -314,18 +412,19 @@ class MqttPublisher:
         if aggregate_available:
             self.publish(
                 f"{prefix}/active",
-                "ON" if active_types else "OFF",
+                "ON" if aggregate else "OFF",
                 retain=True,
                 qos=1,
             )
         self.publish_json(
             f"{prefix}/active/attributes",
             {
-                "active_types": active_types,
-                "fire_partitions": active_partitions_by_type["fire"],
-                "burglary_partitions": active_partitions_by_type["burglary"],
-                "auxiliary_partitions": active_partitions_by_type["auxiliary"],
-                "configured_partitions": list(configured),
+                "active_types": [
+                    alarm_type for alarm_type, value in values.items() if value is True
+                ],
+                "active_partitions": alarm_state["active_partitions"],
+                "active_partitions_by_type": active_partitions_by_type,
+                "complete": alarm_state["complete"],
             },
             retain=True,
             qos=1,
@@ -447,18 +546,31 @@ class MqttPublisher:
             f"vista128_bridge/{object_id}/config"
         )
         payload = json.dumps(config, separators=(",", ":"))
-        self._client.publish(topic, payload, qos=1, retain=True)
+        self._publish_topic(topic, payload, qos=1, retain=True)
 
     def _clear_discovery_config(self, component: str, object_id: str) -> None:
         topic = (
             f"{self.mqtt.discovery_prefix}/{component}/"
             f"vista128_bridge/{object_id}/config"
         )
-        self._client.publish(topic, "", qos=1, retain=True)
+        self._publish_topic(topic, "", qos=1, retain=True)
 
     def _clear_legacy_discovery(self) -> None:
+        for object_id in (*PANEL_ALARM_SPECS, "active"):
+            self._clear_discovery_config("binary_sensor", f"alarm_{object_id}")
+        for partition in range(1, 9):
+            self._clear_discovery_config("alarm_control_panel", f"partition_{partition}")
+            self._clear_discovery_config("sensor", f"keypad_{partition}")
+            for alarm_type in (*KEYPAD_ALARM_SPECS, "active"):
+                self._clear_discovery_config(
+                    "binary_sensor", f"keypad_{partition}_alarm_{alarm_type}"
+                )
         for zone in range(1, 129):
             self._clear_discovery_config("binary_sensor", f"zone_{zone:03d}")
+            for condition in ZONE_CONDITION_SPECS:
+                self._clear_discovery_config(
+                    "binary_sensor", f"zone_{zone:03d}_{condition}"
+                )
         for object_id in (
             "faulted_zones",
             "alarm_zones",
@@ -466,12 +578,20 @@ class MqttPublisher:
             "bypassed_zones",
         ):
             self._clear_discovery_config("sensor", object_id)
+        for object_id in zone_summary_entities(self.topic):
+            self._clear_discovery_config("sensor", object_id)
+        for object_id, (component, _) in diagnostic_entities(
+            self.topic, include_raw=True
+        ).items():
+            self._clear_discovery_config(component, object_id)
+        self._clear_discovery_config("sensor", "event_journal")
 
     def _on_connect(self, client, userdata, flags, reason_code, properties) -> None:
         if reason_code != 0:
             LOG.error("MQTT connection rejected: %s", reason_code)
             return
         LOG.info("Connected to MQTT broker")
+        self._retained_payloads.clear()
         self.publish("bridge/availability", "online", retain=True, qos=1)
         self.publish_discovery()
         if self.settings.control.enabled and self.settings.control.native_alarm_enabled:
@@ -479,8 +599,8 @@ class MqttPublisher:
         if self.settings.control.enabled and self.settings.control.keypad_enabled:
             client.subscribe(self.topic("keypad/+/command"), qos=1)
         if self.settings.debug_raw_tx_enabled:
-            client.subscribe(self.topic("debug/tx"), qos=1)
-            LOG.warning("Raw transmit enabled on %s", self.topic("debug/tx"))
+            client.subscribe(self.topic("admin/raw_tx"), qos=1)
+            LOG.warning("Privileged raw transmit enabled on %s", self.topic("admin/raw_tx"))
 
     def _on_disconnect(
         self,
@@ -495,6 +615,7 @@ class MqttPublisher:
     def _on_message(self, client, userdata, message) -> None:
         is_keypad = self._is_keypad_command(message.topic)
         is_partition = self._is_partition_command(message.topic)
+        is_raw_admin = message.topic == self.topic("admin/raw_tx")
         if (is_keypad or is_partition) and bool(getattr(message, "retain", False)):
             kind = "keypad" if is_keypad else "alarm"
             category = "keypad" if is_keypad else "partition"
@@ -504,13 +625,16 @@ class MqttPublisher:
                 partition = None
             self._publish_control_rejection(kind, partition, "retained_control_message")
             return
+        if is_raw_admin and bool(getattr(message, "retain", False)):
+            self._publish_control_rejection("raw", None, "retained_admin_message")
+            return
         if is_keypad:
             self._handle_keypad_command(message.topic, message.payload)
             return
         if is_partition:
             self._handle_partition_command(message.topic, message.payload)
             return
-        if message.topic == self.topic("debug/tx") and self.settings.debug_raw_tx_enabled:
+        if is_raw_admin and self.settings.debug_raw_tx_enabled:
             self._handle_raw_tx(message.payload)
 
     def _is_partition_command(self, topic: str) -> bool:
@@ -536,18 +660,121 @@ class MqttPublisher:
             {"kind": kind, "partition": partition, "reason": reason},
         )
 
+    @staticmethod
+    def _accepts_metadata(callback: Callable | None, argument_count: int) -> bool:
+        if callback is None:
+            return False
+        try:
+            inspect.signature(callback).bind(*([None] * argument_count))
+        except (TypeError, ValueError):
+            return False
+        return True
+
+    @staticmethod
+    def _transaction_metadata(
+        request: dict,
+        partition: int,
+        default_action: str,
+    ) -> dict:
+        def bounded_text(value, limit: int) -> str:
+            if not isinstance(value, str):
+                return ""
+            return "".join(character for character in value if character.isprintable())[:limit]
+
+        interaction_id = bounded_text(
+            request.get("transaction_id", request.get("interaction_id", "")),
+            96,
+        ) or uuid.uuid4().hex
+        interaction_complete = request.get(
+            "complete", request.get("sequence_complete", True)
+        )
+        if not isinstance(interaction_complete, bool):
+            raise ValueError("interaction completion flag must be boolean")
+        source = bounded_text(request.get("source", ""), 32)
+        if source != "ha_frontend":
+            source = "mqtt"
+        return {
+            "interaction_id": interaction_id,
+            "request_id": uuid.uuid4().hex,
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "actor_id": bounded_text(request.get("actor_id", ""), 128),
+            "actor_name": bounded_text(request.get("actor_name", ""), 128),
+            "partition": partition,
+            "source": source,
+            "action": default_action,
+            "interaction_complete": interaction_complete,
+        }
+
+    def _invoke_keypad_callback(
+        self, partition: int, key: str, metadata: dict
+    ) -> tuple[bool, str]:
+        if self.keypad_command_callback is None:
+            return False, "keypad control callback unavailable"
+        if self._keypad_callback_with_metadata:
+            return self.keypad_command_callback(partition, key, metadata)
+        return self.keypad_command_callback(partition, key)
+
+    def _invoke_alarm_callback(
+        self, partition: int, action: str, code: str, metadata: dict
+    ) -> tuple[bool, str]:
+        if self.alarm_command_callback is None:
+            return False, "native alarm control callback unavailable"
+        if self._alarm_callback_with_metadata:
+            return self.alarm_command_callback(partition, action, code, metadata)
+        return self.alarm_command_callback(partition, action, code)
+
+    def _audit_interaction(self, metadata: dict, status: str, ok: bool) -> None:
+        if self.audit_interaction_callback is None:
+            return
+        try:
+            self.audit_interaction_callback(
+                {
+                    **metadata,
+                    "status": status,
+                    "ok": ok,
+                }
+            )
+        except Exception as exc:
+            # Audit failure must not turn a bounded control rejection into a
+            # retry loop, and no command payload is included in this log.
+            LOG.error("Keypad interaction audit failed: %s", type(exc).__name__)
+
+    def _audit_rejected_interaction(self, metadata: dict) -> None:
+        self._audit_interaction(metadata, "rejected", False)
+
     def _handle_keypad_command(self, topic: str, payload: bytes) -> None:
         partition = None
         try:
             partition = self._partition_from_topic(topic, "keypad")
-            key = payload.decode("ascii", errors="strict")
-            if len(key) != 1 or key not in "0123456789*#":
+            # Keep the former one-byte MQTT interface working for existing
+            # automations. New callers should use one JSON logical sequence so
+            # actor and interaction metadata can travel with it.
+            if len(payload) == 1:
+                legacy_key = payload.decode("ascii", errors="strict")
+                request = {"keys": legacy_key}
+            else:
+                request = json.loads(payload.decode("utf-8"))
+            if not isinstance(request, dict):
+                raise ValueError("keypad_payload_must_be_object")
+            key = request.get("keys", request.get("key", ""))
+            if not isinstance(key, str) or not 1 <= len(key) <= 5:
+                raise ValueError("keypad_sequence_length_must_be_1_to_5")
+            if any(character not in "0123456789*#" for character in key):
                 raise ValueError("unsupported_keypad_payload")
             if self.keypad_command_callback is None:
                 raise ValueError("keypad control callback unavailable")
-            accepted, detail = self.keypad_command_callback(partition, key)
+            metadata = self._transaction_metadata(
+                request, partition, "keypad_sequence"
+            )
+            # The bridge records this exact completed logical sequence. It is
+            # deliberately a single bounded field, not an MQTT envelope or a
+            # stream of individual keypresses.
+            metadata["command_sequence"] = key
+            accepted, detail = self._invoke_keypad_callback(partition, key, metadata)
             if not accepted:
+                self._audit_rejected_interaction(metadata)
                 raise ValueError(detail)
+            self._audit_interaction(metadata, "queued", False)
         except Exception as exc:
             self._publish_control_rejection("keypad", partition, str(exc))
 
@@ -557,40 +784,66 @@ class MqttPublisher:
         try:
             partition = self._partition_from_topic(topic, "partition")
             request = json.loads(payload.decode("utf-8"))
+            if not isinstance(request, dict):
+                raise ValueError("partition_payload_must_be_object")
             action = str(request.get("action", "")).upper()
             code = str(request.get("code", ""))
-            if self.alarm_command_callback is None:
-                raise ValueError("native alarm control callback unavailable")
-            accepted, detail = self.alarm_command_callback(partition, action, code)
+            metadata = self._transaction_metadata(request, partition, action.lower())
+            metadata["command_sequence"] = code
+            metadata["operands"] = {"native_action": action}
+            accepted, detail = self._invoke_alarm_callback(
+                partition, action, code, metadata
+            )
             if not accepted:
+                if len(code) == 4 and code.isdigit():
+                    self._audit_rejected_interaction(metadata)
                 raise ValueError(detail)
+            self._audit_interaction(metadata, "queued", False)
         except Exception as exc:
             # Never include the inbound payload or credential in logs/telemetry.
             self._publish_control_rejection("alarm", partition, str(exc))
 
     def _handle_raw_tx(self, payload: bytes) -> None:
         try:
+            if len(payload) > 2048:
+                raise ValueError("raw TX request is too large")
             request = json.loads(payload.decode("utf-8"))
-            if request.get("confirm") != "I_UNDERSTAND_RAW_PANEL_TX":
-                raise ValueError("missing confirmation token")
+            if not isinstance(request, dict):
+                raise ValueError("raw TX request must be an object")
             data = self._decode_raw_tx(request)
             accepted, detail = self.raw_tx_callback(data)
             if not accepted:
                 raise ValueError(detail)
             self.publish_json(
-                "debug/tx_result",
+                "admin/raw_tx_result",
                 {"ok": True, "bytes": len(data), "status": detail},
             )
         except Exception as exc:
-            LOG.warning("Rejected raw TX request: %s", exc)
-            self.publish_json("debug/tx_result", {"ok": False, "error": str(exc)})
+            LOG.warning("Rejected raw TX request: %s", type(exc).__name__)
+            self.publish_json("admin/raw_tx_result", {"ok": False, "error": str(exc)})
 
     @staticmethod
     def _decode_raw_tx(request: dict) -> bytes:
-        if "hex" in request:
-            data = bytes.fromhex(request["hex"])
+        has_hex = "hex" in request
+        has_ascii = "ascii" in request
+        if has_hex == has_ascii:
+            raise ValueError("payload must contain exactly one of 'hex' or 'ascii'")
+        if has_hex:
+            value = request["hex"]
+            if not isinstance(value, str) or len(value) % 2:
+                raise ValueError("hex payload must be an even-length string")
+            try:
+                data = bytes.fromhex(value)
+            except ValueError as exc:
+                raise ValueError("hex payload is malformed") from exc
         elif "ascii" in request:
-            data = request["ascii"].encode("ascii")
+            value = request["ascii"]
+            if not isinstance(value, str):
+                raise ValueError("ascii payload must be a string")
+            try:
+                data = value.encode("ascii")
+            except UnicodeEncodeError as exc:
+                raise ValueError("ascii payload is not 7-bit ASCII") from exc
         else:
             raise ValueError("payload must contain 'hex' or 'ascii'")
         if not data or len(data) > 512:

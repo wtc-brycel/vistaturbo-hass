@@ -1,5 +1,5 @@
 name: "Vista Turbo RS232"
-version: "0.2.6-rc.10"
+version: "0.2.6-rc.11"
 slug: "vista128_bridge"
 description: >-
   Local TCP/MQTT bridge for the VISTA Turbo RS-232 automation interface.
@@ -23,7 +23,14 @@ options:
   connect_timeout_seconds: 5
   reconnect_max_seconds: 30
   frame_idle_ms: 250
-  raw_logging: true
+  raw_logging: false
+  raw_mqtt_enabled: false
+  mqtt_tls_enabled: false
+  mqtt_tls_ca: ""
+  mqtt_tls_client_cert: ""
+  mqtt_tls_client_key: ""
+  mqtt_outbound_queue_max: 256
+  mqtt_inflight_messages_max: 20
   startup_sync_enabled: true
   startup_sync_initial_delay_ms: 1000
   startup_sync_command_delay_ms: 500
@@ -44,6 +51,9 @@ options:
   event_history_enabled: true
   event_history_startup_dump_enabled: false
   event_history_recent_limit: 20
+  keypad_audit_enabled: true
+  event_history_max_age_days: 90
+  event_history_max_rows: 10000
   transport_print_enabled: false
   transport_host: ""
   transport_http_port: 9101
@@ -52,6 +62,8 @@ options:
   transport_print_queue_max: 5000
   transport_print_width: 32
   debug_raw_tx_enabled: false
+  tx_queue_max: 128
+  raw_tx_queue_max: 16
 schema:
   panel_host: str
   panel_port: port
@@ -63,6 +75,13 @@ schema:
   reconnect_max_seconds: int(1,300)
   frame_idle_ms: int(25,5000)
   raw_logging: bool
+  raw_mqtt_enabled: bool
+  mqtt_tls_enabled: bool
+  mqtt_tls_ca: str
+  mqtt_tls_client_cert: str
+  mqtt_tls_client_key: str
+  mqtt_outbound_queue_max: int(1,10000)
+  mqtt_inflight_messages_max: int(1,1000)
   startup_sync_enabled: bool
   startup_sync_initial_delay_ms: int(100,10000)
   startup_sync_command_delay_ms: int(100,10000)
@@ -83,6 +102,9 @@ schema:
   event_history_enabled: bool
   event_history_startup_dump_enabled: bool
   event_history_recent_limit: int(1,100)
+  keypad_audit_enabled: bool
+  event_history_max_age_days: int(1,3650)
+  event_history_max_rows: int(100,1000000)
   transport_print_enabled: bool
   transport_host: str
   transport_http_port: port
@@ -91,3 +113,5 @@ schema:
   transport_print_queue_max: int(1,100000)
   transport_print_width: int(24,64)
   debug_raw_tx_enabled: bool
+  tx_queue_max: int(1,10000)
+  raw_tx_queue_max: int(1,1000)

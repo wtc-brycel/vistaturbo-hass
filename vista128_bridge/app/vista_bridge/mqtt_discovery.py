@@ -53,6 +53,25 @@ KEYPAD_ALARM_SPECS = {
     },
 }
 
+# Panel-wide alarm entities are derived from the event/state model, not from
+# keypad LEDs. Silent and duress alarms have no ordinary speaker LED but are
+# still security alarms and must be represented here.
+PANEL_ALARM_SPECS = {
+    **KEYPAD_ALARM_SPECS,
+    "silent": {
+        "label": "Silent Alarm",
+        "icon": "mdi:alarm-light-outline",
+    },
+    "duress": {
+        "label": "Duress Alarm",
+        "icon": "mdi:account-alert-outline",
+    },
+    "supervisory": {
+        "label": "Supervisory Alarm",
+        "icon": "mdi:alert-outline",
+    },
+}
+
 
 def keypad_alarm_availability(partition: int, alarm_type: str, topic: TopicFn) -> dict:
     return {
@@ -141,7 +160,7 @@ def panel_alarm_configs(topic: TopicFn) -> dict[str, dict]:
             "icon": spec["icon"],
             "device": device_info(),
         }
-        for alarm_type, spec in KEYPAD_ALARM_SPECS.items()
+        for alarm_type, spec in PANEL_ALARM_SPECS.items()
     }
     configs["active"] = {
         "name": "Alarm Active",
@@ -180,13 +199,22 @@ def panel_entity_availability(topic: TopicFn) -> dict:
                 "payload_available": "ON",
                 "payload_not_available": "OFF",
             },
+            {
+                "topic": topic("panel/state_fresh"),
+                "payload_available": "ON",
+                "payload_not_available": "OFF",
+            },
         ],
         "availability_mode": "all",
     }
 
 
-def diagnostic_entities(topic: TopicFn) -> dict[str, tuple[str, dict]]:
-    return {
+def diagnostic_entities(
+    topic: TopicFn,
+    *,
+    include_raw: bool = False,
+) -> dict[str, tuple[str, dict]]:
+    entities = {
         "connection": (
             "binary_sensor",
             {
@@ -345,9 +373,10 @@ def diagnostic_entities(topic: TopicFn) -> dict[str, tuple[str, dict]]:
         "last_frame": (
             "sensor",
             {
-                "name": "Last Raw Frame",
+                "name": "Last Diagnostic Frame Metadata",
                 "unique_id": "vista128_bridge_last_frame",
-                "state_topic": topic("raw/last_ascii"),
+                "state_topic": topic("raw/last_metadata"),
+                "json_attributes_topic": topic("raw/last_metadata"),
                 "entity_category": "diagnostic",
                 "enabled_by_default": False,
             },
@@ -363,6 +392,9 @@ def diagnostic_entities(topic: TopicFn) -> dict[str, tuple[str, dict]]:
             },
         ),
     }
+    if not include_raw:
+        entities.pop("last_frame", None)
+    return entities
 
 
 def event_history_config(topic: TopicFn) -> dict:

@@ -9,6 +9,9 @@ class FakeClient:
         self.on_connect = None
         self.on_disconnect = None
         self.on_message = None
+        self.tls = None
+        self.max_inflight_messages = None
+        self.max_queued_messages = None
 
     def username_pw_set(self, *args, **kwargs):
         pass
@@ -18,6 +21,15 @@ class FakeClient:
 
     def will_set(self, *args, **kwargs):
         pass
+
+    def tls_set(self, *args, **kwargs):
+        self.tls = (args, kwargs)
+
+    def max_inflight_messages_set(self, value):
+        self.max_inflight_messages = value
+
+    def max_queued_messages_set(self, value):
+        self.max_queued_messages = value
 
     def connect_async(self, *args, **kwargs):
         pass

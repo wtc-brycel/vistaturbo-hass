@@ -43,6 +43,11 @@ class ReadinessTests(unittest.TestCase):
                 "payload_available": "ON",
                 "payload_not_available": "OFF",
             },
+            {
+                "topic": "vista128/panel/state_fresh",
+                "payload_available": "ON",
+                "payload_not_available": "OFF",
+            },
         ]
         for config in (
             keypad_config(1, topic),
@@ -143,9 +148,9 @@ class ReadinessTests(unittest.TestCase):
         report = ArmingStatusReport(raw_modes=("N", "D", "D", "D", "D", "D", "D", "D"))
         changed = state.apply_arming_status(report)
         self.assertIn(1, changed)
-        self.assertFalse(partition.active_alarm_tokens)
-        self.assertFalse(partition.active_burglary_tokens)
-        self.assertFalse(keypad.burglary_alarm_led)
+        self.assertTrue(partition.active_alarm_tokens)
+        self.assertTrue(partition.active_burglary_tokens)
+        self.assertTrue(keypad.burglary_alarm_led)
 
 if __name__ == "__main__":
     unittest.main()

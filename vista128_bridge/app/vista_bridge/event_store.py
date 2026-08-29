@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from contextlib import closing
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+import json
 from pathlib import Path
 import sqlite3
 from typing import Any
@@ -27,10 +29,21 @@ class EventStore:
     occurrence for that fingerprint.
     """
 
-    def __init__(self, path: str) -> None:
+    def __init__(
+        self,
+        path: str,
+        *,
+        max_age_days: int = 90,
+        max_rows: int = 10000,
+    ) -> None:
         self.path = path
+        self.max_age_days = max(1, int(max_age_days))
+        self.max_rows = max(1, int(max_rows))
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         self._initialize()
+        # Enforce new limits against an existing database without making the
+        # first live event pay for all historical cleanup at once.
+        self.prune()
 
     def _connect(self) -> sqlite3.Connection:
         db = sqlite3.connect(self.path, timeout=5)
@@ -74,13 +87,51 @@ class EventStore:
                 CREATE INDEX IF NOT EXISTS idx_events_fingerprint
                     ON events(fingerprint, occurrence);
 
+                CREATE TABLE IF NOT EXISTS keypad_interactions (
+                    interaction_id TEXT PRIMARY KEY,
+                    started_at TEXT NOT NULL,
+                    last_seen_at TEXT NOT NULL,
+                    completed_at TEXT NOT NULL DEFAULT '',
+                    actor_id TEXT NOT NULL DEFAULT '',
+                    actor_name TEXT NOT NULL DEFAULT '',
+                    partition_number INTEGER NOT NULL,
+                    source TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    command_sequence TEXT NOT NULL DEFAULT '',
+                    operands_json TEXT NOT NULL DEFAULT '{}',
+                    last_request_id TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL,
+                    ok INTEGER NOT NULL DEFAULT 0
+                );
+                CREATE INDEX IF NOT EXISTS idx_keypad_interactions_last_seen
+                    ON keypad_interactions(last_seen_at DESC);
+
                 CREATE TABLE IF NOT EXISTS metadata (
                     key TEXT PRIMARY KEY,
                     value TEXT NOT NULL
                 );
                 """
             )
-            db.execute("PRAGMA user_version=1")
+            columns = {
+                row[1]
+                for row in db.execute("PRAGMA table_info(keypad_interactions)")
+            }
+            if "command_sequence" not in columns:
+                db.execute(
+                    "ALTER TABLE keypad_interactions ADD COLUMN "
+                    "command_sequence TEXT NOT NULL DEFAULT ''"
+                )
+            if "operands_json" not in columns:
+                db.execute(
+                    "ALTER TABLE keypad_interactions ADD COLUMN "
+                    "operands_json TEXT NOT NULL DEFAULT '{}'"
+                )
+            if "last_request_id" not in columns:
+                db.execute(
+                    "ALTER TABLE keypad_interactions ADD COLUMN "
+                    "last_request_id TEXT NOT NULL DEFAULT ''"
+                )
+            db.execute("PRAGMA user_version=2")
 
     @staticmethod
     def fingerprint(event: SystemEvent) -> str:
@@ -164,7 +215,257 @@ class EventStore:
                     received_at,
                 ),
             )
-            return not existed
+            inserted = not existed
+
+        # Keep pruning bounded. A single event must never require deleting an
+        # unbounded amount of history while the panel event path is active.
+        self.prune()
+        return inserted
+
+    def prune(
+        self,
+        *,
+        now: datetime | None = None,
+        max_age_days: int | None = None,
+        max_rows: int | None = None,
+        batch_size: int = 500,
+    ) -> int:
+        """Delete at most one bounded batch of expired/oldest rows."""
+        age_days = self.max_age_days if max_age_days is None else max(1, int(max_age_days))
+        row_limit = self.max_rows if max_rows is None else max(1, int(max_rows))
+        batch = max(1, min(5000, int(batch_size)))
+        reference = now or datetime.now(timezone.utc)
+        cutoff = (reference - timedelta(days=age_days)).isoformat()
+
+        with closing(self._connect()) as db, db:
+            deleted = 0
+            expired = db.execute(
+                "SELECT id FROM events WHERE last_received_at < ? "
+                "ORDER BY id LIMIT ?",
+                (cutoff, batch),
+            ).fetchall()
+            if expired:
+                ids = [int(row[0]) for row in expired]
+                placeholders = ",".join("?" for _ in ids)
+                cursor = db.execute(
+                    f"DELETE FROM events WHERE id IN ({placeholders})", ids
+                )
+                deleted += int(cursor.rowcount)
+
+            remaining = db.execute("SELECT COUNT(*) FROM events").fetchone()
+            count = int(remaining[0]) if remaining else 0
+            excess = count - row_limit
+            if excess > 0 and deleted < batch:
+                limit = min(excess, batch - deleted)
+                cursor = db.execute(
+                    "DELETE FROM events WHERE id IN ("
+                    "SELECT id FROM events ORDER BY id LIMIT ?"
+                    ")",
+                    (limit,),
+                )
+                deleted += int(cursor.rowcount)
+
+            audit_expired = db.execute(
+                "SELECT interaction_id FROM keypad_interactions "
+                "WHERE last_seen_at < ? ORDER BY last_seen_at LIMIT ?",
+                (cutoff, batch),
+            ).fetchall()
+            if audit_expired:
+                ids = [str(row[0]) for row in audit_expired]
+                placeholders = ",".join("?" for _ in ids)
+                cursor = db.execute(
+                    "DELETE FROM keypad_interactions "
+                    f"WHERE interaction_id IN ({placeholders})",
+                    ids,
+                )
+                deleted += int(cursor.rowcount)
+
+            audit_count = db.execute(
+                "SELECT COUNT(*) FROM keypad_interactions"
+            ).fetchone()
+            audit_excess = int(audit_count[0]) - row_limit if audit_count else 0
+            if audit_excess > 0:
+                cursor = db.execute(
+                    "DELETE FROM keypad_interactions WHERE interaction_id IN ("
+                    "SELECT interaction_id FROM keypad_interactions "
+                    "ORDER BY last_seen_at LIMIT ?"
+                    ")",
+                    (min(audit_excess, batch),),
+                )
+                deleted += int(cursor.rowcount)
+            return deleted
+
+    def record_keypad_interaction(
+        self,
+        *,
+        interaction_id: str,
+        observed_at: str,
+        started_at: str | None = None,
+        actor_id: str = "",
+        actor_name: str = "",
+        partition: int,
+        source: str,
+        action: str,
+        command_sequence: str = "",
+        operands: dict[str, Any] | None = None,
+        status: str,
+        ok: bool,
+        request_id: str | int = "",
+    ) -> None:
+        """Upsert one bounded audit row for one logical interaction.
+
+        The sequence is intentionally stored for the configured administrator:
+        panel PINs and keypad commands are part of this local audit record.
+        MQTT envelopes and individual keypresses are not stored.
+        """
+        interaction_id = self._audit_text(interaction_id, 96)
+        if not interaction_id:
+            return
+        observed_at = self._audit_text(observed_at, 64)
+        started_at = self._audit_text(started_at or observed_at, 64) or observed_at
+        actor_id = self._audit_text(actor_id, 128)
+        actor_name = self._audit_text(actor_name, 128)
+        source = self._audit_text(source, 32) or "mqtt"
+        action = self._audit_text(action, 64) or "keypad_sequence"
+        command_sequence = self._audit_text(command_sequence, 64)
+        operands_json = self._audit_operands(operands)
+        request_id = self._audit_text(request_id, 96)
+        status = self._audit_text(status, 64) or "unknown"
+        partition = max(0, min(8, int(partition)))
+        with closing(self._connect()) as db, db:
+            existing = db.execute(
+                "SELECT command_sequence, action, last_request_id "
+                "FROM keypad_interactions "
+                "WHERE interaction_id = ?",
+                (interaction_id,),
+            ).fetchone()
+            same_request = bool(
+                existing is not None and request_id and existing[2] == request_id
+            )
+            if same_request and existing[0]:
+                # A queued -> terminal update for the same segment must keep
+                # the already accumulated logical sequence intact.
+                command_sequence = existing[0]
+            if (
+                existing is not None
+                and existing[0]
+                and command_sequence
+                and existing[1] == action == "keypad_sequence"
+                and not same_request
+                and (request_id or existing[0] != command_sequence)
+            ):
+                # The card may flush a sequence in short logical segments
+                # while retaining one interaction ID. Preserve those segments
+                # in one row, while an identical terminal update remains an
+                # idempotent upsert.
+                combined = f"{existing[0]}{command_sequence}"
+                command_sequence = combined[:64]
+            db.execute(
+                """
+                INSERT INTO keypad_interactions (
+                    interaction_id, started_at, last_seen_at, completed_at,
+                    actor_id, actor_name, partition_number, source, action,
+                    command_sequence, operands_json, last_request_id, status, ok
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(interaction_id) DO UPDATE SET
+                    last_seen_at = excluded.last_seen_at,
+                    started_at = CASE
+                        WHEN keypad_interactions.started_at = ''
+                        THEN excluded.started_at
+                        ELSE keypad_interactions.started_at
+                    END,
+                    completed_at = CASE
+                        WHEN excluded.status IN ('accepted','confirmed','failed',
+                                                 'no_ready_ack','verification_mismatch',
+                                                 'stale_session','connection_lost_after_send',
+                                                 'rejected')
+                        THEN excluded.last_seen_at
+                        ELSE keypad_interactions.completed_at
+                    END,
+                    actor_id = CASE
+                        WHEN excluded.actor_id <> '' THEN excluded.actor_id
+                        ELSE keypad_interactions.actor_id
+                    END,
+                    actor_name = CASE
+                        WHEN excluded.actor_name <> '' THEN excluded.actor_name
+                        ELSE keypad_interactions.actor_name
+                    END,
+                    partition_number = excluded.partition_number,
+                    source = excluded.source,
+                    action = excluded.action,
+                    command_sequence = CASE
+                        WHEN excluded.command_sequence <> ''
+                        THEN excluded.command_sequence
+                        ELSE keypad_interactions.command_sequence
+                    END,
+                    operands_json = CASE
+                        WHEN excluded.operands_json <> '{}'
+                        THEN excluded.operands_json
+                        ELSE keypad_interactions.operands_json
+                    END,
+                    last_request_id = CASE
+                        WHEN excluded.last_request_id <> ''
+                        THEN excluded.last_request_id
+                        ELSE keypad_interactions.last_request_id
+                    END,
+                    status = excluded.status,
+                    ok = excluded.ok
+                """,
+                (
+                    interaction_id,
+                    started_at,
+                    observed_at,
+                    observed_at if status in {
+                        "accepted",
+                        "confirmed",
+                        "failed",
+                        "no_ready_ack",
+                        "verification_mismatch",
+                        "stale_session",
+                        "connection_lost_after_send",
+                        "rejected",
+                    } else "",
+                    actor_id,
+                    actor_name,
+                    partition,
+                    source,
+                    action,
+                    command_sequence,
+                    operands_json,
+                    request_id,
+                    status,
+                    1 if ok else 0,
+                ),
+            )
+        self.prune()
+
+    @staticmethod
+    def _audit_text(value: str, limit: int) -> str:
+        return "".join(character for character in str(value) if character.isprintable())[:limit]
+
+    @classmethod
+    def _audit_operands(cls, operands: dict[str, Any] | None) -> str:
+        if not isinstance(operands, dict):
+            return "{}"
+        normalized = dict(operands)
+        if "zone" in normalized:
+            zone = normalized["zone"]
+            if isinstance(zone, int) and 0 <= zone <= 999:
+                normalized["zone"] = f"{zone:03d}"
+            elif isinstance(zone, str) and zone.isdigit() and len(zone) <= 3:
+                normalized["zone"] = f"{int(zone):03d}"
+            else:
+                normalized.pop("zone")
+        try:
+            encoded = json.dumps(
+                normalized,
+                ensure_ascii=True,
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+        except (TypeError, ValueError):
+            return "{}"
+        return encoded if len(encoded) <= 512 else "{}"
 
     def update_descriptor(self, zone: int, descriptor: str) -> int:
         if not descriptor:

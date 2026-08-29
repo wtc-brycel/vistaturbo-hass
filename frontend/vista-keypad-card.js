@@ -1,4 +1,5 @@
-const VISTA_KEYPAD_CARD_VERSION = "0.3.22";
+const VISTA_KEYPAD_CARD_VERSION = "0.3.24";
+const KEYPAD_FRAME_MAX_KEYS = 5;
 
 const MODEL_ALIASES = {
   "6160cr2": "6160cr2",
@@ -122,8 +123,23 @@ function escapeHtml(value) {
 function safeCssColor(value, fallback = "") {
   if (typeof value !== "string") return fallback;
   const text = value.trim();
-  if (!text || /[;{}]/.test(text)) return fallback;
-  return text;
+  const named = new Set([
+    "black", "silver", "gray", "white", "maroon", "red", "purple", "fuchsia",
+    "green", "lime", "olive", "yellow", "navy", "blue", "teal", "aqua",
+    "orange", "transparent", "rebeccapurple",
+  ]);
+  const number = "(?:\\d{1,3}%?|(?:0|1)?\\.\\d+)";
+  const alpha = "(?:0|1|0?\\.\\d+|1(?:\\.0+)?)";
+  const rgb = new RegExp(
+    `^rgba?\\(\\s*${number}\\s*,\\s*${number}\\s*,\\s*${number}(?:\\s*,\\s*${alpha})?\\s*\\)$`,
+    "i",
+  );
+  const hsl = /^hsla?\(\s*-?\d+(?:\.\d+)?(?:deg)?\s*,\s*\d{1,3}%\s*,\s*\d{1,3}%(?:\s*,\s*(?:0|1|0?\.\d+|1(?:\.0+)?))?\s*\)$/i;
+  const hex = /^#[0-9a-f]{3,4}(?:[0-9a-f]{2})?$/i;
+  if (named.has(text.toLowerCase()) || hex.test(text) || rgb.test(text) || hsl.test(text)) {
+    return text;
+  }
+  return fallback;
 }
 
 function editorEntityOptions(hass, currentValue = "", domains = null, allowEmpty = false) {
@@ -136,24 +152,21 @@ function editorEntityOptions(hass, currentValue = "", domains = null, allowEmpty
     return !allowedDomains || allowedDomains.has(domain);
   });
 
-  if (current && !entityIds.includes(current)) entityIds.push(current);
-  entityIds.sort((left, right) => {
-    const leftName = String(states[left]?.attributes?.friendly_name ?? left);
-    const rightName = String(states[right]?.attributes?.friendly_name ?? right);
-    return leftName.localeCompare(rightName) || left.localeCompare(right);
-  });
-
-  const emptyOption = allowEmpty
-    ? `<option value="" ${current ? "" : "selected"}>None</option>`
-    : current ? "" : '<option value="" selected disabled>Select an entity</option>';
-  const options = entityIds.map((entityId) => {
+  // Bound the candidate IDs before touching friendly-name metadata. This
+  // keeps editor work proportional to the small suggestion list even when HA
+  // exposes thousands of unrelated entities.
+  entityIds.sort((left, right) => left.localeCompare(right));
+  const bounded = entityIds.slice(0, 100);
+  if (current && !bounded.includes(current)) bounded.unshift(current);
+  if (allowEmpty) bounded.unshift("");
+  return bounded.map((entityId) => {
+    if (!entityId) return '<option value="" label="None"></option>';
     const friendlyName = String(states[entityId]?.attributes?.friendly_name ?? "").trim();
     const label = friendlyName && friendlyName !== entityId
       ? `${friendlyName} (${entityId})`
       : entityId;
-    return `<option value="${escapeHtml(entityId)}" ${entityId === current ? "selected" : ""}>${escapeHtml(label)}</option>`;
+    return `<option value="${escapeHtml(entityId)}" label="${escapeHtml(label)}"></option>`;
   }).join("");
-  return `${emptyOption}${options}`;
 }
 
 /*
@@ -505,7 +518,7 @@ class VistaKeypadCardEditor extends HTMLElement {
       .field{display:grid;gap:5px;min-width:0}
       .field.full{grid-column:1/-1}
       label,.label{font-size:12px;color:var(--secondary-text-color)}
-      input[type=text],input[type=number],select{width:100%;min-height:40px;padding:7px 9px;border:1px solid var(--divider-color,#aaa);border-radius:7px;background:var(--card-background-color,#fff);color:var(--primary-text-color,#111);font:inherit}
+      input[type=text],input[type=search],input[type=number],select{width:100%;min-height:40px;padding:7px 9px;border:1px solid var(--divider-color,#aaa);border-radius:7px;background:var(--card-background-color,#fff);color:var(--primary-text-color,#111);font:inherit}
       input[type=range]{width:100%}
       .toggle{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:34px}
       .toggle input{width:20px;height:20px}
@@ -520,7 +533,7 @@ class VistaKeypadCardEditor extends HTMLElement {
       <section class="section">
         <h3>Keypad</h3>
         <div class="grid">
-          <div class="field full"><label for="entity">Keypad entity</label><select id="entity" data-top="entity">${keypadEntityOptions}</select></div>
+          <div class="field full"><label for="entity">Keypad entity</label><input id="entity" data-top="entity" type="search" list="keypad-entity-list" autocomplete="off" value="${escapeHtml(this._config.entity ?? "")}" placeholder="Search sensor entities"><datalist id="keypad-entity-list">${keypadEntityOptions}</datalist></div>
           <div class="field"><label for="model">Style</label><select id="model" data-top="model">${this._option("6160cr2", "6160CR-2", model)}${this._option("6160", "6160", model)}${this._option("firstalert", "First Alert", model)}</select></div>
           <div class="field"><label for="layout">Layout</label><select id="layout" data-top="layout">${this._option("auto", "Auto", layout)}${this._option("physical", "Physical", layout)}${this._option("compact", "Compact", layout)}</select></div>
           <div class="field full"><label for="title">Title</label><input id="title" data-top="title" type="text" value="${escapeHtml(this._config.title ?? "")}" placeholder="Optional"></div>
@@ -551,8 +564,8 @@ class VistaKeypadCardEditor extends HTMLElement {
           <div class="toggle"><span class="label">Supervisory</span><input data-sound="supervisory" type="checkbox" ${checked(sound.supervisory !== false)}></div>
           <div class="field"><label>Key chirp volume</label><div class="range-row"><input data-sound="volume" data-number="1" type="range" min="0" max="0.20" step="0.005" value="${escapeHtml(sound.volume)}"><span class="value">${Number(sound.volume).toFixed(3)}</span></div></div>
           <div class="field"><label>Alarm volume</label><div class="range-row"><input data-sound="alarm_volume" data-number="1" type="range" min="0" max="0.20" step="0.005" value="${escapeHtml(sound.alarm_volume)}"><span class="value">${Number(sound.alarm_volume).toFixed(3)}</span></div></div>
-          <div class="field"><label>Burglary entity override</label><select data-sound="alarm_entity">${alarmEntityOptions}</select></div>
-          <div class="field"><label>Auxiliary entity override</label><select data-sound="aux_entity">${auxEntityOptions}</select></div>
+          <div class="field"><label for="alarm-entity">Burglary entity override</label><input id="alarm-entity" data-sound="alarm_entity" type="search" list="alarm-entity-list" autocomplete="off" value="${escapeHtml(sound.alarm_entity ?? "")}" placeholder="Optional"><datalist id="alarm-entity-list">${alarmEntityOptions}</datalist></div>
+          <div class="field"><label for="aux-entity">Auxiliary entity override</label><input id="aux-entity" data-sound="aux_entity" type="search" list="aux-entity-list" autocomplete="off" value="${escapeHtml(sound.aux_entity ?? "")}" placeholder="Optional"><datalist id="aux-entity-list">${auxEntityOptions}</datalist></div>
         </div>
         <div class="note">The bridge-native <code>sound_mode</code> remains preferred. Entity overrides are only for installations that need an alternate Home Assistant source.</div>
       </section>
@@ -619,14 +632,21 @@ class VistaKeypadCard extends HTMLElement {
     this._haptics = new VistaKeypadHaptics();
     this._feedbackSnapshot = null;
     this._audioUnlockHandler = null;
+    this._pendingKeys = "";
+    this._keySequenceSend = Promise.resolve();
+    this._lifecycleGeneration = 0;
+    this._interactionId = null;
+    this._pendingInteraction = null;
   }
 
   connectedCallback() {
+    this._lifecycleGeneration += 1;
     this._installThemeListener();
     this._syncAudioUnlockListener();
   }
 
   disconnectedCallback() {
+    this._lifecycleGeneration += 1;
     this._resizeObserver?.disconnect();
     this._resizeObserver = null;
     if (this._resizeFrame) {
@@ -643,6 +663,9 @@ class VistaKeypadCard extends HTMLElement {
     this._themeMedia = null;
     this._themeMediaHandler = null;
     clearTimeout(this._pressTimer);
+    this._pendingKeys = "";
+    this._interactionId = null;
+    this._pendingInteraction = null;
     this._removeAudioUnlockListener();
     this._audio.stopAll();
     this._haptics.stop();
@@ -988,11 +1011,10 @@ class VistaKeypadCard extends HTMLElement {
   _displayState() {
     const state = this._entityState(this._config?.entity);
 
-    if (!state) {
-      return {
+    const unavailableDisplay = (line2) => ({
         available: false,
-        line1: exactLine("VISTA TURBO"),
-        line2: exactLine("ENTITY MISSING"),
+        line1: exactLine("VISTA OFFLINE"),
+        line2: exactLine(line2),
         ready: false,
         armed: false,
         trouble: false,
@@ -1017,11 +1039,13 @@ class VistaKeypadCard extends HTMLElement {
           silenced: false,
           supervisory: false,
         },
-      };
-    }
+      });
+
+    if (!state) return unavailableDisplay("ENTITY MISSING");
 
     const a = state.attributes ?? {};
-    const unavailable = ["unknown", "unavailable"].includes(state.state);
+    const unavailable = ["unknown", "unavailable"].includes(String(state.state ?? "").toLowerCase());
+    if (unavailable) return unavailableDisplay("STATE OFFLINE");
     const indicator = (name, attribute, fallback = null) => {
       if (this._config?.indicators?.[name]) {
         return this._indicatorState(name, fallback);
@@ -1085,7 +1109,7 @@ class VistaKeypadCard extends HTMLElement {
     return { text: fallbackText, background: "", color: "" };
   }
 
-  _functionKey(index, model, compact = false) {
+  _functionKey(index, model, compact = false, disabled = false) {
     const profile = MODEL_PROFILES[model];
     const fallbackText = compact
       ? profile?.compactFunctionKeys?.[index] ?? DEFAULT_FUNCTION_KEYS[model][index]
@@ -1096,28 +1120,28 @@ class VistaKeypadCard extends HTMLElement {
       def.color ? `--key-custom-color:${def.color}` : "",
     ].filter(Boolean).join(";");
 
-    return `<button class="physical-key function-key" data-key="${FUNCTION_IDS[index].toUpperCase()}" style="${escapeHtml(style)}" aria-label="${escapeHtml(def.text || FUNCTION_IDS[index].toUpperCase())}">
+    return `<button class="physical-key function-key" data-key="${FUNCTION_IDS[index].toUpperCase()}" ${disabled ? "disabled" : ""} style="${escapeHtml(style)}" aria-label="${escapeHtml(def.text || FUNCTION_IDS[index].toUpperCase())}">
       <span class="function-label">${escapeHtml(def.text)}</span>
     </button>`;
   }
 
-  _numberKey(key, legend) {
-    return `<button class="physical-key number-key" data-key="${escapeHtml(key)}" aria-label="${escapeHtml(`${key} ${legend}`.trim())}">
+  _numberKey(key, legend, disabled = false) {
+    return `<button class="physical-key number-key" data-key="${escapeHtml(key)}" ${disabled ? "disabled" : ""} aria-label="${escapeHtml(`${key} ${legend}`.trim())}">
       <span class="number-main">${escapeHtml(key)}</span>
       ${legend ? `<span class="number-legend">${escapeHtml(legend)}</span>` : ""}
     </button>`;
   }
 
-  _controls(model, compact = false) {
+  _controls(model, compact = false, disabled = false) {
     const functions = FUNCTION_IDS.map(
-      (_, i) => `<div class="grid-slot function-slot slot-r${i + 1}">${this._functionKey(i, model, compact)}</div>`
+      (_, i) => `<div class="grid-slot function-slot slot-r${i + 1}">${this._functionKey(i, model, compact, disabled)}</div>`
     ).join("");
 
     const numberKeys = MODEL_PROFILES[model]?.numberKeys ?? NUMBER_KEYS;
     const numeric = numberKeys.map(([key, legend], i) => {
       const row = Math.floor(i / 3) + 1;
       const col = (i % 3) + 2;
-      return `<div class="grid-slot numeric-slot slot-r${row} slot-c${col}">${this._numberKey(key, legend)}</div>`;
+      return `<div class="grid-slot numeric-slot slot-r${row} slot-c${col}">${this._numberKey(key, legend, disabled)}</div>`;
     }).join("");
 
     return `<div class="key-grid">${functions}${numeric}</div>`;
@@ -1199,12 +1223,12 @@ class VistaKeypadCard extends HTMLElement {
     </div>`;
   }
 
-  _firstAlertControls(portrait = false) {
+  _firstAlertControls(portrait = false, disabled = false) {
     const functions = FUNCTION_IDS.map(
-      (_, i) => `<div class="fa-function-slot">${this._functionKey(i, "firstalert", true)}</div>`
+      (_, i) => `<div class="fa-function-slot">${this._functionKey(i, "firstalert", true, disabled)}</div>`
     ).join("");
     const numeric = FIRST_ALERT_NUMBER_KEYS.map(
-      ([key, legend]) => `<div class="fa-number-slot">${this._numberKey(key, legend)}</div>`
+      ([key, legend]) => `<div class="fa-number-slot">${this._numberKey(key, legend, disabled)}</div>`
     ).join("");
     return `<div class="fa-control-layout ${portrait ? "fa-controls-portrait" : "fa-controls-wide"}">
       <div class="fa-function-bank">${functions}</div>
@@ -1225,7 +1249,7 @@ class VistaKeypadCard extends HTMLElement {
           data-lit="${display.backlight && display.available ? "1" : "0"}"></canvas>
       </div>
       ${this._firstAlertStatus(display)}
-      ${this._firstAlertControls(portrait)}
+      ${this._firstAlertControls(portrait, !display.available)}
       <div class="fa-brand" aria-hidden="true">FIRST ALERT STYLE</div>
     </div>`;
   }
@@ -1243,7 +1267,7 @@ class VistaKeypadCard extends HTMLElement {
           data-lit="${display.backlight && display.available ? "1" : "0"}"></canvas>
       </div>
       ${this._compactStatus(model, display)}
-      <div class="compact-controls">${this._controls(model, true)}</div>
+      <div class="compact-controls">${this._controls(model, true, !display.available)}</div>
     </div>`;
   }
 
@@ -1269,7 +1293,7 @@ class VistaKeypadCard extends HTMLElement {
       </div>
 
       ${isCR2 ? this._statusCR2(display) : this._status6160(display)}
-      <div class="controls-well">${this._controls(model)}</div>
+      <div class="controls-well">${this._controls(model, false, !display.available)}</div>
     </div>`;
   }
 
@@ -2377,6 +2401,37 @@ class VistaKeypadCard extends HTMLElement {
 
       .read-only-note.show { opacity:1; }
 
+      .keypad-transaction-controls {
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        gap:8px;
+        width:min(100%,940px);
+      }
+
+      .keypad-complete {
+        min-width:82px;
+        min-height:34px;
+        padding:6px 14px;
+        border:1px solid var(--divider-color);
+        border-radius:7px;
+        background:var(--primary-color);
+        color:var(--text-primary-color,#fff);
+        font:700 12px/1 sans-serif;
+        cursor:pointer;
+        touch-action:manipulation;
+      }
+
+      .keypad-complete:disabled {
+        opacity:.45;
+        cursor:not-allowed;
+      }
+
+      .keypad-transaction-help {
+        color:var(--secondary-text-color);
+        font:11px/1.3 sans-serif;
+      }
+
       @media(max-width:650px) {
         .wrap { gap:4px; }
       }
@@ -2510,6 +2565,13 @@ class VistaKeypadCard extends HTMLElement {
 
     const display = this._displayState();
     const layoutClass = `layout-mode-${this._config.layout ?? "auto"}`;
+    const controlNote = display.available
+      ? "Keypad control is not enabled."
+      : "Panel state is unavailable; keypad controls are disabled.";
+    const keypadControlEnabled = this._config.read_only === false
+      && display.available
+      && display.controlEnabled
+      && Boolean(display.commandTopic);
     this.shadowRoot.innerHTML = `<style>${this._styles()}</style><ha-card><div class="wrap">
       ${this._config.title ? `<div class="card-title">${escapeHtml(this._config.title)}</div>` : ""}
       <div class="layout-host ${layoutClass}">
@@ -2517,7 +2579,11 @@ class VistaKeypadCard extends HTMLElement {
         <div class="layout-physical-view">${this._renderPhysical(this._config.model, display)}</div>
         <div class="layout-compact-view">${this._renderCompact(this._config.model, display)}</div>
       </div>
-      <div class="read-only-note" id="read-only-note">Keypad control is not enabled.</div>
+      <div class="keypad-transaction-controls">
+        <button id="keypad-complete" class="keypad-complete" type="button" ${keypadControlEnabled && this._pendingKeys ? "" : "disabled"} aria-label="Send keypad command">SEND</button>
+        <span class="keypad-transaction-help">Press SEND to finish the command</span>
+      </div>
+      <div class="read-only-note" id="read-only-note">${escapeHtml(controlNote)}</div>
     </div></ha-card>`;
 
     requestAnimationFrame(() => {
@@ -2532,6 +2598,10 @@ class VistaKeypadCard extends HTMLElement {
       await this._audio.unlock().catch(() => false);
       this._syncAudioUnlockListener();
       this._updateAudioFlag();
+    });
+
+    this.shadowRoot.getElementById("keypad-complete")?.addEventListener("click", () => {
+      this._completeKeySequence();
     });
 
     this.shadowRoot.querySelectorAll("button[data-key]").forEach((button) => {
@@ -2557,7 +2627,7 @@ class VistaKeypadCard extends HTMLElement {
     this._pressTimer = setTimeout(() => note.classList.remove("show"), 1600);
   }
 
-  async _handleKey(button) {
+  _handleKey(button) {
     const key = button?.dataset?.key;
     if (!key) return;
 
@@ -2585,27 +2655,102 @@ class VistaKeypadCard extends HTMLElement {
       return;
     }
 
-    try {
-      await this._hass.callService("mqtt", "publish", {
-        topic: display.commandTopic,
-        payload: key,
-        qos: 0,
-        retain: false,
-      });
-    } catch (_) {
-      this._showControlNote("Keypad command could not be published.");
+    this._pendingKeys += key;
+    if (!this._interactionId) {
+      this._interactionId = typeof globalThis.crypto?.randomUUID === "function"
+        ? globalThis.crypto.randomUUID()
+        : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+    }
+    if (!this._pendingInteraction) {
+      this._pendingInteraction = {
+        transaction_id: this._interactionId,
+        partition: Number(String(display.commandTopic).match(/\/keypad\/([1-8])\/command$/)?.[1] ?? 0),
+        source: "ha_frontend",
+        actor_id: typeof this._hass?.user?.id === "string" ? this._hass.user.id.slice(0, 128) : "",
+        actor_name: typeof (this._hass?.user?.name ?? this._hass?.user?.display_name) === "string"
+          ? (this._hass.user.name ?? this._hass.user.display_name).slice(0, 128)
+          : "",
+        action: "keypad_sequence",
+      };
+    }
+    this._updateCompletionButton();
+    if (this._pendingKeys.length > KEYPAD_FRAME_MAX_KEYS) this._flushKeySequence(false);
+  }
+
+  _updateCompletionButton() {
+    const button = this.shadowRoot?.getElementById("keypad-complete");
+    if (!button) return;
+    const display = this._displayState();
+    button.disabled = !(
+      this._config.read_only === false
+      && display.available
+      && display.controlEnabled
+      && display.commandTopic
+      && this._pendingKeys
+    );
+  }
+
+  _completeKeySequence() {
+    if (!this._pendingKeys) {
+      this._showControlNote("Enter a keypad command before pressing SEND.");
       return;
     }
+    this._flushKeySequence(true);
+  }
 
-    this.dispatchEvent(new CustomEvent("vista-keypad-key", {
-      bubbles: true,
-      composed: true,
-      detail: {
-        action: "keypress",
-        entity: this._config.entity,
-        model: this._config.model,
-      },
-    }));
+  _flushKeySequence(complete = false) {
+    const sequence = complete
+      ? this._pendingKeys
+      : this._pendingKeys.slice(0, KEYPAD_FRAME_MAX_KEYS);
+    if (!sequence) return;
+    this._pendingKeys = this._pendingKeys.slice(sequence.length);
+    const interaction = this._pendingInteraction ?? {
+      transaction_id: null,
+      partition: 0,
+      source: "ha_frontend",
+      actor_id: "",
+      actor_name: "",
+      action: "keypad_sequence",
+    };
+    if (complete) {
+      this._pendingInteraction = null;
+      this._interactionId = null;
+    }
+    this._updateCompletionButton();
+    const lifecycleGeneration = this._lifecycleGeneration;
+
+    this._keySequenceSend = this._keySequenceSend.then(async () => {
+      if (lifecycleGeneration !== this._lifecycleGeneration) return;
+      const display = this._displayState();
+      if (!display.available || !display.controlEnabled || !display.commandTopic) {
+        this._showControlNote("Panel state is unavailable; keypad command was not sent.");
+        return;
+      }
+      try {
+        await this._hass.callService("mqtt", "publish", {
+          topic: display.commandTopic,
+          payload: JSON.stringify({ keys: sequence, ...interaction, complete }),
+          qos: 1,
+          retain: false,
+        });
+        if (lifecycleGeneration !== this._lifecycleGeneration) return;
+      } catch (_) {
+        this._showControlNote("Keypad command could not be published.");
+        return;
+      }
+
+      this.dispatchEvent(new CustomEvent("vista-keypad-key", {
+        bubbles: true,
+        composed: true,
+        detail: {
+          action: "keypress",
+          entity: this._config.entity,
+          model: this._config.model,
+        },
+      }));
+    }).catch(() => {
+      this._showControlNote("Keypad command could not be published.");
+    });
   }
 }
 
@@ -2660,7 +2805,7 @@ class VistaEventLogCardEditor extends HTMLElement {
       *{box-sizing:border-box}.editor{display:grid;gap:12px}.field{display:grid;gap:5px}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
       label,.label{font-size:12px;color:var(--secondary-text-color)}input,select{width:100%;min-height:40px;padding:7px 9px;border:1px solid var(--divider-color,#aaa);border-radius:7px;background:var(--card-background-color,#fff);color:var(--primary-text-color,#111);font:inherit}.toggle{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:36px}.toggle input{width:20px;height:20px}@media(max-width:520px){.grid{grid-template-columns:1fr}}
     </style><div class="editor">
-      <div class="field"><label>Event journal entity</label><select data-field="entity">${entityOptions}</select></div>
+      <div class="field"><label for="event-entity">Event journal entity</label><input id="event-entity" data-field="entity" type="search" list="event-entity-list" autocomplete="off" value="${escapeHtml(this._config.entity ?? "")}" placeholder="Search sensor entities"><datalist id="event-entity-list">${entityOptions}</datalist></div>
       <div class="field"><label>Title</label><input data-field="title" value="${escapeHtml(this._config.title ?? "")}" placeholder="VISTA Event Journal"></div>
       <div class="grid">
         <div class="field"><label>Rows</label><input data-field="rows" data-number="1" type="number" min="1" max="100" value="${rows}"></div>

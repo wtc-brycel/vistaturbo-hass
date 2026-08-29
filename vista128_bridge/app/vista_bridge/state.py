@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from .event_codes import (
+    ALARM_TYPE_START_CODES,
     ALARM_RESTORE_TO_START,
     ALARM_START_CODES,
     AUXILIARY_RESTORE_TO_START,
@@ -163,6 +164,48 @@ class PartitionState:
     def auxiliary_alarm_active(self) -> bool:
         return bool(self.active_auxiliary_tokens)
 
+    @property
+    def silent_alarm_active(self) -> bool:
+        return self._has_event_alarm_type("silent")
+
+    @property
+    def duress_alarm_active(self) -> bool:
+        return self._has_event_alarm_type("duress")
+
+    @property
+    def has_active_alarm(self) -> bool:
+        return bool(
+            self.active_alarm_tokens
+            or self.active_fire_tokens
+            or self.active_supervisory_tokens
+            or self.active_burglary_tokens
+            or self.active_auxiliary_tokens
+        )
+
+    def alarm_types(self) -> set[str]:
+        types: set[str] = set()
+        for token in self.active_alarm_tokens:
+            code = token.rsplit(":", 1)[-1]
+            for alarm_type, codes in ALARM_TYPE_START_CODES.items():
+                if code in codes:
+                    types.add(alarm_type)
+        if self.active_fire_tokens:
+            types.add("fire")
+        if self.active_supervisory_tokens:
+            types.add("supervisory")
+        if self.active_burglary_tokens:
+            types.add("burglary")
+        if self.active_auxiliary_tokens:
+            types.add("auxiliary")
+        return types
+
+    def _has_event_alarm_type(self, alarm_type: str) -> bool:
+        codes = ALARM_TYPE_START_CODES[alarm_type]
+        return any(
+            token.rsplit(":", 1)[-1] in codes
+            for token in self.active_alarm_tokens
+        )
+
     def attributes(self) -> dict:
         return {
             "partition": self.partition,
@@ -175,6 +218,8 @@ class PartitionState:
             "supervisory_active": self.supervisory_active,
             "burglary_alarm_active": self.burglary_alarm_active,
             "auxiliary_alarm_active": self.auxiliary_alarm_active,
+            "silent_alarm_active": self.silent_alarm_active,
+            "duress_alarm_active": self.duress_alarm_active,
         }
 
 
@@ -202,6 +247,7 @@ class KeypadState:
     led_status: int = 0
     raw_display: bytes = b""
     updated_at: str = ""
+    session_fresh: bool = False
 
     @property
     def ha_state(self) -> str:
@@ -250,8 +296,8 @@ class KeypadState:
             "chime_at": self.chime_at,
             "backlight": self.backlight,
             "led_status": f"{self.led_status:X}",
-            "raw_display_hex": self.raw_display.hex(" "),
             "updated_at": self.updated_at,
+            "session_fresh": self.session_fresh,
         }
 
 
@@ -263,25 +309,92 @@ class VistaState:
         self.keypads = {partition: KeypadState(partition) for partition in range(1, 9)}
         self.zones = {zone: ZoneState(zone) for zone in range(1, 129)}
         self.last_event: SystemEvent | None = None
+        self.active_global_alarm_tokens: set[str] = set()
         self.ac_power: bool | None = None
         self.system_battery_low: bool | None = None
         self.active_global_trouble_tokens: set[str] = set()
         self.arming_initialized = False
         self.zone_status_initialized = False
         self.zone_partition_initialized = False
+        self.zone_status_blocks_seen: set[int] = set()
+        self.zone_partition_blocks_seen: set[int] = set()
+        self.security_snapshot_complete = False
+        self.session_generation = 0
+
+    @property
+    def zone_snapshot_complete(self) -> bool:
+        return self.zone_status_blocks_seen >= {1, 2} and self.zone_partition_blocks_seen >= {1, 2}
+
+    @property
+    def alarm_knowledge_complete(self) -> bool:
+        return self.security_snapshot_complete
+
+    @property
+    def keypad_alarm_snapshot_complete(self) -> bool:
+        return all(
+            keypad.session_fresh
+            and all(
+                getattr(keypad, attribute) is not None
+                for attribute in (
+                    "fire_alarm_led",
+                    "supervisory_led",
+                    "burglary_alarm_led",
+                    "auxiliary_alarm_led",
+                )
+            )
+            for keypad in self.keypads.values()
+        )
+
+    def begin_query_snapshot(self, query_name: str) -> None:
+        """Invalidate only the session snapshot portion affected by a query."""
+        if query_name == "arming_status":
+            self.arming_initialized = False
+        elif query_name == "zone_status":
+            self.zone_status_initialized = False
+            self.zone_status_blocks_seen.clear()
+        elif query_name == "zone_partition":
+            self.zone_partition_initialized = False
+            self.zone_partition_blocks_seen.clear()
+        if query_name in {"arming_status", "zone_status", "zone_partition"}:
+            self.security_snapshot_complete = False
+
+    def mark_authoritative_snapshot(self) -> bool:
+        """Mark the panel security view authoritative only after every source is fresh."""
+        self.security_snapshot_complete = bool(
+            self.arming_initialized
+            and self.zone_snapshot_complete
+            and self.keypad_alarm_snapshot_complete
+        )
+        return self.security_snapshot_complete
 
     def reset_connection_derived_annunciators(self) -> None:
+        self.session_generation += 1
+        self.arming_initialized = False
+        self.zone_status_initialized = False
+        self.zone_partition_initialized = False
+        self.zone_status_blocks_seen.clear()
+        self.zone_partition_blocks_seen.clear()
+        self.security_snapshot_complete = False
+        self.active_global_alarm_tokens.clear()
         self.ac_power = None
         self.system_battery_low = None
         self.active_global_trouble_tokens.clear()
         for partition in self.partitions.values():
+            # These are all session-derived annunciators. Configuration such as
+            # partition numbering and zone descriptors remains durable, while
+            # current alarm evidence is invalidated until the panel is queried
+            # again.
+            partition.active_alarm_tokens.clear()
             partition.active_fire_tokens.clear()
             partition.active_supervisory_tokens.clear()
             partition.active_burglary_tokens.clear()
             partition.active_auxiliary_tokens.clear()
             partition.active_trouble_tokens.clear()
             partition.fire_silenced = False
+        for zone in self.zones.values():
+            zone.alarm = False
         for keypad in self.keypads.values():
+            keypad.session_fresh = False
             keypad.power_led = None
             keypad.fire_alarm_led = None
             keypad.silenced_led = None
@@ -320,17 +433,6 @@ class VistaState:
             if partition.raw_mode != raw_mode:
                 partition.raw_mode = raw_mode
                 changed.add(partition_number)
-            if raw_mode in {"D", "N"}:
-                if partition.active_alarm_tokens:
-                    partition.active_alarm_tokens.clear()
-                    changed.add(partition_number)
-                if partition.active_burglary_tokens:
-                    partition.active_burglary_tokens.clear()
-                    changed.add(partition_number)
-                keypad = self.keypads.get(partition_number)
-                if keypad is not None and keypad.burglary_alarm_led is True:
-                    keypad.burglary_alarm_led = False
-                    changed.add(partition_number)
         return changed
 
     def apply_keypad_display(
@@ -345,6 +447,7 @@ class VistaState:
             return None
 
         keypad.initialized = True
+        keypad.session_fresh = True
         keypad.line_1 = report.line_1
         keypad.line_2 = report.line_2
         keypad.backlight = report.backlight
@@ -408,6 +511,7 @@ class VistaState:
 
     def apply_zone_status(self, report: ZoneStatusReport) -> set[int]:
         self.zone_status_initialized = True
+        self.zone_status_blocks_seen.add(report.block)
         changed: set[int] = set()
         start_zone = (report.block - 1) * 64 + 1
         for offset, raw_status in enumerate(report.statuses):
@@ -429,6 +533,7 @@ class VistaState:
 
     def apply_zone_partition(self, report: ZonePartitionReport) -> set[int]:
         self.zone_partition_initialized = True
+        self.zone_partition_blocks_seen.add(report.block)
         changed: set[int] = set()
         start_zone = (report.block - 1) * 64 + 1
         for offset, partition_number in enumerate(report.partitions):
@@ -478,35 +583,34 @@ class VistaState:
         changed_partitions: set[int],
     ) -> None:
         partition = self.partitions.get(event.partition)
-        if partition is None:
-            return
 
         new_mode = ARM_EVENT_MODES.get(event.code)
         if event.code in DISARM_EVENT_CODES:
             new_mode = "D"
-        if new_mode is not None and partition.raw_mode != new_mode:
+        if partition is not None and new_mode is not None and partition.raw_mode != new_mode:
             partition.raw_mode = new_mode
-            self.arming_initialized = True
             changed_partitions.add(event.partition)
 
         self._apply_alarm_event(event, partition, changed_zones, changed_partitions)
-        if event.code in DISARM_EVENT_CODES and partition.active_alarm_tokens:
+        if partition is not None and event.code in DISARM_EVENT_CODES and partition.active_alarm_tokens:
             partition.active_alarm_tokens.clear()
             changed_partitions.add(event.partition)
 
     def _apply_alarm_event(
         self,
         event: SystemEvent,
-        partition: PartitionState,
+        partition: PartitionState | None,
         changed_zones: set[int],
         changed_partitions: set[int],
     ) -> None:
         token_prefix = f"{event.zone:03d}:"
+        tokens = partition.active_alarm_tokens if partition is not None else self.active_global_alarm_tokens
         if event.code in ALARM_START_CODES:
             token = token_prefix + event.code
-            if token not in partition.active_alarm_tokens:
-                partition.active_alarm_tokens.add(token)
-                changed_partitions.add(event.partition)
+            if token not in tokens:
+                tokens.add(token)
+                if partition is not None:
+                    changed_partitions.add(event.partition)
             self._set_event_zone_alarm(event.zone, True, changed_zones)
             return
 
@@ -514,9 +618,10 @@ class VistaState:
         if start_code is None:
             return
         token = token_prefix + start_code
-        if token in partition.active_alarm_tokens:
-            partition.active_alarm_tokens.remove(token)
-            changed_partitions.add(event.partition)
+        if token in tokens:
+            tokens.remove(token)
+            if partition is not None:
+                changed_partitions.add(event.partition)
         self._set_event_zone_alarm(event.zone, False, changed_zones)
 
     def _apply_cr2_annunciator_event(
@@ -713,3 +818,66 @@ class VistaState:
                 partition.active_alarm_tokens.add(token)
             else:
                 partition.active_alarm_tokens.discard(token)
+
+    def panel_alarm_states(self) -> dict:
+        """Return per-type and aggregate alarm values with fail-safe availability."""
+        active_partitions_by_type = {
+            alarm_type: set() for alarm_type in ALARM_TYPE_START_CODES
+        }
+        active_partitions: set[int] = set()
+
+        for partition_number, partition in self.partitions.items():
+            types = partition.alarm_types()
+            if partition.has_active_alarm:
+                active_partitions.add(partition_number)
+            for alarm_type in types:
+                active_partitions_by_type[alarm_type].add(partition_number)
+
+        if self.active_global_alarm_tokens:
+            active_partitions.add(0)
+            for token in self.active_global_alarm_tokens:
+                code = token.rsplit(":", 1)[-1]
+                for alarm_type, codes in ALARM_TYPE_START_CODES.items():
+                    if code in codes:
+                        active_partitions_by_type[alarm_type].add(0)
+
+        for zone in self.zones.values():
+            if zone.alarm:
+                active_partitions.add(zone.partition or 0)
+
+        for partition_number, keypad in self.keypads.items():
+            keypad_types = {
+                alarm_type
+                for alarm_type, value in (
+                    ("fire", keypad.fire_alarm_led),
+                    ("burglary", keypad.burglary_alarm_led),
+                    ("auxiliary", keypad.auxiliary_alarm_led),
+                )
+                if value is True
+            }
+            if keypad_types:
+                active_partitions.add(partition_number)
+                for alarm_type in keypad_types:
+                    active_partitions_by_type[alarm_type].add(partition_number)
+
+        values = {
+            alarm_type: (
+                True
+                if partitions
+                else False
+                if self.alarm_knowledge_complete
+                else None
+            )
+            for alarm_type, partitions in active_partitions_by_type.items()
+        }
+        aggregate = True if active_partitions else (False if self.alarm_knowledge_complete else None)
+        return {
+            "values": values,
+            "active_partitions_by_type": {
+                alarm_type: sorted(partitions)
+                for alarm_type, partitions in active_partitions_by_type.items()
+            },
+            "active_partitions": sorted(active_partitions),
+            "active": aggregate,
+            "complete": self.alarm_knowledge_complete,
+        }

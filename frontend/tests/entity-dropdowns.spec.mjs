@@ -53,7 +53,7 @@ async function loadEditors(page) {
   });
 }
 
-test("visual editors render entity selections as dropdowns", async ({ page }) => {
+test("visual editors render bounded searchable entity inputs", async ({ page }) => {
   await loadEditors(page);
 
   const state = await page.evaluate(() => {
@@ -72,18 +72,18 @@ test("visual editors render entity selections as dropdowns", async ({ page }) =>
       keypadValue: keypadEntity.value,
       alarmValue: alarmEntity.value,
       eventValue: eventEntity.value,
-      keypadOptions: [...keypadEntity.options].map((option) => option.value),
-      alarmOptions: [...alarmEntity.options].map((option) => option.value),
-      auxOptions: [...auxEntity.options].map((option) => option.value),
-      eventOptions: [...eventEntity.options].map((option) => option.value),
-      keypadText: keypadEntity.textContent,
+      keypadOptions: [...keypad.querySelector("#keypad-entity-list").options].map((option) => option.value),
+      alarmOptions: [...keypad.querySelector("#alarm-entity-list").options].map((option) => option.value),
+      auxOptions: [...keypad.querySelector("#aux-entity-list").options].map((option) => option.value),
+      eventOptions: [...eventEditor.querySelector("#event-entity-list").options].map((option) => option.value),
+      keypadLabel: keypad.querySelector("#keypad-entity-list option[value='sensor.vista_partition_1_keypad']")?.label,
     };
   });
 
-  expect(state.keypadTag).toBe("SELECT");
-  expect(state.alarmTag).toBe("SELECT");
-  expect(state.auxTag).toBe("SELECT");
-  expect(state.eventTag).toBe("SELECT");
+  expect(state.keypadTag).toBe("INPUT");
+  expect(state.alarmTag).toBe("INPUT");
+  expect(state.auxTag).toBe("INPUT");
+  expect(state.eventTag).toBe("INPUT");
   expect(state.keypadValue).toBe("sensor.vista_partition_1_keypad");
   expect(state.alarmValue).toBe("binary_sensor.house_alarm");
   expect(state.eventValue).toBe("sensor.vista_event_journal");
@@ -96,19 +96,19 @@ test("visual editors render entity selections as dropdowns", async ({ page }) =>
   expect(state.alarmOptions).toContain("binary_sensor.house_alarm");
   expect(state.alarmOptions).toContain("switch.aux_alarm");
   expect(state.auxOptions[0]).toBe("");
-  expect(state.keypadText).toContain("VISTA Partition 1 Keypad (sensor.vista_partition_1_keypad)");
+  expect(state.keypadLabel).toContain("VISTA Partition 1 Keypad (sensor.vista_partition_1_keypad)");
 });
 
-test("changing an entity dropdown emits the selected entity id", async ({ page }) => {
+test("changing a searchable entity input emits the selected entity id", async ({ page }) => {
   await loadEditors(page);
 
   const result = await page.evaluate(() => {
     const keypad = document.getElementById("keypad-editor");
     return new Promise((resolve) => {
       keypad.addEventListener("config-changed", (event) => resolve(event.detail.config), { once: true });
-      const select = keypad.shadowRoot.querySelector('[data-top="entity"]');
-      select.value = "sensor.other_sensor";
-      select.dispatchEvent(new Event("change", { bubbles: true }));
+      const input = keypad.shadowRoot.querySelector('[data-top="entity"]');
+      input.value = "sensor.other_sensor";
+      input.dispatchEvent(new Event("change", { bubbles: true }));
     });
   });
 

@@ -104,6 +104,24 @@ AUXILIARY_RESTORE_TO_START = {
 }
 AUXILIARY_START_CODES = set(AUXILIARY_RESTORE_TO_START.values())
 
+SILENT_RESTORE_TO_START = {"22": "21"}
+SILENT_START_CODES = set(SILENT_RESTORE_TO_START.values())
+
+DURESS_RESTORE_TO_START = {"12": "11"}
+DURESS_START_CODES = set(DURESS_RESTORE_TO_START.values())
+
+# These are the alarm classes represented by the event stream.  Keep this
+# separate from keypad annunciator fields: silent and duress alarms are valid
+# alarm evidence even though they do not have a normal keypad speaker LED.
+ALARM_TYPE_START_CODES = {
+    "fire": {"01", "C1", "D1"},
+    "burglary": BURGLARY_START_CODES,
+    "auxiliary": AUXILIARY_START_CODES,
+    "silent": SILENT_START_CODES,
+    "duress": DURESS_START_CODES,
+    "supervisory": {"43", "E1"},
+}
+
 ZONE_EVENT_TRANSITIONS: dict[str, tuple[str, bool]] = {
     "03": ("trouble", True),
     "04": ("trouble", False),

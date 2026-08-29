@@ -13,6 +13,7 @@ from vista_bridge.printer import (  # noqa: E402
     format_event_receipt,
     panel_clock_offset_seconds,
 )
+from vista_bridge.printer_store import PrintQueueStore  # noqa: E402
 from vista_bridge.protocol import parse_system_event  # noqa: E402
 
 
@@ -38,6 +39,23 @@ class ReceiptFormattingTests(unittest.TestCase):
         self.assertNotIn("\x00", text)
         for line in text.splitlines():
             self.assertLessEqual(len(line), 32)
+
+    def test_terminal_print_spool_history_is_bounded_without_deleting_pending_jobs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = PrintQueueStore(
+                os.path.join(tmp, "queue.db"), max_terminal_rows=2
+            )
+            pending = store.create("2026-08-15T05:27:38+00:00", "B7")
+            for _ in range(3):
+                job_id = store.create("2026-08-15T05:27:38+00:00", "B7")
+                store.mark_failed(job_id, "test")
+            terminal_count = store._db.execute(
+                "SELECT COUNT(*) FROM print_jobs WHERE status != 'pending'"
+            ).fetchone()[0]
+            self.assertEqual(terminal_count, 2)
+            self.assertIsNotNone(store.next_pending())
+            self.assertEqual(store.next_pending().job_id, pending)
+            store.close()
 
     def test_panel_clock_offset_uses_configured_timezone(self):
         offset = panel_clock_offset_seconds(
