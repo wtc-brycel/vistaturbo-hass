@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.6-rc.12
+
+- Add a canonical `VistaCommand` model, deterministic keypad parser, bounded compiler, and native-preferred execution planner for semantic Home Assistant/MQTT control.
+- Add `control/execute` structured MQTT commands while preserving legacy partition and logical keypad topics.
+- Keep exact logical keypad sequences and four-digit PINs in the bounded local administrator audit, with normalized command type, operands, mechanism, confidence, and verification fields; never expose them in normal telemetry or logs.
+- Preserve keypad ownership across every explicit `complete:false` segment and serialize fallback segments through the existing panel transaction coordinator.
+- Bump the bridge to RC12 and the card to `0.3.25`.
+
 ## 0.2.6-rc.11
 
 - Coordinate the #16, #17, and #18 security hardening pass across alarm state, synchronization, MQTT, persistence, and the keypad card; #19 is intentionally separate.

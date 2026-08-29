@@ -11,6 +11,35 @@ from typing import Any
 from .protocol import SystemEvent
 
 
+AUDIT_TERMINAL_STATUSES = frozenset(
+    {
+        "accepted",
+        "confirmed",
+        "failed",
+        "no_ready_ack",
+        "verification_mismatch",
+        "stale_session",
+        "connection_lost_after_send",
+        "request_expired",
+        "transaction_unavailable",
+        "control_queue_full",
+        "control_queue_requeue_failed",
+        "automation_interface_unavailable",
+        "control_disabled",
+        "command_control_disabled",
+        "keypad_control_disabled",
+        "native_alarm_control_disabled",
+        "panel_offline",
+        "panel_session_reset",
+        "keypad_sequence_too_long",
+        "timeout",
+        "unknown",
+        "unverified",
+        "rejected",
+    }
+)
+
+
 @dataclass(frozen=True)
 class EventJournalStats:
     count: int
@@ -100,6 +129,11 @@ class EventStore:
                     command_sequence TEXT NOT NULL DEFAULT '',
                     operands_json TEXT NOT NULL DEFAULT '{}',
                     last_request_id TEXT NOT NULL DEFAULT '',
+                    command_type TEXT NOT NULL DEFAULT '',
+                    code TEXT NOT NULL DEFAULT '',
+                    execution_mechanism TEXT NOT NULL DEFAULT '',
+                    confidence TEXT NOT NULL DEFAULT '',
+                    verification TEXT NOT NULL DEFAULT '',
                     status TEXT NOT NULL,
                     ok INTEGER NOT NULL DEFAULT 0
                 );
@@ -131,7 +165,18 @@ class EventStore:
                     "ALTER TABLE keypad_interactions ADD COLUMN "
                     "last_request_id TEXT NOT NULL DEFAULT ''"
                 )
-            db.execute("PRAGMA user_version=2")
+            for name, definition in (
+                ("command_type", "TEXT NOT NULL DEFAULT ''"),
+                ("code", "TEXT NOT NULL DEFAULT ''"),
+                ("execution_mechanism", "TEXT NOT NULL DEFAULT ''"),
+                ("confidence", "TEXT NOT NULL DEFAULT ''"),
+                ("verification", "TEXT NOT NULL DEFAULT ''"),
+            ):
+                if name not in columns:
+                    db.execute(
+                        f"ALTER TABLE keypad_interactions ADD COLUMN {name} {definition}"
+                    )
+            db.execute("PRAGMA user_version=3")
 
     @staticmethod
     def fingerprint(event: SystemEvent) -> str:
@@ -311,6 +356,12 @@ class EventStore:
         status: str,
         ok: bool,
         request_id: str | int = "",
+        command_type: str = "",
+        code: str = "",
+        execution_mechanism: str = "",
+        confidence: str = "",
+        verification: str = "",
+        logical_command_sequence: str = "",
     ) -> None:
         """Upsert one bounded audit row for one logical interaction.
 
@@ -327,14 +378,25 @@ class EventStore:
         actor_name = self._audit_text(actor_name, 128)
         source = self._audit_text(source, 32) or "mqtt"
         action = self._audit_text(action, 64) or "keypad_sequence"
-        command_sequence = self._audit_text(command_sequence, 64)
+        command_sequence = self._audit_text(command_sequence, 256)
+        logical_command_sequence = self._audit_text(logical_command_sequence, 256)
+        if logical_command_sequence:
+            command_sequence = logical_command_sequence
         operands_json = self._audit_operands(operands)
         request_id = self._audit_text(request_id, 96)
+        command_type = self._audit_text(command_type, 64)
+        code = self._audit_text(code, 4)
+        if code and (len(code) != 4 or not code.isdigit()):
+            code = ""
+        execution_mechanism = self._audit_text(execution_mechanism, 32)
+        confidence = self._audit_text(confidence, 16)
+        verification = self._audit_text(verification, 64)
         status = self._audit_text(status, 64) or "unknown"
         partition = max(0, min(8, int(partition)))
         with closing(self._connect()) as db, db:
             existing = db.execute(
-                "SELECT command_sequence, action, last_request_id "
+                "SELECT command_sequence, action, last_request_id, command_type, "
+                "code, execution_mechanism, confidence, verification "
                 "FROM keypad_interactions "
                 "WHERE interaction_id = ?",
                 (interaction_id,),
@@ -342,7 +404,7 @@ class EventStore:
             same_request = bool(
                 existing is not None and request_id and existing[2] == request_id
             )
-            if same_request and existing[0]:
+            if same_request and existing[0] and not logical_command_sequence:
                 # A queued -> terminal update for the same segment must keep
                 # the already accumulated logical sequence intact.
                 command_sequence = existing[0]
@@ -359,14 +421,16 @@ class EventStore:
                 # in one row, while an identical terminal update remains an
                 # idempotent upsert.
                 combined = f"{existing[0]}{command_sequence}"
-                command_sequence = combined[:64]
+                command_sequence = combined[:256]
             db.execute(
                 """
                 INSERT INTO keypad_interactions (
                     interaction_id, started_at, last_seen_at, completed_at,
                     actor_id, actor_name, partition_number, source, action,
-                    command_sequence, operands_json, last_request_id, status, ok
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    command_sequence, operands_json, last_request_id,
+                    command_type, code, execution_mechanism, confidence,
+                    verification, status, ok
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(interaction_id) DO UPDATE SET
                     last_seen_at = excluded.last_seen_at,
                     started_at = CASE
@@ -375,10 +439,19 @@ class EventStore:
                         ELSE keypad_interactions.started_at
                     END,
                     completed_at = CASE
-                        WHEN excluded.status IN ('accepted','confirmed','failed',
-                                                 'no_ready_ack','verification_mismatch',
-                                                 'stale_session','connection_lost_after_send',
-                                                 'rejected')
+                        WHEN excluded.status IN (
+                            'accepted','confirmed','failed','no_ready_ack',
+                            'verification_mismatch','stale_session',
+                            'connection_lost_after_send','request_expired',
+                            'transaction_unavailable','control_queue_full',
+                            'control_queue_requeue_failed',
+                            'automation_interface_unavailable','control_disabled',
+                            'command_control_disabled','keypad_control_disabled',
+                            'native_alarm_control_disabled','panel_offline',
+                            'panel_session_reset','keypad_sequence_too_long',
+                            'timeout','unknown','unverified',
+                            'rejected'
+                        )
                         THEN excluded.last_seen_at
                         ELSE keypad_interactions.completed_at
                     END,
@@ -408,6 +481,27 @@ class EventStore:
                         THEN excluded.last_request_id
                         ELSE keypad_interactions.last_request_id
                     END,
+                    command_type = CASE
+                        WHEN excluded.command_type <> '' THEN excluded.command_type
+                        ELSE keypad_interactions.command_type
+                    END,
+                    code = CASE
+                        WHEN excluded.code <> '' THEN excluded.code
+                        ELSE keypad_interactions.code
+                    END,
+                    execution_mechanism = CASE
+                        WHEN excluded.execution_mechanism <> ''
+                        THEN excluded.execution_mechanism
+                        ELSE keypad_interactions.execution_mechanism
+                    END,
+                    confidence = CASE
+                        WHEN excluded.confidence <> '' THEN excluded.confidence
+                        ELSE keypad_interactions.confidence
+                    END,
+                    verification = CASE
+                        WHEN excluded.verification <> '' THEN excluded.verification
+                        ELSE keypad_interactions.verification
+                    END,
                     status = excluded.status,
                     ok = excluded.ok
                 """,
@@ -415,16 +509,7 @@ class EventStore:
                     interaction_id,
                     started_at,
                     observed_at,
-                    observed_at if status in {
-                        "accepted",
-                        "confirmed",
-                        "failed",
-                        "no_ready_ack",
-                        "verification_mismatch",
-                        "stale_session",
-                        "connection_lost_after_send",
-                        "rejected",
-                    } else "",
+                    observed_at if status in AUDIT_TERMINAL_STATUSES else "",
                     actor_id,
                     actor_name,
                     partition,
@@ -433,6 +518,11 @@ class EventStore:
                     command_sequence,
                     operands_json,
                     request_id,
+                    command_type,
+                    code,
+                    execution_mechanism,
+                    confidence,
+                    verification,
                     status,
                     1 if ok else 0,
                 ),
@@ -456,6 +546,25 @@ class EventStore:
                 normalized["zone"] = f"{int(zone):03d}"
             else:
                 normalized.pop("zone")
+        if "zones" in normalized:
+            zones = normalized["zones"]
+            if isinstance(zones, (list, tuple)) and zones:
+                normalized_zones = []
+                for zone in zones:
+                    if isinstance(zone, bool):
+                        normalized_zones = []
+                        break
+                    if isinstance(zone, int) and 1 <= zone <= 999:
+                        normalized_zones.append(f"{zone:03d}")
+                    elif isinstance(zone, str) and zone.isdigit() and len(zone) == 3 and int(zone) > 0:
+                        normalized_zones.append(zone)
+                    else:
+                        normalized_zones = []
+                        break
+                if normalized_zones and len(set(normalized_zones)) == len(normalized_zones):
+                    normalized["zones"] = normalized_zones
+                else:
+                    normalized.pop("zones")
         try:
             encoded = json.dumps(
                 normalized,

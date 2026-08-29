@@ -236,6 +236,83 @@ class EventStoreTests(unittest.TestCase):
             self.assertIn("operands_json", columns)
             self.assertIn("last_request_id", columns)
 
+    def test_keypad_audit_schema_adds_semantic_command_fields(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "events.sqlite3")
+            store = EventStore(path)
+            store.record_keypad_interaction(
+                interaction_id="semantic-1",
+                observed_at="2026-08-20T10:00:00+00:00",
+                partition=1,
+                source="ha_frontend",
+                action="zone_bypass",
+                command_sequence="12346001027**",
+                command_type="zone_bypass",
+                code="1234",
+                operands={"zones": ["001", "027"]},
+                execution_mechanism="keypad",
+                confidence="high",
+                verification="acknowledged",
+                status="accepted",
+                ok=True,
+            )
+            with sqlite3.connect(path) as db:
+                row = db.execute(
+                    "SELECT command_type, code, command_sequence, operands_json, "
+                    "execution_mechanism, confidence, verification "
+                    "FROM keypad_interactions WHERE interaction_id='semantic-1'"
+                ).fetchone()
+                columns = {
+                    column[1]
+                    for column in db.execute("PRAGMA table_info(keypad_interactions)")
+                }
+            self.assertEqual(
+                row,
+                (
+                    "zone_bypass",
+                    "1234",
+                    "12346001027**",
+                    '{"zones":["001","027"]}',
+                    "keypad",
+                    "high",
+                    "acknowledged",
+                ),
+            )
+            for name in (
+                "command_type",
+                "code",
+                "execution_mechanism",
+                "confidence",
+                "verification",
+            ):
+                self.assertIn(name, columns)
+
+    def test_keypad_audit_final_full_sequence_replaces_segment_for_same_request(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "events.sqlite3")
+            store = EventStore(path)
+            for sequence, status in (("12346", "queued"), ("12346", "accepted")):
+                store.record_keypad_interaction(
+                    interaction_id="semantic-2",
+                    observed_at=f"2026-08-20T10:00:0{len(status)}+00:00",
+                    partition=1,
+                    source="ha_frontend",
+                    action="keypad_sequence",
+                    command_sequence=sequence,
+                    logical_command_sequence=(
+                        "12346001027104**" if status == "accepted" else ""
+                    ),
+                    request_id="segment-1",
+                    status=status,
+                    ok=status == "accepted",
+                )
+            with sqlite3.connect(path) as db:
+                row = db.execute(
+                    "SELECT command_sequence FROM keypad_interactions "
+                    "WHERE interaction_id='semantic-2'"
+                ).fetchone()
+            self.assertEqual(row, ("12346001027104**",))
+
     def test_keypad_audit_retention_is_bounded(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = EventStore(os.path.join(tmp, "events.sqlite3"), max_age_days=30, max_rows=2)

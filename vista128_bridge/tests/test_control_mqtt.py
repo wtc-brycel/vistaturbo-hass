@@ -206,6 +206,64 @@ class ControlMqttTests(unittest.TestCase):
         self.assertIn("vista128/keypad/+/command", subscriptions)
         self.assertIn("vista128/partition/+/command", subscriptions)
 
+    def test_semantic_command_topic_parses_and_preserves_actor_metadata(self):
+        received = []
+        settings = make_settings(control_enabled=True, keypad_control_enabled=True)
+        publisher = MqttPublisher(
+            settings,
+            lambda data: (True, "queued"),
+            None,
+            None,
+            None,
+            lambda command, metadata: (received.append((command, metadata)) or (True, "queued")),
+        )
+        publisher._on_connect(publisher._client, None, None, 0, None)
+        subscriptions = {topic for topic, _ in publisher._client.subscriptions}
+        self.assertIn("vista128/control/execute", subscriptions)
+        publisher._on_message(
+            None,
+            None,
+            types.SimpleNamespace(
+                topic="vista128/control/execute",
+                payload=(
+                    b'{"action":"bypass_zones","partition":1,"code":"1234",'
+                    b'"zones":[1,27],"source":"ha_frontend",'
+                    b'"actor_id":"alice","actor_name":"Alice",'
+                    b'"transaction_id":"interaction-1"}'
+                ),
+                retain=False,
+            ),
+        )
+        command, metadata = received[0]
+        self.assertEqual(command.command_type, "zone_bypass")
+        self.assertEqual(command.operands["zones"], ["001", "027"])
+        self.assertEqual(metadata["interaction_id"], "interaction-1")
+        self.assertEqual(metadata["actor_name"], "Alice")
+        self.assertEqual(metadata["code"], "1234")
+
+    def test_semantic_command_rejection_does_not_echo_pin(self):
+        settings = make_settings(control_enabled=True, keypad_control_enabled=True)
+        publisher = MqttPublisher(
+            settings,
+            lambda data: (True, "queued"),
+            None,
+            None,
+            None,
+            lambda command, metadata: (False, "control_queue_full"),
+        )
+        publisher._on_message(
+            None,
+            None,
+            types.SimpleNamespace(
+                topic="vista128/control/execute",
+                payload=b'{"action":"disarm","partition":1,"code":"1234"}',
+                retain=False,
+            ),
+        )
+        published = [str(item[1]) for item in publisher._client.published]
+        self.assertTrue(any("control_queue_full" in item for item in published))
+        self.assertFalse(any("1234" in item for item in published))
+
     def test_privileged_raw_topic_is_separate_and_explicitly_opt_in(self):
         settings = replace(make_settings(), debug_raw_tx_enabled=True)
         sent = []

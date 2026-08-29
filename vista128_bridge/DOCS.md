@@ -196,6 +196,50 @@ When `keypad_audit_enabled` is true, each accepted or rejected logical command i
 
 Every control transaction shares the same serialization lock used by state synchronization. The bridge requires the panel to have reported `08XN` Communication On / Automation Interface Available. `08XF` immediately blocks new control and discards queued requests. `08OK` is treated as flow-control acknowledgement only. Native arm/disarm is followed by a fresh arming-status query and compared with the requested mode.
 
+## Semantic VISTA commands
+
+RC12 adds one structured MQTT command endpoint without creating a separate Home Assistant entity for every panel feature:
+
+```text
+vista128/control/execute
+```
+
+Example semantic arm request:
+
+```json
+{
+  "action": "arm",
+  "mode": "away",
+  "partition": 1,
+  "code": "1234",
+  "transaction_id": "ha-script-42",
+  "source": "ha_frontend",
+  "actor_id": "user-id",
+  "actor_name": "Home Admin"
+}
+```
+
+Example deterministic keypad-emulated bypass request:
+
+```json
+{
+  "action": "bypass_zones",
+  "partition": 1,
+  "code": "1234",
+  "zones": [1, 27, 104]
+}
+```
+
+The command model validates every PIN as exactly four digits and every keypad zone operand as exactly three digits, zero-padded (`001`, `027`, `104`). The execution planner prefers the native VISTA automation command for core arm/disarm operations when that gate is enabled. Other supported deterministic operations use the existing owned keypad transaction path and are segmented into no more than five KS strokes per panel frame. Interactive, model-specific, and unknown operations retain their exact logical keypad sequence and are marked with an explicit confidence/classification rather than being guessed.
+
+The existing `keypad/<partition>/command` topic remains compatible for logical keypad segments and the legacy one-byte form remains accepted. A semantic `keypad_command` request is the bounded escape hatch for an obscure logical sequence; it is not raw serial TX. Raw serial TX remains separately privileged at `admin/raw_tx`, is disabled by default, and must not be granted by normal control ACLs.
+
+The local SQLite `keypad_interactions` audit remains one row per interaction ID. It stores the exact completed logical sequence, including PINs where entered, actor attribution, timestamps, partition, source, normalized command type, structured operands, execution mechanism, parser confidence, status, and verification. This journal is administrator-only local data, is not published to MQTT or HA Recorder, and is bounded by `event_history_max_age_days` and `event_history_max_rows`. Existing databases migrate automatically by adding nullable-equivalent empty columns with safe defaults. Actor metadata identifies the caller but is not an authorization boundary; MQTT credentials and broker ACLs still provide access control.
+
+The result topic exposes only non-sensitive command metadata and outcome. It does not include `code`, `raw_sequence`, or the exact logical sequence. `queued` and acknowledged are distinct from verified. Native arm/disarm commands are verified against a fresh arming-status response; keypad menu commands report panel acknowledgement when no authoritative semantic verification exists.
+
+The parser recognizes normal arm/disarm, stay and instant subtypes, maximum, walk test, chime, bypass and group-bypass forms, GOTO, user-management entry, quick-arm and quick-exit forms, the documented `#nn` namespace, `#70` output operands, `#77` action codes, programming entry/exit, global partition selection when the panel context identifies it, and configuration-dependent A-D function/macro forms. Bare four-digit code entry, prompts, held-key distinctions, and model-specific extensions without sufficient panel context remain ambiguous or unclassified. Programming-mode numeric data is kept in a programming state rather than reinterpreted as normal arm/disarm input.
+
 Keypad strokes do not perform a blocking KD query after every digit. After `08OK`, the normal keypad-refresh path is requested so rapid code entry stays responsive while the display catches up asynchronously.
 
 `control_response_timeout_seconds` defaults to 3. `control_verify_delay_ms` defaults to 400 and applies to native alarm verification.

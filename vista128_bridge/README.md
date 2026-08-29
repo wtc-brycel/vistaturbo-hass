@@ -2,7 +2,7 @@
 
 Home Assistant App for the native RS-232 automation interface on Honeywell/Resideo VISTA Turbo alarm panels.
 
-> **Release candidate status:** 0.2.6-rc.11 is the coordinated security-hardening release. It has been developed and tested for monitoring on a VISTA-128BPT; experimental control gates default to off.
+> **Release candidate status:** 0.2.6-rc.12 adds the canonical VISTA command model and semantic control path. It has been developed and tested for monitoring on a VISTA-128BPT; experimental control gates default to off.
 
 ## What you get in Home Assistant
 
@@ -72,7 +72,7 @@ Home Assistant MQTT Discovery uses `availability_mode: all` for partitions, keyp
 
 ## Dashboard keypad card
 
-The matching Lovelace card ships with this release as `vista-keypad-card.js`. Card `0.3.24` includes the keypad models, bounded searchable visual editors, explicit offline rendering, explicit keypad transaction completion, and the responsive `custom:vista-event-log-card` for the SQLite-backed recent event window.
+The matching Lovelace card ships with this release as `vista-keypad-card.js`. Card `0.3.25` includes the keypad models, bounded searchable visual editors, explicit offline rendering, explicit keypad transaction completion, and the responsive `custom:vista-event-log-card` for the SQLite-backed recent event window.
 
 `layout: auto` is the default. The card keeps the approved physical facsimile above 520 px card-container width and switches to a touchscreen-first compact layout at 520 px and below. `layout: physical` and `layout: compact` can force either presentation.
 
@@ -165,3 +165,5 @@ native_alarm_control_enabled: true
 Keypad input uses typed VISTA `KS` frames for `0-9`, `*`, and `#`. The A-D visual function keys are intentionally not transmitted as literal letters because the VISTA protocol uses those data characters for other keystroke encodings.
 
 Native Home Assistant alarm control uses the documented VISTA arm/disarm command families and Home Assistant MQTT remote-code validation. The bounded local keypad-interaction audit stores the exact completed logical command sequence, including a four-digit PIN when it is part of the command, together with actor and outcome metadata. It is not exposed as an HA entity or MQTT telemetry, and control TX payloads remain redacted from bridge logging.
+
+RC12 also exposes a compact semantic command topic at `vista128/control/execute`. It accepts actions such as `arm`, `disarm`, `bypass_zones`, `quick_bypass`, `group_bypass`, `chime`, `goto_partition`, `output_control`, `system_command`, and `keypad_command`. Core arm/disarm requests use native VISTA automation when enabled; unsupported deterministic commands compile to the existing serialized keypad path. PINs must be exactly four digits and zones are normalized to exactly three digits. Semantic results omit PINs and raw sequences. The local bounded administrator audit stores one complete logical interaction with its exact sequence and normalized fields. See `DOCS.md` for the request schema and parser limitations.

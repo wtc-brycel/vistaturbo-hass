@@ -8,6 +8,10 @@ from unittest.mock import patch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "app"))
 
 from vista_bridge.config import ControlSettings  # noqa: E402
+from vista_bridge.command_model import (  # noqa: E402
+    command_from_request,
+    compile_keypad_segments,
+)
 from vista_bridge.control import VistaControlCoordinator  # noqa: E402
 from vista_bridge.state import VistaState  # noqa: E402
 
@@ -156,6 +160,49 @@ class ControlCoordinatorTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertNotIn("1234", self.results[-1])
 
+    async def test_semantic_arm_prefers_native_command_and_audits_semantics(self):
+        control = self.make_control(keypad=True, alarm=True)
+        control.set_automation_available(True)
+        self.state.partitions[1].raw_mode = "A"
+        command = command_from_request(
+            {
+                "action": "arm",
+                "mode": "away",
+                "partition": 1,
+                "code": "1234",
+            },
+            source="ha_frontend",
+            actor_id="alice-id",
+            actor_name="Alice",
+            interaction_id="interaction-native",
+        )
+        self.assertEqual(control.enqueue_command(command), (True, "queued"))
+        await control.process_next()
+        self.assertTrue(self.sent[0][0].endswith(b"\r\n"))
+        self.assertIn(b"AA00123410000000", self.sent[0][0])
+        self.assertEqual(self.results[-1]["execution_mechanism"], "native")
+        self.assertEqual(self.audit[-1]["command_type"], "arm_away")
+        self.assertEqual(self.audit[-1]["code"], "1234")
+
+    async def test_semantic_keypad_fallback_keeps_one_transaction_for_all_segments(self):
+        control = self.make_control(keypad=True, alarm=False)
+        control.set_automation_available(True)
+        command = command_from_request(
+            {
+                "action": "bypass_zones",
+                "partition": 1,
+                "code": "1234",
+                "zones": [1, 27, 104],
+            },
+            interaction_id="interaction-keypad",
+        )
+        self.assertEqual(control.enqueue_command(command), (True, "queued"))
+        await control.process_next()
+        self.assertEqual(len(self.sent), len(compile_keypad_segments(command)))
+        self.assertEqual(self.results[-1]["execution_mechanism"], "keypad")
+        self.assertEqual(self.audit[-1]["command_sequence"], "12346001027104**")
+        self.assertEqual(self.audit[-1]["command_type"], "zone_bypass")
+
     async def test_keypad_reservation_rejects_interleaved_interaction_until_complete(self):
         control = self.make_control()
         control.set_automation_available(True)
@@ -231,6 +278,33 @@ class ControlCoordinatorTests(unittest.IsolatedAsyncioTestCase):
                 ),
                 (False, "keypad_interaction_busy"),
             )
+
+    async def test_unrelated_native_control_waits_for_open_keypad_interaction(self):
+        control = self.make_control(keypad=True, alarm=True)
+        control.set_automation_available(True)
+        self.assertEqual(
+            control.enqueue_keypad(
+                1,
+                "12",
+                {"interaction_id": "interaction-a", "interaction_complete": False},
+            ),
+            (True, "queued"),
+        )
+        self.assertEqual(control.enqueue_alarm(1, "ARM_AWAY", "1234"), (True, "queued"))
+        self.assertEqual(
+            control.enqueue_keypad(
+                1,
+                "34",
+                {"interaction_id": "interaction-a", "interaction_complete": True},
+            ),
+            (True, "queued"),
+        )
+        await control.process_next()
+        await control.process_next()
+        self.assertIn(b"KS", self.sent[0][0])
+        self.assertIn(b"KS", self.sent[1][0])
+        await control.process_next()
+        self.assertIn(b"AA", self.sent[2][0])
 
     async def test_function_and_panic_tokens_are_not_exposed_by_normal_keypad_control(self):
         control = self.make_control()
