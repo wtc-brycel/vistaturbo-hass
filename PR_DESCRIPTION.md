@@ -68,7 +68,7 @@ The historical workflows had a genuine vulnerable design: branch-controlled patc
 - `cd frontend && npx playwright install --with-deps chromium` — local apt dependency installation was blocked by the managed runner's restricted privilege transitions.
 - `cd frontend && npx playwright install chromium --only-shell` — local browser download timed out; the browser-only fallback could not complete in this environment.
 - `cd frontend && npm run test:render` — the local run could not start because the new browser executable was unavailable after the download failure; the GitHub Actions runner completed all 49 tests successfully.
-- GitHub Actions push run `33259517815` and PR run `33259532639` — `test`, `frontend-render`, and `repository-security` all passed; `frontend-render` reports 49 passed.
+- GitHub Actions push run `33259796496` and PR run `33259797682` — `test`, `frontend-render`, and `repository-security` all passed; `frontend-render` reports 49 passed.
 - Docker build validation — Docker is not installed in this environment. The GHCR `3.24` manifest was inspected and confirmed to contain Linux `amd64` and `arm64` entries with the pinned digest.
 - `git diff --check` — passed locally.
 
