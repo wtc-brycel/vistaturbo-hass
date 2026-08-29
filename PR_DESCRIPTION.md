@@ -83,7 +83,7 @@ Normal MQTT control ACLs should grant only the required `keypad/+/command`, `par
 
 Local commands and results:
 
-- `cd vista128_bridge && python -m unittest discover -s tests -v`: **172 tests passed**.
+- `cd vista128_bridge && python -m unittest discover -s tests -v`: **173 tests passed**.
 - `cd vista128_bridge && python -m py_compile app/vista_bridge/*.py tests/*.py`: **passed**.
 - `node --check ../frontend/vista-keypad-card.js`: **passed**.
 - `python scripts/check_repository_security.py`: **passed**.
