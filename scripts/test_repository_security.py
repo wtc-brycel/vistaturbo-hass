@@ -26,7 +26,7 @@ class RepositorySecurityTests(unittest.TestCase):
 
     def test_passes_immutable_read_only_workflow(self):
         self.write_workflow(
-            """permissions:\n  contents: read\njobs:\n  test:\n    steps:\n      - uses: actions/checkout@1111111111111111111111111111111111111111 # v4.2.2\n        with:\n          persist-credentials: false\n"""
+            """permissions:\n  contents: read\njobs:\n  test:\n    steps:\n      - name: Check out\n        uses: actions/checkout@1111111111111111111111111111111111111111 # v4.2.2\n        with:\n          persist-credentials: false\n      - name: Set up Python\n        uses: actions/setup-python@2222222222222222222222222222222222222222 # v5.6.0\n"""
         )
         self.assertEqual(check_repository(self.root), [])
 

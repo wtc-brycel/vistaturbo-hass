@@ -15,7 +15,7 @@ if __package__ in {None, ""}:
 from scripts.release_validation import ReleaseValidationError, load_release_metadata
 
 
-ACTION_USE_RE = re.compile(r"^\s*-\s*uses:\s*([^\s#]+)(?:\s+#\s*(.*))?\s*$")
+ACTION_USE_RE = re.compile(r"^\s*(?:-\s*)?uses:\s*([^\s#]+)(?:\s+#\s*(.*))?\s*$")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 CHECKOUT_RE = re.compile(r"actions/checkout@")
 
