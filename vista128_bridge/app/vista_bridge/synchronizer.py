@@ -78,6 +78,7 @@ class VistaSynchronizer:
         self._pending_transaction: PendingTransaction | None = None
         self._session_tainted = False
         self._resync_reason = ""
+        self._recovery_resync_pending = False
         self._startup_complete = False
         self._program_mode = False
         self.failures_total = 0
@@ -107,6 +108,7 @@ class VistaSynchronizer:
         self._pending_transaction = None
         self._session_tainted = False
         self._resync_reason = ""
+        self._recovery_resync_pending = False
         self._startup_complete = False
         self._program_mode = False
 
@@ -153,11 +155,20 @@ class VistaSynchronizer:
             return False
 
     async def run_arming_refresh(self) -> bool:
-        return await self.run_sync(
+        # Verification is a read-only reconciliation of one already-known
+        # dimension. Do not make all HA state unavailable merely because the
+        # verification query is in flight. If verification actually fails, the
+        # arming dimension is no longer trustworthy and becomes unavailable.
+        ok = await self.run_sync(
             (ARMING_STATUS_QUERY,),
             source="control-verify",
             description="post-control arming verification",
+            invalidate_snapshot=False,
         )
+        if not ok:
+            self._invalidate_queries((ARMING_STATUS_QUERY,))
+        self._check_snapshot()
+        return ok
 
     def mark_descriptor_complete(self) -> bool:
         transaction = self._pending_transaction
@@ -230,6 +241,14 @@ class VistaSynchronizer:
 
     def set_program_mode(self, active: bool) -> None:
         self._program_mode = active
+        if (
+            not active
+            and self._recovery_resync_pending
+            and self._startup_complete
+            and self.is_connected()
+        ):
+            self._recovery_resync_pending = False
+            self._resync_requested.set()
 
     def request_full_resync(self, reason: str) -> None:
         if not self.is_connected():
@@ -238,6 +257,17 @@ class VistaSynchronizer:
             return
         self._resync_reason = reason
         self._resync_requested.set()
+
+    def request_recovery_resync(self, reason: str) -> bool:
+        """Queue one full snapshot after detected loss of trustworthy RX state."""
+        if not self.is_connected() or self._session_tainted:
+            return False
+        self._resync_reason = reason
+        if not self._startup_complete or self._program_mode:
+            self._recovery_resync_pending = True
+            return True
+        self._resync_requested.set()
+        return True
 
     def request_keypad_refresh(self, partition: int) -> None:
         if not self.keypad_settings.enabled or not self.is_connected():
@@ -262,6 +292,9 @@ class VistaSynchronizer:
             self.force_reconnect()
             return
         self._check_snapshot()
+        if self._recovery_resync_pending and not self._program_mode:
+            self._recovery_resync_pending = False
+            self._resync_requested.set()
         if self.event_history_enabled and self.event_history_startup_dump_enabled:
             await self.run_event_log_dump()
 
@@ -277,9 +310,16 @@ class VistaSynchronizer:
                 STATE_SYNC_QUERIES,
                 source="periodic",
                 description="periodic VISTA state reconciliation",
+                invalidate_snapshot=False,
             )
             if ok and self.keypad_settings.enabled:
                 await self._refresh_keypads(tuple(range(1, 9)))
+            if not ok:
+                # A routine reconciliation does not create an availability gap
+                # while it is in flight. If it actually fails, however, the
+                # corresponding state is no longer trustworthy and must become
+                # unavailable until reconciliation or reconnect restores it.
+                self._invalidate_queries(STATE_SYNC_QUERIES)
             self._check_snapshot()
             if not ok and self.failures_consecutive >= self.settings.reconnect_after_failures:
                 LOG.warning(
@@ -322,16 +362,26 @@ class VistaSynchronizer:
     async def resync_loop(self) -> None:
         while self.is_connected():
             await self._resync_requested.wait()
-            self._resync_requested.clear()
+            if not self.is_connected():
+                return
+            # Coalesce a burst of recovery requests before issuing the expensive
+            # full snapshot. Requests arriving while the transaction itself is
+            # running remain set and will receive another pass afterward.
+            await asyncio.sleep(0.5)
             if not self.is_connected():
                 return
             reason = self._resync_reason or "panel event"
-            await asyncio.sleep(0.5)
-            await self.run_sync(
+            self._resync_requested.clear()
+            ok = await self.run_sync(
                 STARTUP_QUERIES,
                 source="resync",
                 description=f"full VISTA resynchronization ({reason})",
             )
+            if not ok:
+                LOG.warning("Full VISTA resynchronization failed; reconnecting")
+                self.force_reconnect()
+                return
+            self._check_snapshot()
 
     async def _refresh_keypads(self, partitions: Sequence[int]) -> None:
         if self._program_mode:
@@ -427,6 +477,7 @@ class VistaSynchronizer:
         *,
         source: str,
         description: str,
+        invalidate_snapshot: bool = True,
     ) -> bool:
         if not self.is_connected():
             return False
@@ -439,7 +490,7 @@ class VistaSynchronizer:
                 for query in queries:
                     if not self.is_connected():
                         return False
-                    self._prepare_query(query)
+                    self._prepare_query(query, invalidate_snapshot=invalidate_snapshot)
                     transaction = self._pending_transaction
                     accepted, detail = self.send_query(query.data, source, query.name)
                     if not accepted:
@@ -486,7 +537,12 @@ class VistaSynchronizer:
         LOG.info("%s complete", description)
         return True
 
-    def _prepare_query(self, query: ProtocolQuery) -> None:
+    def _prepare_query(
+        self,
+        query: ProtocolQuery,
+        *,
+        invalidate_snapshot: bool = True,
+    ) -> None:
         expected_message = {
             "arming_status": "arming_status",
             "zone_status": "zone_status",
@@ -499,7 +555,13 @@ class VistaSynchronizer:
             partition=query.partition,
             expected_message=expected_message,
         )
-        if self.on_query_start is not None:
+        if invalidate_snapshot and self.on_query_start is not None:
+            self.on_query_start(query)
+
+    def _invalidate_queries(self, queries: Sequence[ProtocolQuery]) -> None:
+        if self.on_query_start is None:
+            return
+        for query in queries:
             self.on_query_start(query)
 
     async def _wait_for_query(

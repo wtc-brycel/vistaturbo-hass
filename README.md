@@ -19,7 +19,8 @@ Vista Turbo HASS is a local Home Assistant integration for the native RS-232 aut
 - Supports a centralized configurable dashboard chime-zone list
 - Maintains a persistent SQLite event journal from live panel events, with optional historical panel-log import
 - Includes a responsive Home Assistant event-journal card for recent panel history
-- Reconciles panel state periodically in case an event is missed
+- Reconciles arming state periodically while live System Notification events maintain zone changes
+- Uses full Zone Status snapshots only for startup and explicit recovery, not routine polling
 - Optionally prints event receipts through TransPort
 - Fail-safe panel-wide alarm aggregation and explicit state-freshness availability
 - Bounded event retention, control queues, and privileged raw diagnostics
@@ -51,6 +52,14 @@ Development is currently using a **StarTech NETRS2321POE** in raw TCP Server mod
 Serial settings are **9600 baud, 8 data bits, no parity, 1 stop bit, no flow control**.
 
 For VISTA-128BPT wiring, panel programming, protocol details, and the TB4/J9 connection notes, see [`vista128_bridge/DOCS.md`](vista128_bridge/DOCS.md).
+
+## State synchronization
+
+A normal new panel TCP session performs the authoritative startup snapshot: arming status, Zone Status, zone-to-partition mapping, and zone descriptors. Honeywell documents Zone Status as an initial-synchronization request rather than a routine polling command, so the normal periodic reconciliation sends only the arming-status query. Valid unsolicited `nq` System Notification events maintain zone transitions between full snapshots.
+
+A detected invalid panel frame is treated as possible lost state. The bridge immediately marks panel state stale, invalidates the Zone Status portion of the authoritative snapshot, and schedules one debounced full resynchronization. If corruption is detected while startup or programming already owns the panel, recovery is deferred until that operation can safely finish. If the recovery snapshot itself fails, the bridge forces a TCP reconnect so a new session can establish clean state.
+
+`startup_sync_enabled` should remain enabled for normal operation. Disabling startup synchronization intentionally prevents the bridge from establishing its complete authoritative zone/partition snapshot on a new session.
 
 ## Repository and release security
 

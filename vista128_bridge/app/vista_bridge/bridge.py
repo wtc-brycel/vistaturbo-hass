@@ -413,6 +413,7 @@ class VistaBridge:
 
         self._publish_raw_frame(frame, message_type, validation)
         if not validation.valid:
+            self._invalidate_after_rx_corruption()
             return
         if message_type != "keypad_display":
             mark_protocol_message = getattr(
@@ -435,6 +436,19 @@ class VistaBridge:
                 self.mqtt.publish("panel/automation_available", "ON", retain=True, qos=1)
                 self.mqtt.publish("panel/automation_availability_source", "inferred", retain=True, qos=1)
         self.handler.handle(message_type, frame.data, frame.received_at)
+
+    def _invalidate_after_rx_corruption(self) -> None:
+        # A corrupt frame may have been an unsolicited nq transition. Once
+        # routine Zone Status polling is removed, continuing to advertise the
+        # previous snapshot as authoritative could leave a missed zone change
+        # stale indefinitely. Invalidate freshness immediately and recover with
+        # one full snapshot; the synchronizer coalesces bursts and defers safely
+        # when startup/programming already owns the panel.
+        self.state.begin_query_snapshot("zone_status")
+        self.mqtt.publish("panel/state_fresh", "OFF", retain=True, qos=1)
+        self.mqtt.publish_alarm_states(self.state)
+        if self.synchronizer.request_recovery_resync("invalid panel frame"):
+            LOG.warning("Queued full VISTA resynchronization after invalid panel frame")
 
     def _log_invalid_frame(self, validation) -> None:
         expected = (
