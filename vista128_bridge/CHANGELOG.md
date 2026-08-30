@@ -6,6 +6,7 @@
 - Add `control/execute` structured MQTT commands while preserving legacy partition and logical keypad topics.
 - Keep exact logical keypad sequences and four-digit PINs in the bounded local administrator audit, with normalized command type, operands, mechanism, confidence, and verification fields; never expose them in normal telemetry or logs.
 - Preserve keypad ownership across every explicit `complete:false` segment and serialize fallback segments through the existing panel transaction coordinator.
+- Reject raw sequence overrides on ordinary semantic actions, require complete `#70`/`#77` menu flows, and use native execution only when it preserves all command operands.
 - Bump the bridge to RC12 and the card to `0.3.25`.
 
 ## 0.2.6-rc.11

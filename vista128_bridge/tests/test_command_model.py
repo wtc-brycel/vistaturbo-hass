@@ -159,6 +159,153 @@ class CommandModelTests(unittest.TestCase):
         )
         self.assertEqual(compile_keypad_sequence(semantic), "12342135*")
 
+    def test_raw_sequence_cannot_override_semantic_command(self):
+        with self.assertRaisesRegex(CommandValidationError, "explicit keypad or interactive"):
+            command_from_request(
+                {
+                    "action": "bypass_zones",
+                    "partition": 1,
+                    "code": "1234",
+                    "zones": [1],
+                    "sequence": "12341",
+                }
+            )
+
+        direct = VistaCommand(
+            command_type="bypass_zones",
+            partition=1,
+            code="1234",
+            operands={"zones": ["001"]},
+            raw_sequence="12341",
+        )
+        with self.assertRaisesRegex(CommandValidationError, "cannot override"):
+            compile_keypad_sequence(direct)
+
+        with self.assertRaisesRegex(CommandValidationError, "#70 keypad sequence"):
+            compile_keypad_sequence(
+                command_from_request(
+                    {
+                        "action": "keypad_command",
+                        "partition": 1,
+                        "sequence": "1234#70041",
+                    }
+                )
+            )
+
+    def test_native_plan_requires_full_command_semantics(self):
+        global_arm = command_from_request(
+            {
+                "action": "arm_away",
+                "partition": 1,
+                "code": "1234",
+                "operands": {"partitions": [1, 3, 5]},
+            }
+        )
+        global_plan = plan_command(
+            global_arm, native_available=True, keypad_available=True
+        )
+        self.assertEqual(global_plan.mechanism, "keypad")
+        self.assertEqual(global_plan.keypad_sequence, "12342135*")
+
+        subtype = command_from_request(
+            {
+                "action": "arm_home",
+                "partition": 1,
+                "code": "1234",
+                "operands": {"subtype": "1"},
+            }
+        )
+        subtype_plan = plan_command(
+            subtype, native_available=True, keypad_available=True
+        )
+        self.assertEqual(subtype_plan.mechanism, "keypad")
+        self.assertEqual(subtype_plan.keypad_sequence, "123431")
+
+    def test_prompt_commands_require_complete_explicit_interactive_sequences(self):
+        output = command_from_request(
+            {
+                "action": "output_control",
+                "partition": 1,
+                "code": "1234",
+                "device": "04",
+                "state": "on",
+            }
+        )
+        with self.assertRaisesRegex(CommandValidationError, "complete interactive"):
+            plan_command(output, native_available=False, keypad_available=True)
+
+        with self.assertRaisesRegex(CommandValidationError, "explicit interactive"):
+            command_from_request(
+                {
+                    "action": "output_control",
+                    "partition": 1,
+                    "code": "1234",
+                    "device": "04",
+                    "state": "on",
+                    "sequence": "1234#70041*00",
+                }
+            )
+
+        complete_output = command_from_request(
+            {
+                "action": "output_control",
+                "partition": 1,
+                "code": "1234",
+                "device": "04",
+                "state": "on",
+                "interactive": True,
+                "sequence": "1234#70041*00",
+            }
+        )
+        self.assertEqual(
+            compile_keypad_sequence(complete_output), "1234#70041*00"
+        )
+        with self.assertRaisesRegex(CommandValidationError, "one relay action"):
+            compile_keypad_sequence(
+                VistaCommand(
+                    command_type="output_control",
+                    partition=1,
+                    code="1234",
+                    operands={"device": "04", "state": "on"},
+                    raw_sequence="1234#70041*051*00",
+                )
+            )
+
+        instant = command_from_request(
+            {
+                "action": "instant_activation",
+                "partition": 1,
+                "code": "1234",
+                "action_code": "21",
+                "interactive": True,
+                "sequence": "1234#7721*1*1*",
+            }
+        )
+        self.assertEqual(
+            compile_keypad_sequence(instant), "1234#7721*1*1*"
+        )
+        with self.assertRaisesRegex(CommandValidationError, "quit the menu"):
+            compile_keypad_sequence(
+                VistaCommand(
+                    command_type="instant_activation",
+                    partition=1,
+                    code="1234",
+                    operands={"action_code": "21"},
+                    raw_sequence="1234#7721*1",
+                )
+            )
+
+        system = command_from_request(
+            {
+                "action": "system_command",
+                "partition": 1,
+                "code": "1234",
+                "system_command": "#60",
+            }
+        )
+        with self.assertRaisesRegex(CommandValidationError, "complete interactive"):
+            plan_command(system, native_available=False, keypad_available=True)
+
     def test_compile_and_plan_choose_native_or_keypad(self):
         command = command_from_request(
             {"action": "arm", "mode": "away", "partition": 1, "code": "1234"},

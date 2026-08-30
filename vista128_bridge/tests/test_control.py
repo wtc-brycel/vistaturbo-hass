@@ -203,6 +203,43 @@ class ControlCoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.audit[-1]["command_sequence"], "12346001027104**")
         self.assertEqual(self.audit[-1]["command_type"], "zone_bypass")
 
+    async def test_prompt_command_keeps_keypad_owned_until_menu_exit_sequence(self):
+        control = self.make_control(keypad=True, alarm=False)
+        control.set_automation_available(True)
+        command = command_from_request(
+            {
+                "action": "output_control",
+                "partition": 1,
+                "code": "1234",
+                "device": "04",
+                "state": "on",
+                "interactive": True,
+                "sequence": "1234#70041*00",
+            },
+            interaction_id="relay-interaction",
+        )
+        self.assertEqual(control.enqueue_command(command), (True, "queued"))
+        self.assertEqual(
+            control.enqueue_keypad(
+                1,
+                "1",
+                {"interaction_id": "other-interaction"},
+            ),
+            (False, "keypad_interaction_busy"),
+        )
+
+        await control.process_next()
+        self.assertEqual(len(self.sent), len(compile_keypad_segments(command)))
+        self.assertTrue(self.results[-1]["ok"])
+        self.assertEqual(
+            control.enqueue_keypad(
+                1,
+                "1",
+                {"interaction_id": "other-interaction"},
+            ),
+            (True, "queued"),
+        )
+
     async def test_keypad_reservation_rejects_interleaved_interaction_until_complete(self):
         control = self.make_control()
         control.set_automation_available(True)

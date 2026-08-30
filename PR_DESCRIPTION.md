@@ -18,6 +18,12 @@ logical keypad or semantic MQTT request
   -> one bounded audit row per interaction ID
 ```
 
+## Follow-up execution corrections
+
+- Raw keypad sequences are now accepted only on explicit logical-keypad or interactive command paths. Ordinary semantic actions reject a `sequence` override, so their audited meaning cannot diverge from the transmitted operation.
+- Native execution now requires proof that the native one-partition operation represents the complete `VistaCommand`; global partition selections and subtype-bearing commands use keypad fallback.
+- `#70` and `#77` no longer compile as complete commands at their namespace/action prefix. They require the explicit prompt continuation and documented menu-exit sequence, and the existing keypad owner remains held until that complete sequence has been transmitted.
+
 ## Completed acceptance criteria
 
 - Added fixed VISTA invariants: PINs are exactly four digits and semantic keypad zone operands are exactly three zero-padded digits. Zone lists are bounded and duplicate-free.
@@ -83,7 +89,7 @@ Normal MQTT control ACLs should grant only the required `keypad/+/command`, `par
 
 Local commands and results:
 
-- `cd vista128_bridge && python -m unittest discover -s tests -v`: **173 tests passed**.
+- `cd vista128_bridge && python -m unittest discover -s tests -v`: **177 tests passed**.
 - `cd vista128_bridge && python -m py_compile app/vista_bridge/*.py tests/*.py`: **passed**.
 - `node --check ../frontend/vista-keypad-card.js`: **passed**.
 - `python scripts/check_repository_security.py`: **passed**.
@@ -92,6 +98,6 @@ Local commands and results:
 - `cd frontend && npx playwright install --with-deps chromium`: **blocked by the managed container's apt privilege restrictions** (`setgroups/setegid/seteuid` and apt archive permission errors).
 - `cd frontend && npm run test:render`: **49 tests attempted; browser launch was unavailable because Chromium was not installed**, so no frontend assertions executed locally. CI must run the full Chromium suite before merge.
 - `git diff --check`: **passed**.
-- GitHub Actions run **463** on the published head passed all jobs: `test`, `repository-security`, and `frontend-render`; the frontend job completed **49/49 Playwright tests passed**.
+- GitHub Actions runs **463** and **465** on the published head passed all jobs: `test`, `repository-security`, and `frontend-render`; the frontend job completed **49/49 Playwright tests passed**.
 
 The PR is intentionally left open for review and CI; it is not merged here.

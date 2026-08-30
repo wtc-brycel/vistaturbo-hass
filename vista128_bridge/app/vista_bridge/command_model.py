@@ -17,6 +17,30 @@ MAX_OPERAND_ZONES = 64
 KEYPAD_SEQUENCE_RE = re.compile(r"[0-9*#ABCD]+\Z")
 PIN_RE = re.compile(r"[0-9]{4}\Z")
 
+# A raw sequence is an executable capability, not an alternate spelling for
+# every semantic command.  Keep this allow-list narrow so a caller cannot
+# label one operation while transmitting another operation's keypad input.
+RAW_SEQUENCE_COMMAND_TYPES = frozenset(
+    {
+        "keypad_command",
+        "interactive_menu",
+        "programming_session",
+        "access_control",
+        "program_enter",
+        "program_menu_enter",
+        "program_exit",
+        "program_exit_local",
+        "program_field_change",
+        "program_reset",
+        "program_download",
+        # These are prompt-driven semantic operations.  They are allowed to
+        # carry a sequence only after their semantic prefix and terminal menu
+        # exit have been checked below.
+        "output_control",
+        "instant_activation",
+    }
+)
+
 
 class CommandValidationError(ValueError):
     """Raised when a semantic or keypad command is not safe to execute."""
@@ -662,6 +686,8 @@ def command_from_request(
         "home": "arm_home", "night": "arm_night", "instant": "arm_instant",
         "maximum": "arm_maximum", "off": "disarm",
         "keypad": "keypad_command", "raw_keypad": "keypad_command",
+        "raw_logical_keypad": "keypad_command", "logical_keypad": "keypad_command",
+        "interactive_keypad": "interactive_menu",
     }
     action = aliases.get(action, action)
     partition = request.get("partition")
@@ -684,14 +710,25 @@ def command_from_request(
     if code:
         code = validate_pin(code)
     raw_sequence = request.get("sequence", request.get("keys", request.get("raw_sequence", "")))
-    if action == "keypad_command":
+    if raw_sequence in (None, ""):
+        raw_sequence = ""
+    else:
+        if action not in RAW_SEQUENCE_COMMAND_TYPES:
+            raise CommandValidationError(
+                "raw keypad sequence requires an explicit keypad or interactive command"
+            )
         raw_sequence = validate_keypad_sequence(raw_sequence)
         if any(character not in "0123456789*#" for character in raw_sequence):
             raise CommandValidationError(
                 "executable keypad commands support only 0-9, *, and #"
             )
-    elif raw_sequence:
-        raw_sequence = validate_keypad_sequence(raw_sequence)
+        interactive = request.get("interactive", operands.get("interactive", False))
+        if action in {"output_control", "instant_activation"} and interactive is not True:
+            raise CommandValidationError(
+                f"{action} raw sequence requires explicit interactive mode"
+            )
+        if action in {"output_control", "instant_activation"}:
+            operands["interactive"] = True
     required_code = {
         "disarm", "arm_away", "arm_home", "arm_night", "arm_instant", "arm_maximum",
         "force_arm_away", "force_arm_home", "walk_test", "zone_bypass", "unbypass_zones",
@@ -735,6 +772,13 @@ def command_from_request(
         if state not in {"on", "off"}:
             raise CommandValidationError("output state must be on or off")
         operands.update({"device": device, "state": state})
+    if action == "instant_activation":
+        action_code = operands.get("action_code", request.get("action_code", ""))
+        if isinstance(action_code, int):
+            action_code = f"{action_code:02d}"
+        if not isinstance(action_code, str) or re.fullmatch(r"[0-9]{2}", action_code) is None:
+            raise CommandValidationError("instant activation action code must be two digits")
+        operands["action_code"] = action_code
     if action in {"arm_away", "arm_home", "arm_maximum", "arm_instant", "arm_night", "disarm"}:
         selected = operands.get("partitions")
         if selected is not None:
@@ -776,10 +820,15 @@ def command_from_request(
 def compile_keypad_sequence(command: VistaCommand) -> str:
     """Compile a semantic command into the exact logical keypad sequence."""
     if command.raw_sequence:
+        if command.command_type not in RAW_SEQUENCE_COMMAND_TYPES:
+            raise CommandValidationError(
+                "semantic command cannot override its operation with a raw keypad sequence"
+            )
         if any(character not in "0123456789*#" for character in command.raw_sequence):
             raise CommandValidationError(
                 "executable keypad commands support only 0-9, *, and #"
             )
+        _validate_interactive_sequence(command)
         return command.raw_sequence
     code = validate_pin(command.code)
     operands = command.operands
@@ -790,6 +839,10 @@ def compile_keypad_sequence(command: VistaCommand) -> str:
         and isinstance(global_partitions, (list, tuple))
         and command_type in {"disarm", "arm_away", "arm_home", "arm_maximum", "arm_instant", "arm_night"}
     ):
+        if operands.get("subtype"):
+            raise CommandValidationError(
+                "global arming with a subtype requires its exact keypad sequence"
+            )
         action_digit = {
             "disarm": "1",
             "arm_away": "2",
@@ -800,6 +853,12 @@ def compile_keypad_sequence(command: VistaCommand) -> str:
         }[command_type]
         partitions = normalize_partitions(global_partitions)
         return code + action_digit + "".join(str(partition) for partition in partitions) + "*"
+    if "partitions" in operands and command_type in {
+        "disarm", "arm_away", "arm_home", "arm_maximum", "arm_instant", "arm_night"
+    }:
+        raise CommandValidationError(
+            "partition operands require an explicit global arming selection"
+        )
     simple = {
         "disarm": "1", "arm_away": "2", "arm_maximum": "4", "walk_test": "5",
         "chime": "9", "access_relay": "0", "user_capabilities": "**",
@@ -835,24 +894,86 @@ def compile_keypad_sequence(command: VistaCommand) -> str:
             raise CommandValidationError("GOTO target partition must be 1..8")
         return code + "*" + str(target)
     if command_type == "output_control":
-        device = operands.get("device")
-        state = operands.get("state")
-        if not isinstance(device, str) or re.fullmatch(r"[0-9]{2}", device) is None or state not in {"on", "off"}:
-            raise CommandValidationError("output control operands are invalid")
-        return code + "#70" + device + ("1" if state == "on" else "0")
+        raise CommandValidationError(
+            "output_control requires its complete interactive keypad sequence, including menu exit"
+        )
     if command_type == "instant_activation":
-        action_code = operands.get("action_code")
-        if not isinstance(action_code, str) or re.fullmatch(r"[0-9]{2}", action_code) is None:
-            raise CommandValidationError("instant activation action code must be two digits")
-        return code + "#77" + action_code
+        raise CommandValidationError(
+            "instant_activation requires its complete interactive keypad sequence, including menu exit"
+        )
     if command_type == "system_command":
-        namespace = operands.get("system_command")
-        if not isinstance(namespace, str) or re.fullmatch(r"#[0-9]{2}", namespace) is None:
-            raise CommandValidationError("system command must use the #nn namespace")
-        return code + namespace + str(operands.get("suffix", ""))
+        raise CommandValidationError(
+            "system_command requires its complete interactive keypad sequence"
+        )
     if command_type in {"program_enter", "program_menu_enter", "program_exit", "program_exit_local", "program_field_change"}:
         raise CommandValidationError("programming commands require their exact keypad sequence")
     raise CommandValidationError(f"no keypad compiler exists for {command_type}")
+
+
+def _validate_interactive_sequence(command: VistaCommand) -> None:
+    """Ensure a prompt-driven semantic command carries its full safe flow.
+
+    The panel does not treat the namespace prefix as the completed operation.
+    Requiring the semantic prefix to match the exact sequence prevents a
+    mislabeled command from becoming a different keypad operation, while the
+    terminal markers prevent releasing the keypad owner inside a menu.
+    """
+    if command.command_type in {"keypad_command", "interactive_menu"}:
+        _validate_known_menu_exit(command.raw_sequence)
+        return
+    if command.command_type not in {"output_control", "instant_activation"}:
+        return
+    if not command.code:
+        raise CommandValidationError("interactive VISTA command requires an exactly four-digit PIN")
+    sequence = command.raw_sequence
+    if command.command_type == "output_control":
+        device = command.operands.get("device")
+        state = command.operands.get("state")
+        if (
+            not isinstance(device, str)
+            or re.fullmatch(r"[0-9]{2}", device) is None
+            or state not in {"on", "off"}
+        ):
+            raise CommandValidationError("output control operands are invalid")
+        prefix = command.code + "#70" + device + ("1" if state == "on" else "0")
+        if not sequence.startswith(prefix):
+            raise CommandValidationError(
+                "output control sequence does not match its semantic operands"
+            )
+        # Keypad #70 returns to ENTER DEVICE NO. after '*'; 00 is the
+        # documented quit entry that restores the normal keypad context.
+        if sequence != prefix + "*00":
+            raise CommandValidationError(
+                "output control sequence must perform one relay action, press *, and exit with 00"
+            )
+        return
+
+    action_code = command.operands.get("action_code")
+    if not isinstance(action_code, str) or re.fullmatch(r"[0-9]{2}", action_code) is None:
+        raise CommandValidationError("instant activation action code must be two digits")
+    prefix = command.code + "#77" + action_code
+    if not sequence.startswith(prefix):
+        raise CommandValidationError(
+            "instant activation sequence does not match its action code"
+        )
+    # #77 is committed only after its action specifier, confirmation, and
+    # quit-menu prompts have been completed.  Each continuation is a '*'.
+    if not sequence.endswith("*1*1*"):
+        raise CommandValidationError(
+            "instant activation sequence must complete confirmation and quit the menu"
+        )
+
+
+def _validate_known_menu_exit(sequence: str) -> None:
+    """Reject a raw logical command that stops inside a known VISTA menu."""
+    if re.match(r"[0-9]{4}#70", sequence) and not sequence.endswith("*00"):
+        raise CommandValidationError(
+            "#70 keypad sequence must press * and exit the relay menu with 00"
+        )
+    if re.match(r"[0-9]{4}#77[0-9]{2}", sequence) and not sequence.endswith("*1*1*"):
+        raise CommandValidationError(
+            "#77 keypad sequence must complete confirmation and quit the menu"
+        )
 
 
 def compile_keypad_segments(command: VistaCommand, *, max_strokes: int = 5) -> tuple[str, ...]:
@@ -882,13 +1003,24 @@ NATIVE_COMMANDS = {
 }
 
 
+def native_command_covers_entire_command(command: VistaCommand) -> bool:
+    """Return whether the native one-partition operation preserves all semantics."""
+    return bool(
+        command.command_type in NATIVE_COMMANDS
+        and command.partition is not None
+        and bool(command.code)
+        and not command.raw_sequence
+        and not command.operands
+    )
+
+
 def plan_command(
     command: VistaCommand,
     *,
     native_available: bool,
     keypad_available: bool,
 ) -> ExecutionPlan:
-    if native_available and command.command_type in NATIVE_COMMANDS:
+    if native_available and native_command_covers_entire_command(command):
         return ExecutionPlan(
             command=command.with_execution(execution_mechanism="native", status="planned"),
             mechanism="native",
