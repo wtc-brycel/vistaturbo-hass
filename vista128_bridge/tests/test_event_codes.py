@@ -4,7 +4,7 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "app"))
 
-from vista_bridge.event_codes import classify_alarm_event  # noqa: E402
+from vista_bridge.event_codes import EVENT_DESCRIPTIONS, classify_alarm_event  # noqa: E402
 
 
 class AlarmEventClassificationTests(unittest.TestCase):
@@ -23,6 +23,12 @@ class AlarmEventClassificationTests(unittest.TestCase):
             with self.subTest(start=start):
                 self.assertEqual(classify_alarm_event(start), ("burglary", "alarm"))
                 self.assertEqual(classify_alarm_event(restore), ("burglary", "restore"))
+
+    def test_24_hour_zone_description_stays_literal_while_semantics_are_burglary(self):
+        self.assertEqual(EVENT_DESCRIPTIONS["61"], "24 Hour Zone Alarm")
+        self.assertEqual(EVENT_DESCRIPTIONS["62"], "24 Hour Zone Alarm Restore")
+        self.assertEqual(classify_alarm_event("61"), ("burglary", "alarm"))
+        self.assertEqual(classify_alarm_event("62"), ("burglary", "restore"))
 
     def test_audible_panic_is_not_burglary_or_auxiliary(self):
         self.assertEqual(classify_alarm_event("31"), ("panic_audible", "alarm"))
