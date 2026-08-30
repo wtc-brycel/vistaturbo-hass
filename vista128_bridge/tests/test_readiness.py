@@ -67,17 +67,21 @@ class ReadinessTests(unittest.TestCase):
     def test_reconnect_invalidates_native_audible_state(self):
         state = VistaState()
         keypad = state.keypads[1]
-        keypad.initialized = True
         keypad.fire_alarm_led = False
-        keypad.silenced_led = False
-        keypad.burglary_alarm_led = True
+        keypad.burglary_alarm_led = False
         keypad.auxiliary_alarm_led = False
-        state.partitions[1].active_burglary_tokens.add("010:31")
+        state.apply_system_event(event("31", zone=10))
+        self.assertTrue(keypad.audible_panic_alarm)
+        self.assertTrue(state.partitions[1].audible_panic_alarm_active)
+        self.assertEqual(keypad.sound_mode, "panic_audible")
+
         state.reset_connection_derived_annunciators()
+        self.assertIsNone(keypad.audible_panic_alarm)
         self.assertIsNone(keypad.burglary_alarm_led)
         self.assertIsNone(keypad.auxiliary_alarm_led)
         self.assertEqual(keypad.sound_mode, "unknown")
-        self.assertFalse(state.partitions[1].active_burglary_tokens)
+        self.assertFalse(state.partitions[1].audible_panic_alarm_active)
+        self.assertFalse(state.partitions[1].active_alarm_tokens)
 
     def test_reconnect_discards_event_derived_cr2_state(self):
         state = VistaState()
@@ -137,7 +141,6 @@ class ReadinessTests(unittest.TestCase):
         )
         self.assertFalse(keypad.fire_alarm_led)
 
-
     def test_authoritative_not_ready_disarmed_clears_stale_burglary_class(self):
         state = VistaState()
         partition = state.partitions[1]
@@ -151,6 +154,7 @@ class ReadinessTests(unittest.TestCase):
         self.assertTrue(partition.active_alarm_tokens)
         self.assertTrue(partition.active_burglary_tokens)
         self.assertTrue(keypad.burglary_alarm_led)
+
 
 if __name__ == "__main__":
     unittest.main()
