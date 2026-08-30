@@ -113,6 +113,7 @@ test("rapid keypad entry publishes every key immediately and in order", async ({
   expect(payloads.map((payload) => payload.keys)).toEqual(["1", "2", "3", "4", "#"]);
   expect(payloads.every((payload) => payload.complete === true)).toBe(true);
   expect(new Set(payloads.map((payload) => payload.transaction_id)).size).toBe(5);
+  expect(new Set(payloads.map((payload) => payload.audit_interaction_id)).size).toBe(1);
 });
 
 test("slow entry never waits for an inactivity boundary", async ({ page }) => {

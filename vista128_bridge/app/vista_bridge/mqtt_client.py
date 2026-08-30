@@ -703,6 +703,7 @@ class MqttPublisher:
             request.get("transaction_id", request.get("interaction_id", "")),
             96,
         ) or uuid.uuid4().hex
+        audit_interaction_id = bounded_text(request.get("audit_interaction_id", ""), 96)
         interaction_complete = request.get(
             "complete", request.get("sequence_complete", True)
         )
@@ -713,6 +714,7 @@ class MqttPublisher:
             source = "mqtt"
         return {
             "interaction_id": interaction_id,
+            "audit_interaction_id": audit_interaction_id,
             "request_id": uuid.uuid4().hex,
             "started_at": datetime.now(timezone.utc).isoformat(),
             "actor_id": bounded_text(request.get("actor_id", ""), 128),
@@ -754,9 +756,13 @@ class MqttPublisher:
         if self.audit_interaction_callback is None:
             return
         try:
+            audit_metadata = dict(metadata)
+            audit_interaction_id = str(audit_metadata.get("audit_interaction_id", "")).strip()
+            if audit_interaction_id:
+                audit_metadata["interaction_id"] = audit_interaction_id
             self.audit_interaction_callback(
                 {
-                    **metadata,
+                    **audit_metadata,
                     "status": status,
                     "ok": ok,
                 }

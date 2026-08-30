@@ -46,6 +46,7 @@ class ControlRequest:
     command_sequence: str = field(default="", repr=False)
     operands: dict | None = None
     interaction_id: str = ""
+    audit_interaction_id: str = ""
     actor_id: str = ""
     actor_name: str = ""
     source: str = "mqtt"
@@ -308,6 +309,7 @@ class VistaControlCoordinator:
             command_sequence=plan.keypad_sequence,
             operands=dict(command.operands),
             interaction_id=interaction_id,
+            audit_interaction_id=str(metadata.get("audit_interaction_id", "")),
             actor_id=str(metadata.get("actor_id", command.actor_id)),
             actor_name=str(metadata.get("actor_name", command.actor_name)),
             source=str(metadata.get("source", command.source)),
@@ -391,6 +393,7 @@ class VistaControlCoordinator:
                 else None
             ),
             interaction_id=interaction_id,
+            audit_interaction_id=str(metadata.get("audit_interaction_id", "")),
             actor_id=str(metadata.get("actor_id", "")),
             actor_name=str(metadata.get("actor_name", "")),
             source=str(metadata.get("source", "mqtt")),
@@ -770,10 +773,11 @@ class VistaControlCoordinator:
         payload.pop("command_sequence", None)
         payload.pop("raw_sequence", None)
         self.publish_result(payload)
-        if self.audit_result is not None and request.interaction_id:
+        audit_interaction_id = request.audit_interaction_id or request.interaction_id
+        if self.audit_result is not None and audit_interaction_id:
             audit = command.audit_fields()
             audit_payload = {
-                "interaction_id": request.interaction_id,
+                "interaction_id": audit_interaction_id,
                 "request_id": request.audit_request_id,
                 "actor_id": request.actor_id,
                 "actor_name": request.actor_name,

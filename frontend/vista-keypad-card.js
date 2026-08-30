@@ -1,4 +1,5 @@
 const VISTA_KEYPAD_CARD_VERSION = "0.3.26";
+const KEYPAD_AUDIT_IDLE_MS = 5000;
 
 const MODEL_ALIASES = {
   "6160cr2": "6160cr2",
@@ -632,6 +633,8 @@ class VistaKeypadCard extends HTMLElement {
     this._feedbackSnapshot = null;
     this._audioUnlockHandler = null;
     this._keyPressSend = Promise.resolve();
+    this._auditInteractionId = null;
+    this._auditInteractionTimer = null;
     this._lifecycleGeneration = 0;
   }
 
@@ -659,6 +662,9 @@ class VistaKeypadCard extends HTMLElement {
     this._themeMedia = null;
     this._themeMediaHandler = null;
     clearTimeout(this._pressTimer);
+    clearTimeout(this._auditInteractionTimer);
+    this._auditInteractionTimer = null;
+    this._auditInteractionId = null;
     this._removeAudioUnlockListener();
     this._audio.stopAll();
     this._haptics.stop();
@@ -2609,9 +2615,16 @@ class VistaKeypadCard extends HTMLElement {
       return;
     }
 
-    const transactionId = typeof globalThis.crypto?.randomUUID === "function"
+    const makeInteractionId = () => typeof globalThis.crypto?.randomUUID === "function"
       ? globalThis.crypto.randomUUID()
       : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+    const transactionId = makeInteractionId();
+    if (!this._auditInteractionId) this._auditInteractionId = makeInteractionId();
+    const auditInteractionId = this._auditInteractionId;
+    clearTimeout(this._auditInteractionTimer);
+    this._auditInteractionTimer = setTimeout(() => {
+      if (this._auditInteractionId === auditInteractionId) this._auditInteractionId = null;
+    }, KEYPAD_AUDIT_IDLE_MS);
     const partition = Number(String(display.commandTopic).match(/\/keypad\/([1-8])\/command$/)?.[1] ?? 0);
     const actorId = typeof this._hass?.user?.id === "string" ? this._hass.user.id.slice(0, 128) : "";
     const actorName = typeof (this._hass?.user?.name ?? this._hass?.user?.display_name) === "string"
@@ -2637,6 +2650,7 @@ class VistaKeypadCard extends HTMLElement {
           payload: JSON.stringify({
             keys: key,
             transaction_id: transactionId,
+            audit_interaction_id: auditInteractionId,
             partition,
             source: "ha_frontend",
             actor_id: actorId,
