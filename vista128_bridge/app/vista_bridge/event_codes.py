@@ -39,8 +39,8 @@ EVENT_DESCRIPTIONS: dict[str, str] = {
     "52": "Interior Alarm Restore",
     "53": "Expansion Module Tamper",
     "54": "Expansion Module Tamper Restore",
-    "61": "24 Hour Burglary Alarm",
-    "62": "24 Hour Burglary Alarm Restore",
+    "61": "24 Hour Zone Alarm",
+    "62": "24 Hour Zone Alarm Restore",
     "63": "RF Expansion Module Supervision",
     "64": "RF Expansion Module Supervision Restore",
     "71": "Day/Night Burglary Alarm",
@@ -107,7 +107,7 @@ ALARM_START_CODES = set(ALARM_RESTORE_TO_START.values())
 BURGLARY_RESTORE_TO_START = {
     "42": "41",  # perimeter alarm
     "52": "51",  # interior alarm
-    "62": "61",  # 24 hour burglary alarm
+    "62": "61",  # 24 hour zone alarm, CID 133 burglary
     "72": "71",  # day/night burglary alarm
     "82": "81",  # entry/exit burglary alarm
 }
