@@ -1,0 +1,219 @@
+name: Finalize immediate keypad hotfix
+
+on:
+  push:
+    branches:
+      - fix/immediate-keypad-input
+    paths:
+      - .github/workflows/keypad-hotfix-finalize.yml
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out hotfix branch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: fix/immediate-keypad-input
+          fetch-depth: 0
+      - name: Preserve grouped audit semantics without delaying keypad delivery
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one replacement, found {count}")
+              p.write_text(text.replace(old, new, 1))
+
+          def replace_count(path, old, new, expected):
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != expected:
+                  raise SystemExit(f"{path}: expected {expected} replacements, found {count}")
+              p.write_text(text.replace(old, new))
+
+          # Frontend: each key remains its own immediate control transaction,
+          # while a short-lived audit interaction ID groups a human entry burst.
+          replace_once(
+              "frontend/vista-keypad-card.js",
+              'const VISTA_KEYPAD_CARD_VERSION = "0.3.26";\n\nconst MODEL_ALIASES',
+              'const VISTA_KEYPAD_CARD_VERSION = "0.3.26";\nconst KEYPAD_AUDIT_IDLE_MS = 5000;\n\nconst MODEL_ALIASES',
+          )
+          replace_once(
+              "frontend/vista-keypad-card.js",
+              '    this._audioUnlockHandler = null;\n    this._keyPressSend = Promise.resolve();\n    this._lifecycleGeneration = 0;',
+              '    this._audioUnlockHandler = null;\n    this._keyPressSend = Promise.resolve();\n    this._auditInteractionId = null;\n    this._auditInteractionTimer = null;\n    this._lifecycleGeneration = 0;',
+          )
+          replace_once(
+              "frontend/vista-keypad-card.js",
+              '    clearTimeout(this._pressTimer);\n    this._removeAudioUnlockListener();',
+              '    clearTimeout(this._pressTimer);\n    clearTimeout(this._auditInteractionTimer);\n    this._auditInteractionTimer = null;\n    this._auditInteractionId = null;\n    this._removeAudioUnlockListener();',
+          )
+          replace_once(
+              "frontend/vista-keypad-card.js",
+              '''    const transactionId = typeof globalThis.crypto?.randomUUID === "function"\n      ? globalThis.crypto.randomUUID()\n      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;\n    const partition = Number(String(display.commandTopic).match(/\\/keypad\\/([1-8])\\/command$/)?.[1] ?? 0);\n    const actorId = typeof this._hass?.user?.id === "string" ? this._hass.user.id.slice(0, 128) : "";\n    const actorName = typeof (this._hass?.user?.name ?? this._hass?.user?.display_name) === "string"\n      ? (this._hass.user.name ?? this._hass.user.display_name).slice(0, 128)\n      : "";\n    const lifecycleGeneration = this._lifecycleGeneration;''',
+              '''    const makeInteractionId = () => typeof globalThis.crypto?.randomUUID === "function"\n      ? globalThis.crypto.randomUUID()\n      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;\n    const transactionId = makeInteractionId();\n    if (!this._auditInteractionId) this._auditInteractionId = makeInteractionId();\n    const auditInteractionId = this._auditInteractionId;\n    clearTimeout(this._auditInteractionTimer);\n    this._auditInteractionTimer = setTimeout(() => {\n      if (this._auditInteractionId === auditInteractionId) this._auditInteractionId = null;\n    }, KEYPAD_AUDIT_IDLE_MS);\n    const partition = Number(String(display.commandTopic).match(/\\/keypad\\/([1-8])\\/command$/)?.[1] ?? 0);\n    const actorId = typeof this._hass?.user?.id === "string" ? this._hass.user.id.slice(0, 128) : "";\n    const actorName = typeof (this._hass?.user?.name ?? this._hass?.user?.display_name) === "string"\n      ? (this._hass.user.name ?? this._hass.user.display_name).slice(0, 128)\n      : "";\n    const lifecycleGeneration = this._lifecycleGeneration;''',
+          )
+          replace_once(
+              "frontend/vista-keypad-card.js",
+              '            transaction_id: transactionId,\n            partition,',
+              '            transaction_id: transactionId,\n            audit_interaction_id: auditInteractionId,\n            partition,',
+          )
+
+          # MQTT/control: keep the control transaction ID separate from the
+          # administrator audit interaction ID. This avoids row-per-digit audit
+          # records without using the audit ID as a keypad reservation token.
+          replace_once(
+              "vista128_bridge/app/vista_bridge/mqtt_client.py",
+              '''        interaction_id = bounded_text(\n            request.get("transaction_id", request.get("interaction_id", "")),\n            96,\n        ) or uuid.uuid4().hex\n        interaction_complete = request.get(''',
+              '''        interaction_id = bounded_text(\n            request.get("transaction_id", request.get("interaction_id", "")),\n            96,\n        ) or uuid.uuid4().hex\n        audit_interaction_id = bounded_text(request.get("audit_interaction_id", ""), 96)\n        interaction_complete = request.get(''',
+          )
+          replace_once(
+              "vista128_bridge/app/vista_bridge/mqtt_client.py",
+              '''            "interaction_id": interaction_id,\n            "request_id": uuid.uuid4().hex,''',
+              '''            "interaction_id": interaction_id,\n            "audit_interaction_id": audit_interaction_id,\n            "request_id": uuid.uuid4().hex,''',
+          )
+          replace_once(
+              "vista128_bridge/app/vista_bridge/mqtt_client.py",
+              '''        try:\n            self.audit_interaction_callback(\n                {\n                    **metadata,\n                    "status": status,\n                    "ok": ok,\n                }\n            )''',
+              '''        try:\n            audit_metadata = dict(metadata)\n            audit_interaction_id = str(audit_metadata.get("audit_interaction_id", "")).strip()\n            if audit_interaction_id:\n                audit_metadata["interaction_id"] = audit_interaction_id\n            self.audit_interaction_callback(\n                {\n                    **audit_metadata,\n                    "status": status,\n                    "ok": ok,\n                }\n            )''',
+          )
+
+          replace_once(
+              "vista128_bridge/app/vista_bridge/control.py",
+              '    interaction_id: str = ""\n    actor_id: str = ""',
+              '    interaction_id: str = ""\n    audit_interaction_id: str = ""\n    actor_id: str = ""',
+          )
+          replace_count(
+              "vista128_bridge/app/vista_bridge/control.py",
+              '            interaction_id=interaction_id,\n            actor_id=',
+              '            interaction_id=interaction_id,\n            audit_interaction_id=str(metadata.get("audit_interaction_id", "")),\n            actor_id=',
+              2,
+          )
+          replace_once(
+              "vista128_bridge/app/vista_bridge/control.py",
+              '''        if self.audit_result is not None and request.interaction_id:\n            audit = command.audit_fields()\n            audit_payload = {\n                "interaction_id": request.interaction_id,''',
+              '''        audit_interaction_id = request.audit_interaction_id or request.interaction_id\n        if self.audit_result is not None and audit_interaction_id:\n            audit = command.audit_fields()\n            audit_payload = {\n                "interaction_id": audit_interaction_id,''',
+          )
+
+          # Frontend regression: transactions stay atomic/unique, audit identity
+          # is shared across the rapid human entry burst.
+          replace_once(
+              "frontend/tests/control.spec.mjs",
+              '  expect(new Set(payloads.map((payload) => payload.transaction_id)).size).toBe(5);',
+              '  expect(new Set(payloads.map((payload) => payload.transaction_id)).size).toBe(5);\n  expect(new Set(payloads.map((payload) => payload.audit_interaction_id)).size).toBe(1);',
+          )
+
+          # Product documentation must not preserve the broken SEND workflow.
+          root = Path("README.md")
+          root_text = root.read_text().replace("0.2.6-rc.13", "0.2.6-rc.14").replace("0.3.25", "0.3.26")
+          root.write_text(root_text)
+
+          frontend = Path("frontend/README.md")
+          ftext = frontend.read_text()
+          old_frontend = '''Card `0.3.25` can publish real keypad input when both the bridge and card are explicitly enabled for control. Enable the App's `control_enabled` and `keypad_control_enabled`, then enable **Keypad input** in the card visual editor. Numeric keys, `*`, and `#` are held as one logical command until the explicit **SEND** button is pressed and published QoS 1 with retain disabled through Home Assistant's MQTT publish action. Input longer than the VISTA KS five-key frame is sent as five-key `complete:false` segments followed by one final `complete:true` segment, all carrying the same interaction ID. Inactivity never completes or splits a command. A-D function buttons remain intentionally unmapped pending explicit action/hold semantics. The card never logs, locally persists, or includes the sequence in its DOM event; the bridge may persist the completed sequence in its bounded local administrator audit.'''
+          new_frontend = '''Card `0.3.26` can publish real keypad input when both the bridge and card are explicitly enabled for control. Enable the App's `control_enabled` and `keypad_control_enabled`, then enable **Keypad input** in the card visual editor. Numeric keys, `*`, and `#` are published immediately when pressed as one-key non-retained QoS 1 JSON requests with `complete: true`. The card preserves press order locally while the bridge serializes panel traffic. There is no synthetic SEND or finish-command step, and key delivery never waits for inactivity. A-D function buttons remain intentionally unmapped pending explicit action/hold semantics. The card never logs, locally persists, or includes the entered key in its DOM event; a separate short-lived audit interaction ID groups rapid human entry into one bounded administrator-local audit record.'''
+          if ftext.count(old_frontend) != 1:
+              raise SystemExit("frontend/README.md: old keypad paragraph not found exactly once")
+          ftext = ftext.replace(old_frontend, new_frontend, 1)
+          ftext = ftext.replace("0.3.25", "0.3.26").replace("v0.2.6-rc.12", "v0.2.6-rc.14")
+          frontend.write_text(ftext)
+
+          docs = Path("vista128_bridge/DOCS.md")
+          dtext = docs.read_text()
+          old_docs = '''`keypad_control_enabled` permits only ordinary `0-9`, `*`, and `#` keypad strokes. A-D function buttons and panic encodings are not exposed through the normal keypad command topic. The browser holds entered keys as one logical command until the explicit **SEND** button is pressed. Input longer than the VISTA KS five-key frame is sent as five-key `complete:false` segments followed by one final `complete:true` segment, all carrying one `interaction_id`; inactivity never completes or splits the command. The bridge reserves the keypad for that interaction; a different interaction is rejected while the reservation is active, so two PIN/command sequences cannot interleave. Ownership is released only by the final segment, cancellation, or panel session reset/reconnect; callers must explicitly abandon a partial interaction rather than relying on an elapsed-time boundary. The bridge serializes the logical sequence as one panel transaction, rejects retained control messages, and ties queued commands to one panel TCP session so a reconnect cannot replay a stale key or alarm request. A one-key JSON command and the former one-byte key payload remain compatible with existing callers; new integrations should use JSON.'''
+          new_docs = '''`keypad_control_enabled` permits only ordinary `0-9`, `*`, and `#` keypad strokes. A-D function buttons and panic encodings are not exposed through the normal keypad command topic. The Home Assistant keypad publishes each key immediately as a one-key non-retained QoS 1 JSON request with `complete: true`; there is no browser-side SEND or finish-command boundary. Each key is an atomic serialized panel transaction, and the card preserves press order for its own key stream. A separate short-lived audit interaction ID groups rapid human entry into one bounded audit row without delaying panel delivery or using the audit identity as a control/reservation token. The bridge rejects retained control messages and ties queued commands to one panel TCP session so a reconnect cannot replay a stale key or alarm request. The former one-byte key payload remains compatible with existing callers; new integrations should use JSON.'''
+          if dtext.count(old_docs) != 1:
+              raise SystemExit("DOCS.md: old SEND paragraph not found exactly once")
+          docs.write_text(dtext.replace(old_docs, new_docs, 1))
+
+          changelog = Path("vista128_bridge/CHANGELOG.md")
+          ctext = changelog.read_text()
+          marker = "# Changelog\n\n"
+          if not ctext.startswith(marker):
+              raise SystemExit("unexpected changelog header")
+          rc14 = '''## 0.2.6-rc.14\n\n- Remove the synthetic keypad SEND/finish-command workflow and restore immediate physical-keypad semantics for `0-9`, `*`, and `#`.\n- Publish each press as an ordered one-key QoS 1 non-retained request with `complete: true`; panel delivery never waits for inactivity.\n- Keep control transaction IDs atomic while grouping rapid entry under a separate bounded audit interaction ID so individual PIN digits are not stored as separate audit rows.\n- Add browser regressions for immediate rapid/slow entry, literal `*`/`#`, absence of SEND UI, actor attribution, and redacted DOM events.\n- Bump the App to RC14 and the keypad card to `0.3.26`.\n\n'''
+          if "## 0.2.6-rc.14" not in ctext:
+              changelog.write_text(marker + rc14 + ctext[len(marker):])
+          PY
+
+          cat > vista128_bridge/tests/test_immediate_keypad_audit.py <<'PY'
+          import os
+          import sys
+          import unittest
+
+          sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "app"))
+          sys.path.insert(0, os.path.dirname(__file__))
+
+          from fake_paho import install_fake_paho  # noqa: E402
+
+          install_fake_paho()
+
+          from vista_bridge.mqtt_client import MqttPublisher  # noqa: E402
+
+
+          class ImmediateKeypadAuditTests(unittest.TestCase):
+              def test_control_and_audit_interaction_ids_are_separate(self):
+                  metadata = MqttPublisher._transaction_metadata(
+                      {
+                          "transaction_id": "control-key-1",
+                          "audit_interaction_id": "audit-burst-1",
+                          "complete": True,
+                          "source": "ha_frontend",
+                      },
+                      1,
+                      "keypad_sequence",
+                  )
+                  self.assertEqual(metadata["interaction_id"], "control-key-1")
+                  self.assertEqual(metadata["audit_interaction_id"], "audit-burst-1")
+                  self.assertTrue(metadata["interaction_complete"])
+
+              def test_audit_callback_uses_audit_identity_not_control_identity(self):
+                  captured = []
+                  publisher = object.__new__(MqttPublisher)
+                  publisher.audit_interaction_callback = captured.append
+                  publisher._audit_interaction(
+                      {
+                          "interaction_id": "control-key-1",
+                          "audit_interaction_id": "audit-burst-1",
+                          "request_id": "request-1",
+                          "command_sequence": "1",
+                      },
+                      "queued",
+                      False,
+                  )
+                  self.assertEqual(len(captured), 1)
+                  self.assertEqual(captured[0]["interaction_id"], "audit-burst-1")
+                  self.assertEqual(captured[0]["command_sequence"], "1")
+                  self.assertEqual(captured[0]["status"], "queued")
+
+
+          if __name__ == "__main__":
+              unittest.main()
+          PY
+
+          node --check frontend/vista-keypad-card.js
+          node --check frontend/tests/control.spec.mjs
+          python -m py_compile vista128_bridge/app/vista_bridge/control.py vista128_bridge/app/vista_bridge/mqtt_client.py vista128_bridge/tests/test_immediate_keypad_audit.py
+          grep -Fq 'audit_interaction_id' frontend/vista-keypad-card.js
+          ! grep -Fq 'Press SEND to finish the command' frontend/vista-keypad-card.js
+          ! grep -Fq 'explicit **SEND** button' frontend/README.md
+          ! grep -Fq 'explicit **SEND** button' vista128_bridge/DOCS.md
+          rm .github/workflows/keypad-hotfix-finalize.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'Preserve grouped audit semantics for immediate keypad input'
+          git push origin HEAD:fix/immediate-keypad-input
