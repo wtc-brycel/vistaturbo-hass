@@ -14,104 +14,65 @@ init: false
 services:
   - mqtt:need
 options:
+  # Panel
   panel_host: "192.0.2.10"
   panel_port: 10001
   panel_timezone: "America/New_York"
-  mqtt_base_topic: "vista128"
-  mqtt_discovery_prefix: "homeassistant"
-  reconnect_min_seconds: 1
-  connect_timeout_seconds: 5
-  reconnect_max_seconds: 30
-  frame_idle_ms: 250
-  raw_logging: false
-  raw_mqtt_enabled: false
-  mqtt_tls_enabled: false
-  mqtt_tls_ca: ""
-  mqtt_tls_client_cert: ""
-  mqtt_tls_client_key: ""
-  mqtt_outbound_queue_max: 256
-  mqtt_inflight_messages_max: 20
-  startup_sync_enabled: true
-  startup_sync_initial_delay_ms: 1000
-  startup_sync_command_delay_ms: 500
-  startup_sync_response_timeout_seconds: 5
-  periodic_sync_enabled: true
-  periodic_sync_interval_seconds: 300
-  periodic_sync_reconnect_after_failures: 3
-  keypad_display_enabled: true
   keypad_partitions: "1"
-  keypad_poll_interval_seconds: 7
-  keypad_event_refresh_delay_ms: 250
-  chime_zones: ""
+
+  # Control
   control_enabled: false
   keypad_control_enabled: false
   native_alarm_control_enabled: false
-  control_response_timeout_seconds: 3
-  control_verify_delay_ms: 400
-  event_history_enabled: true
+  chime_zones: ""
+
+  # Event history
   event_history_startup_dump_enabled: false
-  event_history_recent_limit: 20
-  keypad_audit_enabled: true
-  event_history_max_age_days: 90
-  event_history_max_rows: 10000
+
+  # Optional TransPort event printer
   transport_print_enabled: false
   transport_host: ""
   transport_http_port: 9101
-  transport_print_timeout_seconds: 5
-  transport_print_retry_seconds: 10
-  transport_print_queue_max: 5000
   transport_print_width: 32
+
+  # Diagnostics
+  raw_logging: false
   debug_raw_tx_enabled: false
-  tx_queue_max: 128
-  raw_tx_queue_max: 16
 schema:
+  # Panel
   panel_host: str
   panel_port: port
   panel_timezone: str
-  mqtt_base_topic: str
-  mqtt_discovery_prefix: str
-  reconnect_min_seconds: int(1,60)
-  connect_timeout_seconds: int(1,60)
-  reconnect_max_seconds: int(1,300)
-  frame_idle_ms: int(25,5000)
-  raw_logging: bool
-  raw_mqtt_enabled: bool
-  mqtt_tls_enabled: bool
-  mqtt_tls_ca: str
-  mqtt_tls_client_cert: str
-  mqtt_tls_client_key: str
-  mqtt_outbound_queue_max: int(1,10000)
-  mqtt_inflight_messages_max: int(1,1000)
-  startup_sync_enabled: bool
-  startup_sync_initial_delay_ms: int(100,10000)
-  startup_sync_command_delay_ms: int(100,10000)
-  startup_sync_response_timeout_seconds: int(1,30)
-  periodic_sync_enabled: bool
-  periodic_sync_interval_seconds: int(60,86400)
-  periodic_sync_reconnect_after_failures: int(1,20)
-  keypad_display_enabled: bool
   keypad_partitions: str
-  keypad_poll_interval_seconds: int(2,300)
-  keypad_event_refresh_delay_ms: int(0,5000)
-  chime_zones: str
+
+  # Control
   control_enabled: bool
   keypad_control_enabled: bool
   native_alarm_control_enabled: bool
-  control_response_timeout_seconds: int(1,10)
-  control_verify_delay_ms: int(0,5000)
-  event_history_enabled: bool
+  chime_zones: str
+
+  # Event history
   event_history_startup_dump_enabled: bool
-  event_history_recent_limit: int(1,100)
-  keypad_audit_enabled: bool
-  event_history_max_age_days: int(1,3650)
-  event_history_max_rows: int(100,1000000)
+  event_history_max_age_days: "int(1,3650)?"
+
+  # Optional TransPort event printer
   transport_print_enabled: bool
   transport_host: str
   transport_http_port: port
-  transport_print_timeout_seconds: int(1,60)
-  transport_print_retry_seconds: int(1,3600)
-  transport_print_queue_max: int(1,100000)
   transport_print_width: int(24,64)
+
+  # Diagnostics
+  raw_logging: bool
+  raw_mqtt_enabled: bool?
   debug_raw_tx_enabled: bool
-  tx_queue_max: int(1,10000)
-  raw_tx_queue_max: int(1,1000)
+
+  # Advanced MQTT namespace overrides. Optional so existing installations do
+  # not gain newly required keys during an upgrade.
+  mqtt_base_topic: str?
+  mqtt_discovery_prefix: str?
+
+  # MQTT security. Optional for the same upgrade-safety reason.
+  mqtt_tls_enabled: bool?
+  mqtt_tls_ca: str?
+  mqtt_tls_client_cert: str?
+  mqtt_tls_client_key: str?

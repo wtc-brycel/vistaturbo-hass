@@ -1,67 +1,70 @@
 configuration:
   panel_host:
-    name: Serial server host
+    name: Panel · Serial server host
     description: IP address or DNS name of the TCP serial server.
   panel_port:
-    name: Serial server TCP port
+    name: Panel · TCP port
     description: TCP server port that transparently exposes the VISTA RS-232 connection.
   panel_timezone:
-    name: Panel timezone
+    name: Panel · Timezone
     description: IANA timezone used to interpret the VISTA panel's local event timestamps.
-  mqtt_base_topic:
-    name: MQTT base topic
-    description: Base MQTT topic used by the bridge.
-  mqtt_discovery_prefix:
-    name: MQTT discovery prefix
-    description: Home Assistant MQTT discovery prefix; normally homeassistant.
-  reconnect_min_seconds:
-    name: Minimum reconnect delay
-    description: Initial TCP reconnect delay after a failure.
-  connect_timeout_seconds:
-    name: TCP connect timeout
-    description: Time to wait for the serial server TCP connection before retrying.
-  reconnect_max_seconds:
-    name: Maximum reconnect delay
-    description: Maximum TCP reconnect backoff.
-  frame_idle_ms:
-    name: Frame idle flush
-    description: Flush an unterminated serial chunk after this many milliseconds of inactivity.
-  raw_logging:
-    name: Log raw frames
-    description: Print each received frame in ASCII and hexadecimal form to the App log.
-  startup_sync_enabled:
-    name: Startup synchronization
-    description: Query partition, zone, mapping, and descriptor state after each TCP connection.
-  periodic_sync_enabled:
-    name: Periodic state reconciliation
-    description: Periodically re-query dynamic partition and zone state to correct any drift.
-  periodic_sync_interval_seconds:
-    name: Reconciliation interval
-    description: Seconds between read-only partition and zone state reconciliations.
-  periodic_sync_reconnect_after_failures:
-    name: Failed sync reconnect threshold
-    description: Force a fresh serial-server TCP session after this many consecutive failed reconciliations.
+  keypad_partitions:
+    name: Panel · Partitions
+    description: Comma-separated VISTA partitions to expose through Home Assistant.
+  control_enabled:
+    name: Control · Enable panel control
+    description: Master safety gate for all commands that change panel state.
+  keypad_control_enabled:
+    name: Control · Virtual keypad
+    description: Allow the Home Assistant virtual keypad to send keypad commands.
+  native_alarm_control_enabled:
+    name: Control · Alarm entity
+    description: Allow Home Assistant alarm-control-panel actions to send panel commands.
+  chime_zones:
+    name: Chime · Zones
+    description: Comma-separated zone numbers that should produce chime events.
+  event_history_startup_dump_enabled:
+    name: History · Import panel log on startup
+    description: Request the VISTA historical event log after startup synchronization.
+  event_history_max_age_days:
+    name: History · Retention
+    description: Days to retain the local event journal and keypad audit; defaults to 90 when unset.
   transport_print_enabled:
-    name: Print VISTA events to TransPort
-    description: Send every valid unsolicited VISTA system event to the TransPort text event printer.
+    name: TransPort · Enable event printing
+    description: Send valid unsolicited VISTA system events to the TransPort event printer.
   transport_host:
-    name: TransPort host
+    name: TransPort · Host
     description: IP address or DNS name of the TransPort appliance running the event printer.
   transport_http_port:
-    name: TransPort event-printer HTTP port
+    name: TransPort · HTTP port
     description: HTTP port for POST /print; TransPort defaults to 9101.
-  transport_print_timeout_seconds:
-    name: Print timeout
-    description: Connect/response timeout for a TransPort print submission.
-  transport_print_retry_seconds:
-    name: Print retry delay
-    description: Delay before retrying jobs that could not establish a TCP connection to TransPort.
-  transport_print_queue_max:
-    name: Durable print queue limit
-    description: Maximum pending event receipts retained in the add-on's persistent spool.
   transport_print_width:
-    name: Receipt columns
+    name: TransPort · Receipt columns
     description: Plain-text receipt width. 32 columns fits typical 58 mm printers.
+  raw_logging:
+    name: Diagnostics · Log raw frames
+    description: Print each received VISTA frame in ASCII and hexadecimal form to the App log.
+  raw_mqtt_enabled:
+    name: Diagnostics · Publish raw MQTT frames
+    description: Publish raw protocol frames to diagnostic MQTT topics; disabled when unset.
   debug_raw_tx_enabled:
-    name: Enable guarded raw transmit
+    name: Diagnostics · Guarded raw transmit
     description: Dangerous diagnostic feature. Keep disabled unless testing panel commands.
+  mqtt_base_topic:
+    name: Advanced · MQTT base topic
+    description: Override the default vista128 MQTT topic namespace.
+  mqtt_discovery_prefix:
+    name: Advanced · MQTT discovery prefix
+    description: Override the Home Assistant MQTT discovery prefix; normally homeassistant.
+  mqtt_tls_enabled:
+    name: Security · MQTT TLS
+    description: Verify the MQTT broker through TLS instead of using plaintext MQTT.
+  mqtt_tls_ca:
+    name: Security · MQTT CA certificate
+    description: CA certificate path used to verify the MQTT broker when TLS is enabled.
+  mqtt_tls_client_cert:
+    name: Security · MQTT client certificate
+    description: Optional client certificate path for mutual TLS; configure together with the client key.
+  mqtt_tls_client_key:
+    name: Security · MQTT client key
+    description: Optional client key path for mutual TLS; configure together with the client certificate.

@@ -2,7 +2,7 @@
 
 Home Assistant App for the native RS-232 automation interface on Honeywell/Resideo VISTA Turbo alarm panels.
 
-> **Release candidate status:** 0.2.6-rc.12 adds the canonical VISTA command model and semantic control path. It has been developed and tested for monitoring on a VISTA-128BPT; experimental control gates default to off.
+> **Release candidate status:** 0.2.6-rc.14 is the current release candidate. It has been developed and tested for monitoring on a VISTA-128BPT; experimental control gates default to off.
 
 ## What you get in Home Assistant
 
@@ -72,7 +72,7 @@ Home Assistant MQTT Discovery uses `availability_mode: all` for partitions, keyp
 
 ## Dashboard keypad card
 
-The matching Lovelace card ships with this release as `vista-keypad-card.js`. Card `0.3.25` includes the keypad models, bounded searchable visual editors, explicit offline rendering, explicit keypad transaction completion, and the responsive `custom:vista-event-log-card` for the SQLite-backed recent event window.
+The matching Lovelace card ships with this release as `vista-keypad-card.js`. Card `0.3.26` includes the keypad models, bounded searchable visual editors, explicit offline rendering, immediate physical-keypad-style key delivery when input is enabled, and the responsive `custom:vista-event-log-card` for the SQLite-backed recent event window.
 
 `layout: auto` is the default. The card keeps the approved physical facsimile above 520 px card-container width and switches to a touchscreen-first compact layout at 520 px and below. `layout: physical` and `layout: compact` can force either presentation.
 
@@ -90,11 +90,11 @@ Optional `day_case_color` and `night_case_color` settings can override either si
 
 ## Persistent event journal
 
-When `event_history_enabled` is true, every decoded live system event is persisted in `/data/vista128_events.sqlite3`. The journal keeps event code, panel timestamp, partition, zone, user number, descriptor, and whether the row was observed live, in the historical panel log, or both. Repeated identical events within the same panel minute remain separate occurrences.
+Every decoded live system event is persisted in `/data/vista128_events.sqlite3`. The journal keeps event code, panel timestamp, partition, zone, user number, descriptor, and whether the row was observed live, in the historical panel log, or both. Repeated identical events within the same panel minute remain separate occurrences.
 
-The App discovers an **Event Journal** sensor whose state is the total journal row count. Its attributes contain dump metadata and only the configured recent window. The complete database is not copied into Home Assistant state.
+The App discovers an **Event Journal** sensor whose state is the total journal row count. Its attributes contain dump metadata and a bounded recent window. The complete database is not copied into Home Assistant state.
 
-Event history and the optional local keypad-interaction audit contain sensitive panel/security information. The audit keeps one row per logical interaction, including its exact completed keypad command sequence when `keypad_audit_enabled` is true; it is not mirrored into Home Assistant. Both tables are bounded by `event_history_max_age_days` (default 90) and `event_history_max_rows` (default 10000).
+Event history and the local keypad-interaction audit contain sensitive panel/security information. The audit keeps one row per logical interaction, including its exact completed keypad command sequence; it is not mirrored into Home Assistant. `event_history_max_age_days` controls retention and defaults to 90 days. A separate internal row cap prevents unbounded database growth.
 
 Set `event_history_startup_dump_enabled: true` to request the VISTA historical log once after successful startup synchronization. The first test release leaves this disabled by default pending physical VISTA-128BPT validation. Historical records are storage-only and do not mutate live panel state or generate chimes, alarm sounds, keypad refreshes, or printer receipts.
 
@@ -122,24 +122,39 @@ RF low-battery and sensor-tamper events are not part of that authoritative snaps
 
 ## Configuration
 
-The main settings are the serial server address and TCP port. Keypad polling defaults are:
+The Home Assistant Options editor is intentionally limited to deployment choices and user-facing features. Protocol timing, reconnect backoff, synchronization pacing, MQTT queue sizing, verification delays, database row caps, and print retry behavior use supported internal defaults instead of being exposed as tuning knobs.
 
 ```yaml
-keypad_display_enabled: true
+panel_host: 10.2.2.141
+panel_port: 10001
+panel_timezone: America/New_York
 keypad_partitions: "1"
-keypad_poll_interval_seconds: 7
-keypad_event_refresh_delay_ms: 250
-chime_zones: ""
+
 control_enabled: false
 keypad_control_enabled: false
 native_alarm_control_enabled: false
+chime_zones: ""
+
+event_history_startup_dump_enabled: false
+# Optional; defaults to 90 when unset.
+event_history_max_age_days: 90
+
+transport_print_enabled: false
+transport_host: ""
+transport_http_port: 9101
+transport_print_width: 32
+
+raw_logging: false
+debug_raw_tx_enabled: false
 ```
 
-`chime_zones` is the bridge-owned dashboard chime policy, independent of ECP keypad programming. It accepts comma-separated zone numbers and ascending ranges such as `"1,2,5-8,27"`. Listed zones chime only on a new fault transition while the resolved partition is known to be disarmed.
+`raw_mqtt_enabled` remains available as an optional diagnostic setting but is omitted from defaults so older installations that predate it can save configuration without a missing-option failure.
 
-MQTT's disconnected QoS outbound queue is finite by default (`mqtt_outbound_queue_max: 256`; in-flight QoS messages: `mqtt_inflight_messages_max: 20`). Publish overflow is reported rather than retried through an unbounded application queue.
+`keypad_partitions` accepts a comma-separated partition list such as `"1"` or `"1,2"`. `chime_zones` accepts comma-separated zone numbers and ascending ranges such as `"1,2,5-8,27"`; listed zones chime only on a new fault transition while the resolved partition is known to be disarmed.
 
-Full configuration and MQTT details are in `DOCS.md`.
+The MQTT disconnected-QoS queue and in-flight window are bounded internally. Publish overflow is reported rather than retried through an unbounded application queue.
+
+See `DOCS.md` for runtime defaults, optional MQTT security/namespace overrides, and protocol details.
 
 ## Compatibility
 
@@ -151,10 +166,9 @@ This App was made with the use of AI - ChatGPT Codex, specifically - during prot
 
 The implementation has been tested against real panel traffic. Review the source before relying on it in your own installation.
 
-
 ## Experimental panel control
 
-RC8 adds a gated native write path. Control remains disabled unless all required App toggles are explicitly enabled.
+Panel write paths remain disabled unless the required App control toggles are explicitly enabled.
 
 ```yaml
 control_enabled: true
@@ -162,8 +176,8 @@ keypad_control_enabled: true
 native_alarm_control_enabled: true
 ```
 
-Keypad input uses typed VISTA `KS` frames for `0-9`, `*`, and `#`. The A-D visual function keys are intentionally not transmitted as literal letters because the VISTA protocol uses those data characters for other keystroke encodings.
+Keypad input uses typed VISTA `KS` frames for `0-9`, `*`, and `#`. The A-D visual function keys are intentionally not transmitted as literal letters because the VISTA protocol uses those data characters for other keystroke encodings. Card `0.3.26` publishes each physical keypress immediately; there is no synthetic SEND or finish-command step.
 
 Native Home Assistant alarm control uses the documented VISTA arm/disarm command families and Home Assistant MQTT remote-code validation. The bounded local keypad-interaction audit stores the exact completed logical command sequence, including a four-digit PIN when it is part of the command, together with actor and outcome metadata. It is not exposed as an HA entity or MQTT telemetry, and control TX payloads remain redacted from bridge logging.
 
-RC12 also exposes a compact semantic command topic at `vista128/control/execute`. It accepts actions such as `arm`, `disarm`, `bypass_zones`, `quick_bypass`, `group_bypass`, `chime`, `goto_partition`, `output_control`, `system_command`, and `keypad_command`. Core arm/disarm requests use native VISTA automation only when that native operation represents the complete command; global partition and subtype-bearing commands use the serialized keypad path. Unsupported deterministic commands compile to the existing serialized keypad path. PINs must be exactly four digits and zones are normalized to exactly three digits. Semantic results omit PINs and raw sequences. The local bounded administrator audit stores one complete logical interaction with its exact sequence and normalized fields. Raw `sequence` overrides are reserved for explicit logical-keypad or interactive commands. `system_command` compiles its validated `#nn` namespace without an arbitrary raw override. `output_control` and `instant_activation` require complete menu-exit sequences, not just their `#70`/`#77` prefixes; #77 also requires an action-specific operand (for example partition(s), relay, zone list, or group) before confirmation and quit. GOTO accepts target `0` to return to the original partition. See `DOCS.md` for the request schema and parser limitations.
+The compact semantic command topic at `vista128/control/execute` accepts actions such as `arm`, `disarm`, `bypass_zones`, `quick_bypass`, `group_bypass`, `chime`, `goto_partition`, `output_control`, `system_command`, and `keypad_command`. Core arm/disarm requests use native VISTA automation only when that native operation represents the complete command; global partition and subtype-bearing commands use the serialized keypad path. Unsupported deterministic commands compile to the existing serialized keypad path. PINs must be exactly four digits and zones are normalized to exactly three digits. Semantic results omit PINs and raw sequences. The local bounded administrator audit stores one complete logical interaction with its exact sequence and normalized fields. Raw `sequence` overrides are reserved for explicit logical-keypad or interactive commands. `system_command` compiles its validated `#nn` namespace without an arbitrary raw override. `output_control` and `instant_activation` require complete menu-exit sequences, not just their `#70`/`#77` prefixes; #77 also requires an action-specific operand (for example partition(s), relay, zone list, or group) before confirmation and quit. GOTO accepts target `0` to return to the original partition. See `DOCS.md` for the request schema and parser limitations.
