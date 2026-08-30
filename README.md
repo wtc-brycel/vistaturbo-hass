@@ -2,7 +2,7 @@
 
 Vista Turbo HASS is a local Home Assistant integration for the native RS-232 automation interface on Honeywell/Resideo VISTA Turbo alarm panels.
 
-> **Current status:** 0.2.6-rc.12 release candidate. Tested on a VISTA-128BPT. Monitoring remains enabled by default; experimental keypad and native alarm control are available only when explicitly enabled in the App.
+> **Current status:** 0.2.6-rc.11 release candidate. Tested on a VISTA-128BPT. Monitoring remains enabled by default; experimental keypad and native alarm control are available only when explicitly enabled in the App.
 
 ## What it does
 
@@ -19,7 +19,8 @@ Vista Turbo HASS is a local Home Assistant integration for the native RS-232 aut
 - Supports a centralized configurable dashboard chime-zone list
 - Maintains a persistent SQLite event journal from live panel events, with optional historical panel-log import
 - Includes a responsive Home Assistant event-journal card for recent panel history
-- Reconciles panel state periodically in case an event is missed
+- Reconciles arming state periodically while live System Notification events maintain zone changes
+- Uses full Zone Status snapshots only for startup and explicit recovery, not routine polling
 - Optionally prints event receipts through TransPort
 - Fail-safe panel-wide alarm aggregation and explicit state-freshness availability
 - Bounded event retention, control queues, and privileged raw diagnostics
@@ -52,6 +53,14 @@ Serial settings are **9600 baud, 8 data bits, no parity, 1 stop bit, no flow con
 
 For VISTA-128BPT wiring, panel programming, protocol details, and the TB4/J9 connection notes, see [`vista128_bridge/DOCS.md`](vista128_bridge/DOCS.md).
 
+## State synchronization
+
+A normal new panel TCP session performs the authoritative startup snapshot: arming status, Zone Status, zone-to-partition mapping, and zone descriptors. Honeywell documents Zone Status as an initial-synchronization request rather than a routine polling command, so the normal periodic reconciliation sends only the arming-status query. Valid unsolicited `nq` System Notification events maintain zone transitions between full snapshots.
+
+A detected invalid panel frame is treated as possible lost state. The bridge immediately marks panel state stale, invalidates the Zone Status portion of the authoritative snapshot, and schedules one debounced full resynchronization. If corruption is detected while startup or programming already owns the panel, recovery is deferred until that operation can safely finish. If the recovery snapshot itself fails, the bridge forces a TCP reconnect so a new session can establish clean state.
+
+`startup_sync_enabled` should remain enabled for normal operation. Disabling startup synchronization intentionally prevents the bridge from establishing its complete authoritative zone/partition snapshot on a new session.
+
 ## Repository and release security
 
 The production add-on image is built from the Home Assistant base `3.24` multi-architecture image pinned by digest in `vista128_bridge/Dockerfile`. The bridge's Python dependency is hash-checked, and frontend browser tests use the locked Playwright `1.62.1` release.
@@ -68,26 +77,26 @@ Add this repository to the Home Assistant App Store:
 https://github.com/wtc-brycel/vistaturbo-hass
 ```
 
-Install or update **Vista Turbo RS232** to `0.2.6-rc.12`, then configure the TCP address and port of the serial server. Partition 1 keypad polling is enabled by default every 7 seconds.
+Install or update **Vista Turbo RS232** to `0.2.6-rc.11`, then configure the TCP address and port of the serial server. Partition 1 keypad polling is enabled by default every 7 seconds.
 
 The App requires the Home Assistant MQTT service.
 
 ## Install the keypad card
 
-The matching `vista-keypad-card.js` is attached to the `v0.2.6-rc.12` GitHub release and is also kept in `frontend/` in this repository.
+The matching `vista-keypad-card.js` is attached to the `v0.2.6-rc.11` GitHub release and is also kept in `frontend/` in this repository.
 
 From the Home Assistant Terminal or SSH add-on:
 
 ```sh
 mkdir -p /config/www
-curl -fL "https://github.com/wtc-brycel/vistaturbo-hass/releases/download/v0.2.6-rc.12/vista-keypad-card.js" \
+curl -fL "https://github.com/wtc-brycel/vistaturbo-hass/releases/download/v0.2.6-rc.11/vista-keypad-card.js" \
   -o /config/www/vista-keypad-card.js
 ```
 
 Then add a JavaScript module resource in **Settings -> Dashboards -> Resources**:
 
 ```text
-/local/vista-keypad-card.js?v=0.3.25
+/local/vista-keypad-card.js?v=0.3.24
 ```
 
 A minimal 6160CR-2 card is:

@@ -16,19 +16,39 @@ from vista_bridge.bridge import TxItem  # noqa: E402
 
 
 class FakeMqtt:
+    def __init__(self):
+        self.published = []
+        self.alarm_state_publishes = 0
+
     def publish(self, *args, **kwargs):
-        pass
+        self.published.append((args, kwargs))
 
     def publish_json(self, *args, **kwargs):
-        pass
+        self.published.append((args, kwargs))
+
+    def publish_alarm_states(self, state):
+        self.alarm_state_publishes += 1
+
+
+class FakeState:
+    def __init__(self):
+        self.query_snapshots = []
+
+    def begin_query_snapshot(self, query_name):
+        self.query_snapshots.append(query_name)
 
 
 class FakeSynchronizer:
     def __init__(self):
         self.ready_count = 0
+        self.recovery_requests = []
 
     def mark_ready(self):
         self.ready_count += 1
+
+    def request_recovery_resync(self, reason):
+        self.recovery_requests.append(reason)
+        return True
 
 
 class FakeHandler:
@@ -46,23 +66,33 @@ class BridgeFrameTests(unittest.TestCase):
         bridge.invalid_frames = 0
         bridge.settings = SimpleNamespace(raw_logging=False, raw_mqtt_enabled=False)
         bridge.mqtt = FakeMqtt()
+        bridge.state = FakeState()
         bridge.synchronizer = FakeSynchronizer()
         bridge.handler = FakeHandler()
         return bridge
 
-    def test_invalid_ready_packet_does_not_complete_sync(self):
+    def test_invalid_ready_packet_does_not_complete_sync_and_requests_recovery(self):
         bridge = self.make_bridge()
         bridge._handle_frame(RawFrame.create(b"08OK009F", "crlf"))
         self.assertEqual(bridge.synchronizer.ready_count, 0)
         self.assertEqual(bridge.invalid_frames, 1)
         self.assertEqual(bridge.handler.calls, [])
+        self.assertEqual(bridge.state.query_snapshots, ["zone_status"])
+        self.assertEqual(bridge.synchronizer.recovery_requests, ["invalid panel frame"])
+        self.assertEqual(bridge.mqtt.alarm_state_publishes, 1)
+        self.assertIn(
+            (("panel/state_fresh", "OFF"), {"retain": True, "qos": 1}),
+            bridge.mqtt.published,
+        )
 
-    def test_valid_ready_packet_completes_sync(self):
+    def test_valid_ready_packet_completes_sync_without_recovery(self):
         bridge = self.make_bridge()
         bridge._handle_frame(RawFrame.create(b"08OK009E", "crlf"))
         self.assertEqual(bridge.synchronizer.ready_count, 1)
         self.assertEqual(bridge.invalid_frames, 0)
         self.assertEqual(len(bridge.handler.calls), 1)
+        self.assertEqual(bridge.state.query_snapshots, [])
+        self.assertEqual(bridge.synchronizer.recovery_requests, [])
 
     def test_control_and_raw_tx_logs_redact_payloads(self):
         bridge = self.make_bridge()
