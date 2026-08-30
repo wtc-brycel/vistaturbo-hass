@@ -129,6 +129,39 @@ class SyncStrategyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(calls), 1)
         self.assertIn("invalid frame 2", calls[0][2])
 
+    async def test_recovery_request_during_active_resync_gets_followup_snapshot(self):
+        connected = True
+        calls = []
+        second_requested = False
+        sync = VistaSynchronizer(
+            sync_settings(),
+            keypad_disabled(),
+            False,
+            False,
+            lambda: connected,
+            lambda data, source, label: (True, "queued"),
+            lambda: None,
+        )
+        sync._startup_complete = True
+
+        async def capture_run_sync(queries, *, source, description):
+            nonlocal connected, second_requested
+            calls.append((tuple(query.name for query in queries), source, description))
+            if not second_requested:
+                second_requested = True
+                self.assertTrue(sync.request_recovery_resync("corruption during recovery"))
+            else:
+                connected = False
+            return True
+
+        sync.run_sync = capture_run_sync
+        self.assertTrue(sync.request_recovery_resync("initial corruption"))
+        await sync.resync_loop()
+
+        self.assertEqual(len(calls), 2)
+        self.assertIn("initial corruption", calls[0][2])
+        self.assertIn("corruption during recovery", calls[1][2])
+
     async def test_failed_recovery_resync_forces_reconnect(self):
         connected = True
         reconnects = []
