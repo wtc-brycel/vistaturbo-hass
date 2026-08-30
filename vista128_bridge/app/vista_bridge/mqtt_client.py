@@ -10,6 +10,7 @@ import uuid
 
 import paho.mqtt.client as mqtt
 
+from .command_model import VistaCommand, command_from_request
 from .config import Settings
 from .mqtt_discovery import (
     KEYPAD_ALARM_SPECS,
@@ -40,6 +41,7 @@ class MqttPublisher:
         keypad_command_callback: Callable[..., tuple[bool, str]] | None = None,
         alarm_command_callback: Callable[..., tuple[bool, str]] | None = None,
         audit_interaction_callback: Callable[[dict], None] | None = None,
+        semantic_command_callback: Callable[..., tuple[bool, str]] | None = None,
     ) -> None:
         self.settings = settings
         self.mqtt = settings.mqtt
@@ -47,11 +49,15 @@ class MqttPublisher:
         self.keypad_command_callback = keypad_command_callback
         self.alarm_command_callback = alarm_command_callback
         self.audit_interaction_callback = audit_interaction_callback
+        self.semantic_command_callback = semantic_command_callback
         self._keypad_callback_with_metadata = self._accepts_metadata(
             keypad_command_callback, 3
         )
         self._alarm_callback_with_metadata = self._accepts_metadata(
             alarm_command_callback, 4
+        )
+        self._semantic_callback_with_metadata = self._accepts_metadata(
+            semantic_command_callback, 2
         )
         self.publish_errors = 0
         self._retained_payloads: dict[str, tuple[str, int]] = {}
@@ -598,6 +604,11 @@ class MqttPublisher:
             client.subscribe(self.topic("partition/+/command"), qos=1)
         if self.settings.control.enabled and self.settings.control.keypad_enabled:
             client.subscribe(self.topic("keypad/+/command"), qos=1)
+        if self.settings.control.enabled and (
+            self.settings.control.keypad_enabled
+            or self.settings.control.native_alarm_enabled
+        ):
+            client.subscribe(self.topic("control/execute"), qos=1)
         if self.settings.debug_raw_tx_enabled:
             client.subscribe(self.topic("admin/raw_tx"), qos=1)
             LOG.warning("Privileged raw transmit enabled on %s", self.topic("admin/raw_tx"))
@@ -615,9 +626,10 @@ class MqttPublisher:
     def _on_message(self, client, userdata, message) -> None:
         is_keypad = self._is_keypad_command(message.topic)
         is_partition = self._is_partition_command(message.topic)
+        is_semantic = self._is_semantic_command(message.topic)
         is_raw_admin = message.topic == self.topic("admin/raw_tx")
-        if (is_keypad or is_partition) and bool(getattr(message, "retain", False)):
-            kind = "keypad" if is_keypad else "alarm"
+        if (is_keypad or is_partition or is_semantic) and bool(getattr(message, "retain", False)):
+            kind = "keypad" if is_keypad else ("alarm" if is_partition else "command")
             category = "keypad" if is_keypad else "partition"
             try:
                 partition = self._partition_from_topic(message.topic, category)
@@ -634,6 +646,9 @@ class MqttPublisher:
         if is_partition:
             self._handle_partition_command(message.topic, message.payload)
             return
+        if is_semantic:
+            self._handle_semantic_command(message.payload)
+            return
         if is_raw_admin and self.settings.debug_raw_tx_enabled:
             self._handle_raw_tx(message.payload)
 
@@ -642,6 +657,9 @@ class MqttPublisher:
 
     def _is_keypad_command(self, topic: str) -> bool:
         return topic.startswith(self.topic("keypad/")) and topic.endswith("/command")
+
+    def _is_semantic_command(self, topic: str) -> bool:
+        return topic == self.topic("control/execute")
 
     def _partition_from_topic(self, topic: str, category: str) -> int:
         prefix = self.topic(category) + "/"
@@ -723,6 +741,15 @@ class MqttPublisher:
             return self.alarm_command_callback(partition, action, code, metadata)
         return self.alarm_command_callback(partition, action, code)
 
+    def _invoke_semantic_callback(
+        self, command: VistaCommand, metadata: dict
+    ) -> tuple[bool, str]:
+        if self.semantic_command_callback is None:
+            return False, "semantic command callback unavailable"
+        if self._semantic_callback_with_metadata:
+            return self.semantic_command_callback(command, metadata)
+        return self.semantic_command_callback(command)
+
     def _audit_interaction(self, metadata: dict, status: str, ok: bool) -> None:
         if self.audit_interaction_callback is None:
             return
@@ -745,6 +772,8 @@ class MqttPublisher:
     def _handle_keypad_command(self, topic: str, payload: bytes) -> None:
         partition = None
         try:
+            if len(payload) > 4096:
+                raise ValueError("keypad payload is too large")
             partition = self._partition_from_topic(topic, "keypad")
             # Keep the former one-byte MQTT interface working for existing
             # automations. New callers should use one JSON logical sequence so
@@ -802,6 +831,51 @@ class MqttPublisher:
         except Exception as exc:
             # Never include the inbound payload or credential in logs/telemetry.
             self._publish_control_rejection("alarm", partition, str(exc))
+
+    def _handle_semantic_command(self, payload: bytes) -> None:
+        partition = None
+        try:
+            if len(payload) > 8192:
+                raise ValueError("command payload is too large")
+            request = json.loads(payload.decode("utf-8"))
+            if not isinstance(request, dict):
+                raise ValueError("command_payload_must_be_object")
+            partition_value = request.get("partition")
+            partition = int(partition_value) if not isinstance(partition_value, bool) else None
+            command = command_from_request(
+                request,
+                source=(
+                    request.get("source", "")
+                    if request.get("source") == "ha_frontend"
+                    else "mqtt"
+                ),
+                actor_id=request.get("actor_id", ""),
+                actor_name=request.get("actor_name", ""),
+                interaction_id=request.get(
+                    "transaction_id", request.get("interaction_id", "")
+                ),
+            )
+            metadata = self._transaction_metadata(
+                request, command.partition or 0, command.command_type
+            )
+            metadata.update(
+                {
+                    "command_sequence": command.raw_sequence,
+                    "operands": command.operands,
+                    "command_type": command.command_type,
+                    "code": command.code,
+                    "confidence": command.confidence,
+                }
+            )
+            accepted, detail = self._invoke_semantic_callback(command, metadata)
+            if not accepted:
+                self._audit_interaction(
+                    metadata, "rejected", False
+                )
+                raise ValueError(detail)
+            self._audit_interaction(metadata, "queued", False)
+        except Exception as exc:
+            self._publish_control_rejection("command", partition, str(exc))
 
     def _handle_raw_tx(self, payload: bytes) -> None:
         try:

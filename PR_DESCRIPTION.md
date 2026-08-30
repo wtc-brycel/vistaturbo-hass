@@ -1,75 +1,106 @@
-# Security: harden release/CI supply chain and audit historical Actions (#19)
+# VISTA command model and transactional semantic control
 
-Closes #19. This PR starts from merged runtime/frontend hardening PR #21 and keeps issue #20 out of scope. It does not change VISTA runtime, control, or parser behavior.
+Closes #20. This PR is based on merged `main` after #22 and preserves the security properties from #16, #17, and #18. It does not modify #19 or begin #20 follow-up work beyond the command-model scope described here.
 
-## Historical audit conclusion
+## Summary
 
-The five named commits and surrounding temporary validator runs were checked against local Git history, GitHub Actions run/job metadata and hosted logs, remote branch refs, tags, and the current RC11 release. The complete note is [docs/security/historical-actions-audit.md](docs/security/historical-actions-audit.md).
+This adds one canonical `VistaCommand` representation shared by keypad parsing, structured MQTT requests, keypad compilation, execution planning, verification, and the existing bounded local audit journal.
 
-The historical workflows had a genuine vulnerable design: branch-controlled patch/test code ran with an ephemeral `GITHUB_TOKEN` that had `contents: write`, and checkout persisted credentials. The audit found two expected bot mutations: `f0367702fa9652a5e153ae1971a0598686ab9f42` on `fix/editor-focus` and `0b16430063f01ebfb73bac7e45ef71ab0123f0e5` on `feature/alarm-binary-sensors`. Failed runs stopped before their write step. No evidence of credential misuse, unexpected repository mutation, long-lived credential exposure, tag tampering, release tampering, suspicious artifacts, or unusual network activity was found. No rotation, history rewrite, tag deletion, or release cleanup was warranted.
+The control path is now:
 
-## Completed #19 criteria
+```text
+logical keypad or semantic MQTT request
+  -> VistaCommand
+  -> deterministic parser/compiler and ExecutionPlan
+  -> existing serialized control coordinator
+  -> native VISTA command or owned <=5-stroke keypad fallback
+  -> panel acknowledgement and, for arm/disarm, fresh arming verification
+  -> one bounded audit row per interaction ID
+```
 
-### Normal CI
+## Follow-up execution corrections
 
-- `.github/workflows/tests.yml` now declares `contents: read` at workflow and job level.
-- Every checkout sets `persist-credentials: false`.
-- Every active third-party action is pinned to a full upstream commit SHA with its human-readable release beside it:
-  - `actions/checkout` `11bd71901bbe5b1630ceea73d27597364c9af683` (`v4.2.2`)
-  - `actions/setup-python` `a26af69be951a213d495a4c3e4e4022e16d87065` (`v5.6.0`)
-  - `actions/setup-node` `49933ea5288caeca8642d1e84afbd3f7d6820020` (`v4.4.0`)
-  - `actions/upload-artifact` `ea165f8d65b6e75b540449e92b4886f43607fa02` (`v4.6.2`)
-  - `actions/download-artifact` `634f93cb2916e3fdff6788551b99b062d0335ce0` (`v5.0.0`)
-- Normal tests do not commit or push and now use `npm ci`.
+- Raw keypad sequences are now accepted only on explicit logical-keypad or interactive command paths. Ordinary semantic actions reject a `sequence` override, so their audited meaning cannot diverge from the transmitted operation.
+- Native execution now requires proof that the native one-partition operation represents the complete `VistaCommand`; global partition selections and subtype-bearing commands use keypad fallback.
+- `#70` and `#77` no longer compile as complete commands at their namespace/action prefix. They require the explicit prompt continuation and documented menu-exit sequence, and the existing keypad owner remains held until that complete sequence has been transmitted.
+- `#77` now models the action-specific operand required by the selected action code (partition(s), relay, zone list, group, access point, or trigger) and compiles `action code → specifier → confirmation → quit` as one audited logical sequence.
+- Semantic `system_command` requests now compile their validated `#nn` namespace; unsupported operands are rejected instead of being silently ignored, and `GOTO 0` returns to the keypad's original partition.
+- Keypad fallback verification checks every requested global-arming partition. When panel telemetry proves only a Stay/Instant family and cannot prove the requested subtype, the result is `acknowledged_unverified` rather than `confirmed`.
 
-### Release-candidate boundary
+## Completed acceptance criteria
 
-- `validate` is read-only (`contents: read`, `checks: read`, `actions: read`), checks out the exact `github.sha` without credential persistence, validates metadata, waits for the exact commit's newest successful GitHub Actions `test`, `frontend-render`, and `repository-security` checks, and uploads a one-day artifact named for that SHA.
-- `publish` is the only job with `contents: write`; it has no checkout and executes only the fixed release publication shell path after downloading the SHA-bound artifact. It receives `actions: read` only in addition to the required contents write.
-- `release/rc.json` must contain exactly `tag`, `name`, and `notes`. Tags must match `vMAJOR.MINOR.PATCH-rc.NUMBER`; names are bounded to 120 safe printable characters; notes must be an existing regular `.md` file below `release/`, with no absolute path, traversal component, backslash, or escaping symlink. Publication uses fixed bundle names `notes.md`, `vista-keypad-card.js`, and `vista-keypad-simulator.html`.
-- Before any tag/release write, the workflow verifies the exact release SHA. Missing tags are created only at that SHA; existing lightweight or annotated tags are dereferenced and mismatches hard-fail. Existing releases must be the expected prerelease, non-draft release, and their downloaded expected assets must match the validated SHA-256 identities. Existing unrelated/mismatched releases hard-fail; a matching rerun exits idempotently.
-- The workflow no longer runs merely because the publication workflow file changes; release metadata changes remain the deliberate publication trigger.
+- Added fixed VISTA invariants: PINs are exactly four digits and semantic keypad zone operands are exactly three zero-padded digits. Zone lists are bounded and duplicate-free.
+- Added deterministic parser states for normal commands, bypass zones/groups, hash namespace, output control, instant activation, user management, global partition selection, programming, macro/function keys, and explicit unclassified/ambiguous cases.
+- Recognized normal disarm, Away, Stay subtypes, Instant subtypes, Maximum, walk test, chime, GOTO, user-capability, access relay, quick arm, quick exit, programming entry/exit, documented `#nn` families, `#70`, and representative `#77` action codes.
+- Added model/capability extension registration and conservative handling for function keys, panic ambiguity, bare-code entry, programming data, and prompt-dependent commands. The parser does not fabricate certainty when panel context is insufficient.
+- Added bidirectional compilation and planning. Core arm/disarm semantics prefer the existing native automation interface. Other supported deterministic operations use the existing keypad transaction path. Programming and interactive commands require their exact logical sequence.
+- Added `vista128/control/execute` as a compact structured MQTT API. It validates action-specific operands, preserves actor/source/interaction attribution, rejects malformed input, and does not create a large HA entity surface.
+- Kept legacy `partition/<partition>/command`, JSON keypad, and one-byte keypad paths compatible.
+- Preserved one keypad owner across all explicit `complete:false` segments and blocked unrelated panel writes while an interaction is open. Fallback compilation sends all segments through the existing synchronizer lock and per-frame transaction acknowledgement.
+- Enriched the existing `keypad_interactions` SQLite table in place with command type, exact PIN when part of the command, execution mechanism, parser confidence, and verification. Existing databases migrate automatically; lifecycle updates remain idempotent per request/segment and one interaction remains one row.
+- Preserved the deliberate issue #21 audit policy: the exact completed logical sequence, including PINs, is retained only in the bounded administrator-local audit. It is not emitted in logs, HA entities, retained MQTT state, control-result telemetry, browser events, or MQTT envelopes.
+- Preserved bounded event/audit retention and added coverage for semantic fields and full-sequence replacement after segmented request lifecycle updates.
+- Bumped the bridge/add-on to `0.2.6-rc.12` and the frontend card/simulator to `0.3.25`. Updated release metadata, changelog, installation cache-busting examples, semantic command documentation, fixed-width operand rules, audit behavior, and migration notes.
+- Preserved the fail-safe alarm/freshness, reconnect invalidation, TLS/no-downgrade, raw-TX privilege, Paho queue bounds, retained-topic cleanup, frontend unavailable rendering, CSS validation, and repository-security behavior from the merged security work.
 
-### Supply-chain inputs
+## API examples
 
-- `vista128_bridge/Dockerfile` now uses Home Assistant base `3.24` with immutable multi-architecture manifest digest `sha256:93ef607824e3f27e868f11b10938283a98bf880ed57bcf8eaa81c6c2d521f6f5`, verified from GHCR. Its manifest supports Linux `amd64` and `arm64` for the add-on's `amd64` and `aarch64` targets.
-- `paho-mqtt==2.1.0` remains pinned and now uses pip `--require-hashes` for the reviewed wheel and source distributions.
-- `@playwright/test` is upgraded from `1.55.0` to `1.62.1`; the lockfile is refreshed consistently.
-- Alpine packages remain selected by the immutable Home Assistant base's supported repositories rather than brittle exact APK versions. Exact APK freezing was deliberately left incomplete because it would make routine add-on builds unreliable against those repositories; this limitation is documented in the audit note.
+Publish to `vista128/control/execute` with retain disabled:
 
-### Regression guardrails
+```json
+{
+  "action": "arm",
+  "mode": "away",
+  "partition": 1,
+  "code": "1234",
+  "transaction_id": "ha-script-42",
+  "source": "ha_frontend",
+  "actor_id": "user-id",
+  "actor_name": "Home Admin"
+}
+```
 
-`scripts/check_repository_security.py` is a read-only repository check run by CI. It fails for mutable action refs, normal-workflow write permissions including scalar `permissions: write-all`, persisted checkout credentials, production `:latest` base images, unsafe release metadata, and ordinary test-workflow commit/push behavior. Unit tests cover valid pins, each policy failure, metadata traversal/symlink rejection, newest-check success rules, and mismatched tag/release identity handling.
+```json
+{
+  "action": "bypass_zones",
+  "partition": 1,
+  "code": "1234",
+  "zones": [1, 27, 104]
+}
+```
+
+The second request compiles to `12346001027104**` before five-stroke segmentation. The input is never placed in the normal control result.
 
 ## Deliberately incomplete
 
-- Exact Alpine package-version pinning is not used for the concrete compatibility reason above; the base image is pinned by digest and the limitation is documented.
-- The panel runtime and the full semantic keypad parser from issue #20 are intentionally untouched.
-- GitHub's repository-level default Actions permission setting cannot be changed from repository content; workflow-level and job-level permissions now explicitly enforce read-only normal CI, with write isolated to the trusted release job.
+- The parser does not decode the complete Compass/VISTA programming schema, every prompt-driven access-control menu, or every `#77` access-code extension. Those operations remain explicit interactive, model-specific, or unclassified commands and retain the exact logical sequence for later semantic work.
+- Full prompt acquisition from keypad display is represented by parser context, but this PR does not claim that every panel prompt can be inferred from a single captured display page. Held-key timing and A/B/C panic-vs-macro distinctions remain configuration-dependent.
+- The frontend continues to expose only ordinary `0-9`, `*`, and `#` input. A-D function buttons are not made executable by this PR.
+- The implementation exposes a structured MQTT API, not a new first-class Home Assistant service. A future service can call the same `VistaCommand` and coordinator API.
+- The panel serial-server connection remains unauthenticated plaintext and its checksum remains error detection, not authentication. Optional printer HTTP has the existing trusted-network assumption. These are documented operational limitations, not claims of cryptographic protection.
+- An acknowledged obscure keypad/menu operation may still be unverified when no authoritative state or event feedback exists. Native core arm/disarm continues to require fresh arming-state verification.
 
-## Migration notes
+No known behavior introduced by this PR can make a stale or ambiguous panel state look safely current. Ambiguous parsing and insufficient verification produce an explicit low-confidence/unverified result or rejection; they may produce a false negative for command confirmation, but not a new false-safe alarm/arming state.
 
-- No application configuration migration is required.
-- Release maintainers must keep release notes under `release/` as `.md` files and use the exact three-field `release/rc.json` schema. Moving a note outside that directory or using a non-RC tag now fails closed.
-- A release workflow-only change does not publish a release. Update `release/rc.json` deliberately when preparing the next candidate.
-- CI installs frontend dependencies from `package-lock.json` with `npm ci`; local contributors should use the same command.
+## Migration and compatibility
 
-## Tests and validation
+Existing SQLite databases are migrated automatically by adding empty semantic audit columns. Existing rows remain valid. The existing bridge control gates remain disabled by default. The new semantic topic is subscribed only when the existing global control gate and at least one execution gate are enabled. Existing keypad and partition topics remain available under their existing gates.
 
-- `python -m unittest discover -s scripts -p 'test_*.py' -v` — 11 passed.
-- `python scripts/check_repository_security.py` — passed.
-- Both active workflow YAML files parsed successfully with PyYAML.
-- `python -m py_compile scripts/*.py` — passed.
-- `python -m pip install --dry-run --require-hashes --no-deps -r vista128_bridge/requirements.txt` — passed.
-- `cd vista128_bridge && python -m unittest discover -s tests -v` — 156 passed locally and in CI.
-- `cd vista128_bridge && python -m py_compile app/vista_bridge/*.py tests/*.py` — passed locally.
-- `cd vista128_bridge && node --check ../frontend/vista-keypad-card.js` — passed locally.
-- `cd frontend && npm ci --no-audit --no-fund` — passed locally and in CI.
-- `cd frontend && npx playwright install --with-deps chromium` — local apt dependency installation was blocked by the managed runner's restricted privilege transitions.
-- `cd frontend && npx playwright install chromium --only-shell` — local browser download timed out; the browser-only fallback could not complete in this environment.
-- `cd frontend && npm run test:render` — the local run could not start because the new browser executable was unavailable after the download failure; the GitHub Actions runner completed all 49 tests successfully.
-- GitHub Actions push run `33259796496` and PR run `33259797682` — `test`, `frontend-render`, and `repository-security` all passed; `frontend-render` reports 49 passed.
-- Docker build validation — Docker is not installed in this environment. The GHCR `3.24` manifest was inspected and confirmed to contain Linux `amd64` and `arm64` entries with the pinned digest.
-- `git diff --check` — passed locally.
+Normal MQTT control ACLs should grant only the required `keypad/+/command`, `partition/+/command`, and optionally `control/execute` topics. Keep `admin/raw_tx` separate and do not grant it to ordinary HA control publishers. Actor metadata is attribution, not authorization.
 
-Known remaining security limitation: the panel serial-server transport remains unauthenticated plaintext by design, but that is outside #19's repository trust boundary and is documented in the runtime documentation. Within the repository/release boundary, no known path now grants normal test execution repository-write credentials or accepts a mismatched release identity.
+## Validation
+
+Local commands and results:
+
+- `cd vista128_bridge && python -m unittest discover -s tests -v`: **182 tests passed**.
+- `cd vista128_bridge && python -m py_compile app/vista_bridge/*.py tests/*.py`: **passed**.
+- `node --check ../frontend/vista-keypad-card.js`: **passed**.
+- `python scripts/check_repository_security.py`: **passed**.
+- `python -m unittest discover -s scripts -p 'test_*.py' -v`: **11 tests passed**.
+- `cd frontend && npm ci --no-audit --no-fund`: **passed** without lockfile changes.
+- `cd frontend && npx playwright install --with-deps chromium`: **blocked by the managed container's apt privilege restrictions** (`setgroups/setegid/seteuid` and apt archive permission errors).
+- `cd frontend && npm run test:render`: **49 tests attempted; browser launch was unavailable because Chromium was not installed**, so no frontend assertions executed locally. CI must run the full Chromium suite before merge.
+- `git diff --check`: **passed**.
+- GitHub Actions run **467** on the published head passed all jobs: `test`, `repository-security`, and `frontend-render`; the frontend job completed **49/49 Playwright tests passed**.
+
+The PR is intentionally left open for review and CI; it is not merged here.

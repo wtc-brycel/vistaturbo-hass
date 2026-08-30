@@ -81,6 +81,7 @@ class VistaBridge:
             self.enqueue_keypad_control,
             self.enqueue_alarm_control,
             self._record_control_audit,
+            self.control.enqueue_command,
         )
         self.handler = ProtocolMessageHandler(
             settings,
@@ -119,6 +120,14 @@ class VistaBridge:
             status=str(payload.get("status", "unknown")),
             ok=bool(payload.get("ok", False)),
             request_id=str(payload.get("request_id", "")),
+            command_type=str(payload.get("command_type", "")),
+            code=str(payload.get("code", "")),
+            execution_mechanism=str(payload.get("execution_mechanism", "")),
+            confidence=str(payload.get("confidence", "")),
+            verification=str(payload.get("verification", "")),
+            logical_command_sequence=str(
+                payload.get("logical_command_sequence", "")
+            ),
         )
 
     def enqueue_keypad_control(
@@ -137,6 +146,9 @@ class VistaBridge:
         metadata: dict | None = None,
     ) -> tuple[bool, str]:
         return self.control.enqueue_alarm(partition, action, code, metadata)
+
+    def enqueue_command_control(self, command, metadata: dict | None = None):
+        return self.control.enqueue_command(command, metadata)
 
     def enqueue_raw_tx(self, data: bytes) -> tuple[bool, str]:
         return self._enqueue_tx(data, source="debug", label="raw")
