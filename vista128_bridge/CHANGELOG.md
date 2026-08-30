@@ -7,6 +7,8 @@
 - Keep exact logical keypad sequences and four-digit PINs in the bounded local administrator audit, with normalized command type, operands, mechanism, confidence, and verification fields; never expose them in normal telemetry or logs.
 - Preserve keypad ownership across every explicit `complete:false` segment and serialize fallback segments through the existing panel transaction coordinator.
 - Reject raw sequence overrides on ordinary semantic actions, require complete `#70`/`#77` menu flows, and use native execution only when it preserves all command operands.
+- Model `#77` action-specific operands through confirmation and quit-menu, compile semantic `system_command` namespaces, reject unused action operands, and support `GOTO 0`.
+- Verify keypad fallback arming across every requested partition; subtype-bearing results are acknowledged as unverified when panel telemetry cannot prove the subtype.
 - Bump the bridge to RC12 and the card to `0.3.25`.
 
 ## 0.2.6-rc.11

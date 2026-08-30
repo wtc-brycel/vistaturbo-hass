@@ -91,10 +91,11 @@ class CommandModelTests(unittest.TestCase):
         self.assertEqual(instant.command_type, "instant_activation")
         self.assertEqual(instant.operands["action"], "arm_away")
         automatic_unbypass = KeypadParser().parse(
-            "1234#7731001027**", partition=1
+            "1234#7731*02*1*1*", partition=1
         )
-        self.assertEqual(automatic_unbypass.command_type, "automatic_unbypass")
-        self.assertEqual(automatic_unbypass.operands["zones"], ["001", "027"])
+        self.assertEqual(automatic_unbypass.command_type, "instant_activation")
+        self.assertEqual(automatic_unbypass.operands["action"], "automatic_unbypass")
+        self.assertEqual(automatic_unbypass.operands["zone_list"], "02")
         system = KeypadParser().parse("1234#60", partition=1)
         self.assertEqual(system.command_type, "event_log_display")
         self.assertEqual(
@@ -277,12 +278,13 @@ class CommandModelTests(unittest.TestCase):
                 "partition": 1,
                 "code": "1234",
                 "action_code": "21",
+                "partitions": [1, 3, 5],
                 "interactive": True,
-                "sequence": "1234#7721*1*1*",
+                "sequence": "1234#7721*135*1*1*",
             }
         )
         self.assertEqual(
-            compile_keypad_sequence(instant), "1234#7721*1*1*"
+            compile_keypad_sequence(instant), "1234#7721*135*1*1*"
         )
         with self.assertRaisesRegex(CommandValidationError, "quit the menu"):
             compile_keypad_sequence(
@@ -290,7 +292,7 @@ class CommandModelTests(unittest.TestCase):
                     command_type="instant_activation",
                     partition=1,
                     code="1234",
-                    operands={"action_code": "21"},
+                    operands={"action_code": "21", "partitions": [1]},
                     raw_sequence="1234#7721*1",
                 )
             )
@@ -303,8 +305,73 @@ class CommandModelTests(unittest.TestCase):
                 "system_command": "#60",
             }
         )
-        with self.assertRaisesRegex(CommandValidationError, "complete interactive"):
-            plan_command(system, native_available=False, keypad_available=True)
+        system_plan = plan_command(
+            system, native_available=False, keypad_available=True
+        )
+        self.assertEqual(system_plan.mechanism, "keypad")
+        self.assertEqual(system_plan.keypad_sequence, "1234#60")
+
+    def test_instant_activation_requires_matching_action_specific_operand(self):
+        command = command_from_request(
+            {
+                "action": "instant_activation",
+                "partition": 1,
+                "code": "1234",
+                "action_code": "21",
+                "partitions": [1, 3, 5],
+            }
+        )
+        self.assertEqual(
+            compile_keypad_sequence(command), "1234#7721*135*1*1*"
+        )
+        with self.assertRaisesRegex(CommandValidationError, "action-specific"):
+            compile_keypad_sequence(
+                VistaCommand(
+                    command_type="instant_activation",
+                    partition=1,
+                    code="1234",
+                    operands={
+                        "action_code": "21",
+                        "partitions": [1, 3, 5],
+                    },
+                    raw_sequence="1234#7721*13*1*1*",
+                )
+            )
+        with self.assertRaisesRegex(CommandValidationError, "unsupported operand"):
+            command_from_request(
+                {
+                    "action": "instant_activation",
+                    "partition": 1,
+                    "code": "1234",
+                    "action_code": "21",
+                    "partitions": [1],
+                    "relay": "04",
+                }
+            )
+
+    def test_goto_zero_returns_to_original_partition(self):
+        command = command_from_request(
+            {
+                "action": "goto_partition",
+                "partition": 1,
+                "code": "1234",
+                "target_partition": 0,
+            }
+        )
+        self.assertEqual(compile_keypad_sequence(command), "1234*0")
+        parsed = KeypadParser().parse("1234*0", partition=1)
+        self.assertEqual(parsed.operands["target_partition"], 0)
+
+    def test_action_specific_operands_are_not_silently_ignored(self):
+        with self.assertRaisesRegex(CommandValidationError, "subtype"):
+            command_from_request(
+                {
+                    "action": "arm_away",
+                    "partition": 1,
+                    "code": "1234",
+                    "operands": {"subtype": "1"},
+                }
+            )
 
     def test_compile_and_plan_choose_native_or_keypad(self):
         command = command_from_request(

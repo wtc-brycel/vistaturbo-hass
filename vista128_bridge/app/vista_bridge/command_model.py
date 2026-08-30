@@ -41,6 +41,55 @@ RAW_SEQUENCE_COMMAND_TYPES = frozenset(
     }
 )
 
+INSTANT_ACTIVATION_ACTIONS = {
+    "01": "relay_on", "02": "relay_off", "03": "relay_close_2_seconds",
+    "04": "relay_close_minutes", "05": "relay_close_seconds",
+    "06": "relay_group_on", "07": "relay_group_off",
+    "08": "relay_group_close_2_seconds", "09": "relay_group_close_minutes",
+    "10": "relay_group_close_seconds", "20": "arm_stay", "21": "arm_away",
+    "22": "disarm", "23": "force_arm_stay", "24": "force_arm_away",
+    "25": "arm_instant", "26": "arm_maximum", "30": "automatic_bypass",
+    "31": "automatic_unbypass", "40": "opening_window", "41": "closing_window",
+    "42": "access_window", "55": "access_point_grant", "56": "access_point_grant_override",
+    "57": "access_point_protect", "58": "access_point_bypass", "59": "access_point_lock",
+    "60": "access_point_exit", "61": "access_group_grant", "62": "access_group_grant_override",
+    "63": "access_group_protect", "64": "access_group_bypass", "66": "access_group_exit",
+    "67": "access_partition_grant", "68": "access_partition_grant_override",
+    "69": "access_partition_protect", "70": "access_partition_bypass",
+    "71": "access_partition_lock", "72": "access_partition_exit",
+    "73": "access_trigger_on", "74": "access_trigger_off",
+    "77": "access_group_enable", "78": "access_group_disable",
+}
+
+INSTANT_PARTITION_ACTIONS = frozenset({"20", "21", "22", "23", "24", "25", "26", "40", "41"})
+INSTANT_RELAY_ACTIONS = frozenset({"01", "02", "03", "04", "05"})
+INSTANT_RELAY_GROUP_ACTIONS = frozenset({"06", "07", "08", "09", "10"})
+INSTANT_ZONE_LIST_ACTIONS = frozenset({"30", "31"})
+INSTANT_ACCESS_GROUP_ACTIONS = frozenset({"42", "61", "62", "63", "64", "66", "77", "78"})
+INSTANT_ACCESS_POINT_ACTIONS = frozenset({"55", "56", "57", "58", "59", "60"})
+INSTANT_ACCESS_PARTITION_ACTIONS = frozenset({"67", "68", "69", "70", "71", "72"})
+INSTANT_TRIGGER_ACTIONS = frozenset({"73", "74"})
+
+
+def _instant_specifier_field(action_code: str) -> str:
+    if action_code in INSTANT_PARTITION_ACTIONS:
+        return "partitions"
+    if action_code in INSTANT_RELAY_ACTIONS:
+        return "relay"
+    if action_code in INSTANT_RELAY_GROUP_ACTIONS:
+        return "relay_group"
+    if action_code in INSTANT_ZONE_LIST_ACTIONS:
+        return "zone_list"
+    if action_code in INSTANT_ACCESS_GROUP_ACTIONS:
+        return "group"
+    if action_code in INSTANT_ACCESS_POINT_ACTIONS:
+        return "access_point"
+    if action_code in INSTANT_ACCESS_PARTITION_ACTIONS:
+        return "partition"
+    if action_code in INSTANT_TRIGGER_ACTIONS:
+        return "trigger"
+    return ""
+
 
 class CommandValidationError(ValueError):
     """Raised when a semantic or keypad command is not safe to execute."""
@@ -515,7 +564,7 @@ class KeypadParser:
                 operands={"user": user, "interactive": True} if user else {"interactive": True},
                 **common,
             )
-        if tail.startswith("*") and len(tail) == 2 and tail[1] in "12345678":
+        if tail.startswith("*") and len(tail) == 2 and tail[1] in "012345678":
             return VistaCommand(command_type="goto_partition", confidence="high", operands={"target_partition": int(tail[1])}, **common)
         if tail.startswith("#"):
             return self._parse_system_namespace(tail[1:], context, common)
@@ -603,45 +652,30 @@ class KeypadParser:
                 **common,
             )
         if command_number == "77" and len(suffix) >= 2 and suffix[:2].isdigit():
-            actions = {
-                "01": "relay_on", "02": "relay_off", "03": "relay_close_2_seconds",
-                "04": "relay_close_minutes", "05": "relay_close_seconds", "06": "relay_group_on",
-                "07": "relay_group_off", "08": "relay_group_close_2_seconds", "09": "relay_group_close_minutes",
-                "10": "relay_group_close_seconds", "20": "arm_stay", "21": "arm_away", "22": "disarm",
-                "23": "force_arm_stay", "24": "force_arm_away", "25": "arm_instant", "26": "arm_maximum",
-                "30": "automatic_bypass", "31": "automatic_unbypass", "40": "opening_window",
-                "41": "closing_window", "42": "access_window",
-            }
             action_code = suffix[:2]
-            zone_text = suffix[2:-2] if suffix.endswith("**") else ""
-            if action_code in {"30", "31"} and zone_text:
-                if len(zone_text) % 3 == 0 and zone_text.isdigit():
-                    zones = tuple(
-                        zone_text[index:index + 3]
-                        for index in range(0, len(zone_text), 3)
-                    )
-                    try:
-                        normalized_zones = normalize_zones(zones)
-                    except CommandValidationError:
-                        normalized_zones = ()
-                    if normalized_zones:
-                        return VistaCommand(
-                            command_type=(
-                                "automatic_bypass"
-                                if action_code == "30"
-                                else "automatic_unbypass"
-                            ),
-                            confidence="high",
-                            operands={
-                                "action_code": action_code,
-                                "zones": list(normalized_zones),
-                            },
-                            **common,
-                        )
+            action = INSTANT_ACTIVATION_ACTIONS.get(action_code)
+            remainder = suffix[2:]
+            specifier = ""
+            complete = False
+            if remainder.startswith("*") and remainder.endswith("*1*1*"):
+                specifier = remainder[1:-5]
+                complete = bool(specifier)
+            operands = {
+                "action_code": action_code,
+                "action": action,
+                "interactive": True,
+            }
+            if complete:
+                operands["action_specifier"] = specifier
+                field_name = _instant_specifier_field(action_code)
+                if field_name == "partitions":
+                    operands["partitions"] = [int(value) for value in specifier]
+                elif field_name:
+                    operands[field_name] = specifier
             return VistaCommand(
                 command_type="instant_activation",
-                confidence="medium" if action_code in actions else "low",
-                operands={"action_code": action_code, "action": actions.get(action_code), "interactive": True},
+                confidence="high" if action and complete else ("medium" if action else "low"),
+                operands=operands,
                 **common,
             )
         extension = context.extensions.get(f"#{command_number}") or context.extensions.get(command_number)
@@ -706,7 +740,13 @@ def command_from_request(
     if not isinstance(operands, Mapping):
         raise CommandValidationError("command operands must be an object")
     operands = dict(operands)
+    if action == "arm":
+        operands.pop("mode", None)
+    for key in ("subtype", "partitions", "global_arming"):
+        if key not in operands and key in request:
+            operands[key] = request[key]
     code = request.get("code", operands.get("code", ""))
+    operands.pop("code", None)
     if code:
         code = validate_pin(code)
     raw_sequence = request.get("sequence", request.get("keys", request.get("raw_sequence", "")))
@@ -759,8 +799,8 @@ def command_from_request(
         operands["group"] = f"{group_number:02d}"
     if action == "goto_partition":
         target = operands.get("target_partition", request.get("target_partition"))
-        if isinstance(target, bool) or not isinstance(target, int) or not 1 <= target <= 8:
-            raise CommandValidationError("GOTO target partition must be 1..8")
+        if isinstance(target, bool) or not isinstance(target, int) or not 0 <= target <= 8:
+            raise CommandValidationError("GOTO target partition must be 0..8")
         operands["target_partition"] = target
     if action == "output_control":
         device = operands.get("device", request.get("device"))
@@ -779,6 +819,7 @@ def command_from_request(
         if not isinstance(action_code, str) or re.fullmatch(r"[0-9]{2}", action_code) is None:
             raise CommandValidationError("instant activation action code must be two digits")
         operands["action_code"] = action_code
+        _normalize_instant_activation_operands(operands, request)
     if action in {"arm_away", "arm_home", "arm_maximum", "arm_instant", "arm_night", "disarm"}:
         selected = operands.get("partitions")
         if selected is not None:
@@ -802,6 +843,7 @@ def command_from_request(
         if not isinstance(namespace, str) or re.fullmatch(r"#[0-9]{2}", namespace) is None:
             raise CommandValidationError("system command must use the #nn namespace")
         operands["system_command"] = namespace
+    _validate_operand_schema(action, operands)
     return VistaCommand(
         command_type=action,
         partition=partition,
@@ -817,8 +859,134 @@ def command_from_request(
     )
 
 
+def _validate_operand_schema(command_type: str, operands: Mapping[str, Any]) -> None:
+    """Reject operands which the selected compiler/operation cannot consume."""
+    allowed = {
+        "disarm": {"partitions", "global_arming"},
+        "arm_away": {"partitions", "global_arming"},
+        "arm_home": {"partitions", "global_arming", "subtype"},
+        "arm_night": {"partitions", "global_arming", "subtype"},
+        "arm_instant": {"partitions", "global_arming", "subtype"},
+        "arm_maximum": {"partitions", "global_arming"},
+        "force_arm_away": {"partitions", "global_arming"},
+        "force_arm_home": {"partitions", "global_arming"},
+        "zone_bypass": {"zones"},
+        "unbypass_zones": {"zones"},
+        "bypass_zones": {"zones"},
+        "group_bypass": {"group"},
+        "goto_partition": {"target_partition"},
+        "output_control": {"device", "state", "interactive"},
+        "instant_activation": {
+            "action_code", "action", "action_specifier", "interactive",
+            "partitions", "relay", "relay_group", "zone_list", "group",
+            "access_point", "partition", "trigger",
+        },
+        "system_command": {"system_command"},
+    }.get(command_type)
+    if allowed is None:
+        return
+    unsupported = sorted(set(operands) - allowed)
+    if unsupported:
+        raise CommandValidationError(
+            f"unsupported operand(s) for {command_type}: {', '.join(unsupported)}"
+        )
+    if command_type in {"arm_away", "arm_maximum", "force_arm_away", "force_arm_home", "disarm"} and "subtype" in operands:
+        raise CommandValidationError(
+            f"subtype is not supported for {command_type}"
+        )
+    if "global_arming" in operands and operands["global_arming"] is not True:
+        raise CommandValidationError("global_arming must be true when supplied")
+    if command_type in {
+        "disarm", "arm_away", "arm_home", "arm_night", "arm_instant",
+        "arm_maximum", "force_arm_away", "force_arm_home",
+    } and "partitions" in operands and not operands.get("global_arming"):
+        raise CommandValidationError(
+            "partition operands require an explicit global arming selection"
+        )
+    if command_type in {
+        "disarm", "arm_away", "arm_home", "arm_night", "arm_instant",
+        "arm_maximum", "force_arm_away", "force_arm_home",
+    } and operands.get("global_arming") and "partitions" not in operands:
+        raise CommandValidationError(
+            "global arming requires an explicit partition selection"
+        )
+
+
+def _normalize_instant_activation_operands(
+    operands: dict[str, Any], request: Mapping[str, Any]
+) -> None:
+    for key in (
+        "partitions", "relay", "relay_group", "zone_list", "group",
+        "access_point", "partition", "trigger", "action_specifier",
+    ):
+        request_key = "target_partition" if key == "partition" else key
+        if key not in operands and request_key in request:
+            operands[key] = request[request_key]
+    action_code = operands["action_code"]
+    action = INSTANT_ACTIVATION_ACTIONS.get(action_code)
+    if action is None:
+        raise CommandValidationError(
+            f"unsupported #77 action code: {action_code}"
+        )
+    requested_action = operands.get("action", request.get("action_name"))
+    if requested_action and requested_action != action:
+        raise CommandValidationError(
+            "#77 action does not match its action code"
+        )
+    operands["action"] = action
+    field_name = _instant_specifier_field(action_code)
+    if not field_name:
+        raise CommandValidationError(
+            f"#77 action code {action_code} has no supported operand schema"
+        )
+    for key in (
+        "partitions", "relay", "relay_group", "zone_list", "group",
+        "access_point", "partition", "trigger",
+    ):
+        if key in operands and key != field_name:
+            raise CommandValidationError(
+                f"unsupported operand for #77 action {action_code}: {key}"
+            )
+    for key in (field_name, "action_specifier"):
+        if key not in operands and key in request:
+            operands[key] = request[key]
+    if field_name == "partitions":
+        if "partitions" in operands:
+            partitions = normalize_partitions(operands["partitions"])
+            specifier = "".join(str(value) for value in partitions)
+            operands["partitions"] = list(partitions)
+        else:
+            specifier = operands.get("action_specifier", "")
+            if not isinstance(specifier, str) or not re.fullmatch(r"[0-8]+", specifier) or not specifier:
+                raise CommandValidationError("#77 partition action requires partition(s)")
+            if "0" in specifier and specifier != "0":
+                raise CommandValidationError("#77 partition action cannot mix all-partitions 0 with explicit partitions")
+            if specifier != "0" and len(set(specifier)) != len(specifier):
+                raise CommandValidationError("#77 partition action contains duplicate partitions")
+            if specifier != "0":
+                operands["partitions"] = [int(value) for value in specifier]
+        operands["action_specifier"] = specifier
+        return
+    value = operands.get(field_name, operands.get("action_specifier", ""))
+    if field_name == "partition":
+        if isinstance(value, int):
+            value = str(value)
+        if not isinstance(value, str) or not re.fullmatch(r"[1-8]", value):
+            raise CommandValidationError("#77 partition action requires partition 1..8")
+    else:
+        if isinstance(value, int):
+            value = f"{value:02d}"
+        if not isinstance(value, str) or re.fullmatch(r"[0-9]{2}", value) is None or value == "00":
+            raise CommandValidationError(
+                f"#77 {field_name.replace('_', ' ')} action requires a two-digit operand"
+            )
+    operands[field_name] = value
+    operands["action_specifier"] = value
+
+
 def compile_keypad_sequence(command: VistaCommand) -> str:
     """Compile a semantic command into the exact logical keypad sequence."""
+    _validate_operand_schema(command.command_type, command.operands)
     if command.raw_sequence:
         if command.command_type not in RAW_SEQUENCE_COMMAND_TYPES:
             raise CommandValidationError(
@@ -890,21 +1058,20 @@ def compile_keypad_sequence(command: VistaCommand) -> str:
         return code + "6*" + group
     if command_type == "goto_partition":
         target = operands.get("target_partition")
-        if not isinstance(target, int) or not 1 <= target <= 8:
-            raise CommandValidationError("GOTO target partition must be 1..8")
+        if not isinstance(target, int) or not 0 <= target <= 8:
+            raise CommandValidationError("GOTO target partition must be 0..8")
         return code + "*" + str(target)
     if command_type == "output_control":
         raise CommandValidationError(
             "output_control requires its complete interactive keypad sequence, including menu exit"
         )
     if command_type == "instant_activation":
-        raise CommandValidationError(
-            "instant_activation requires its complete interactive keypad sequence, including menu exit"
-        )
+        return _compile_instant_activation_sequence(command)
     if command_type == "system_command":
-        raise CommandValidationError(
-            "system_command requires its complete interactive keypad sequence"
-        )
+        namespace = operands.get("system_command")
+        if not isinstance(namespace, str) or re.fullmatch(r"#[0-9]{2}", namespace) is None:
+            raise CommandValidationError("system command must use the #nn namespace")
+        return code + namespace
     if command_type in {"program_enter", "program_menu_enter", "program_exit", "program_exit_local", "program_field_change"}:
         raise CommandValidationError("programming commands require their exact keypad sequence")
     raise CommandValidationError(f"no keypad compiler exists for {command_type}")
@@ -948,20 +1115,30 @@ def _validate_interactive_sequence(command: VistaCommand) -> None:
             )
         return
 
-    action_code = command.operands.get("action_code")
-    if not isinstance(action_code, str) or re.fullmatch(r"[0-9]{2}", action_code) is None:
-        raise CommandValidationError("instant activation action code must be two digits")
-    prefix = command.code + "#77" + action_code
-    if not sequence.startswith(prefix):
-        raise CommandValidationError(
-            "instant activation sequence does not match its action code"
-        )
-    # #77 is committed only after its action specifier, confirmation, and
-    # quit-menu prompts have been completed.  Each continuation is a '*'.
     if not sequence.endswith("*1*1*"):
         raise CommandValidationError(
             "instant activation sequence must complete confirmation and quit the menu"
         )
+    expected = _compile_instant_activation_sequence(command)
+    if sequence != expected:
+        raise CommandValidationError(
+            "instant activation sequence does not match its action-specific operands"
+        )
+
+
+def _compile_instant_activation_sequence(command: VistaCommand) -> str:
+    if not command.code:
+        raise CommandValidationError("instant activation requires an exactly four-digit PIN")
+    operands = dict(command.operands)
+    _normalize_instant_activation_operands(operands, {})
+    return (
+        command.code
+        + "#77"
+        + operands["action_code"]
+        + "*"
+        + operands["action_specifier"]
+        + "*1*1*"
+    )
 
 
 def _validate_known_menu_exit(sequence: str) -> None:
@@ -970,10 +1147,29 @@ def _validate_known_menu_exit(sequence: str) -> None:
         raise CommandValidationError(
             "#70 keypad sequence must press * and exit the relay menu with 00"
         )
-    if re.match(r"[0-9]{4}#77[0-9]{2}", sequence) and not sequence.endswith("*1*1*"):
-        raise CommandValidationError(
-            "#77 keypad sequence must complete confirmation and quit the menu"
+    if re.match(r"[0-9]{4}#77[0-9]{2}", sequence):
+        if not sequence.endswith("*1*1*"):
+            raise CommandValidationError(
+                "#77 keypad sequence must complete confirmation and quit the menu"
+            )
+        action_start = 7
+        separator = sequence.find("*", action_start)
+        if separator < 0 or separator != action_start + 2 or not sequence[action_start:separator].isdigit():
+            raise CommandValidationError("#77 keypad sequence must include an action specifier")
+        action_code = sequence[action_start:separator]
+        specifier = sequence[separator + 1: -5]
+        if not specifier or not _specifier_is_valid(action_code, specifier):
+            raise CommandValidationError("#77 keypad sequence has an invalid action specifier")
+
+
+def _specifier_is_valid(action_code: str, specifier: str) -> bool:
+    if action_code in INSTANT_PARTITION_ACTIONS:
+        return bool(re.fullmatch(r"0|[1-8]+", specifier)) and (
+            specifier == "0" or len(set(specifier)) == len(specifier)
         )
+    if action_code in INSTANT_ACCESS_PARTITION_ACTIONS:
+        return bool(re.fullmatch(r"[1-8]", specifier))
+    return bool(re.fullmatch(r"[0-9]{2}", specifier)) and specifier != "00"
 
 
 def compile_keypad_segments(command: VistaCommand, *, max_strokes: int = 5) -> tuple[str, ...]:

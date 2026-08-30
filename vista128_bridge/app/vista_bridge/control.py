@@ -601,11 +601,13 @@ class VistaControlCoordinator:
 
             native_action = NATIVE_COMMANDS.get(command.command_type, "")
             if native_action:
-                confirmed = await self._verify_arming(request, native_action)
+                confirmed, verification_status = await self._verify_arming(
+                    request, native_action
+                )
                 self._result(
                     request,
                     confirmed,
-                    "confirmed" if confirmed else "verification_mismatch",
+                    verification_status,
                     action=command.command_type,
                 )
             else:
@@ -634,23 +636,47 @@ class VistaControlCoordinator:
         if request.generation != self._current_generation() or not self.is_connected():
             self._result(request, False, "connection_lost_after_send")
             return
-        confirmed = await self._verify_arming(request, plan.native_action)
+        confirmed, verification_status = await self._verify_arming(
+            request, plan.native_action
+        )
         self._result(
             request,
             confirmed,
-            "confirmed" if confirmed else "verification_mismatch",
+            verification_status,
             action=command.command_type,
         )
 
-    async def _verify_arming(self, request: ControlRequest, action: str) -> bool:
+    async def _verify_arming(
+        self, request: ControlRequest, action: str
+    ) -> tuple[bool, str]:
         if self.settings.verify_delay_ms:
             await asyncio.sleep(self.settings.verify_delay_ms / 1000)
         if request.generation != self._current_generation() or not self.is_connected():
-            return False
+            return False, "verification_mismatch"
         refreshed = await self.synchronizer.run_arming_refresh()
-        partition = self.state.partitions.get(request.partition)
-        raw_mode = partition.raw_mode if partition is not None else ""
-        return bool(refreshed and raw_mode in EXPECTED_ARMING_MODES.get(action, set()))
+        if not refreshed:
+            return False, "verification_mismatch"
+        expected = EXPECTED_ARMING_MODES.get(action, set())
+        command = request.command
+        operands = command.operands if command is not None else request.operands or {}
+        selected = operands.get("partitions") if isinstance(operands, dict) else None
+        partitions = (
+            tuple(int(value) for value in selected)
+            if isinstance(selected, (list, tuple)) and selected
+            else (request.partition,)
+        )
+        for partition_number in partitions:
+            partition = self.state.partitions.get(partition_number)
+            raw_mode = partition.raw_mode if partition is not None else ""
+            if raw_mode not in expected:
+                return False, "verification_mismatch"
+        # H/I telemetry proves the arming family but not the requested
+        # subtype (the panel does not expose that distinction in this
+        # snapshot). Never upgrade that partial evidence to "confirmed".
+        subtype = operands.get("subtype") if isinstance(operands, dict) else None
+        if subtype:
+            return True, "acknowledged_unverified"
+        return True, "confirmed"
 
     def _audit_command(self, request: ControlRequest) -> tuple[VistaCommand, str]:
         command = request.command

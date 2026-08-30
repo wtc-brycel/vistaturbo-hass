@@ -203,6 +203,56 @@ class ControlCoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.audit[-1]["command_sequence"], "12346001027104**")
         self.assertEqual(self.audit[-1]["command_type"], "zone_bypass")
 
+    async def test_global_keypad_arming_verifies_every_requested_partition(self):
+        control = self.make_control(keypad=True, alarm=False)
+        control.set_automation_available(True)
+        for partition in (1, 3, 5):
+            self.state.partitions[partition].raw_mode = "A"
+        command = command_from_request(
+            {
+                "action": "arm_away",
+                "partition": 1,
+                "code": "1234",
+                "operands": {"partitions": [1, 3, 5]},
+            },
+            interaction_id="global-arm",
+        )
+        self.assertEqual(control.enqueue_command(command), (True, "queued"))
+        await control.process_next()
+        self.assertEqual(self.results[-1]["status"], "confirmed")
+        self.state.partitions[5].raw_mode = "D"
+        command = command_from_request(
+            {
+                "action": "arm_away",
+                "partition": 1,
+                "code": "1234",
+                "operands": {"partitions": [1, 3, 5]},
+            },
+            interaction_id="global-arm-mismatch",
+        )
+        self.assertEqual(control.enqueue_command(command), (True, "queued"))
+        await control.process_next()
+        self.assertEqual(self.results[-1]["status"], "verification_mismatch")
+
+    async def test_subtype_fallback_is_acknowledged_but_not_over_verified(self):
+        control = self.make_control(keypad=True, alarm=False)
+        control.set_automation_available(True)
+        self.state.partitions[1].raw_mode = "H"
+        command = command_from_request(
+            {
+                "action": "arm_home",
+                "partition": 1,
+                "code": "1234",
+                "operands": {"subtype": "2"},
+            },
+            interaction_id="subtyped-arm",
+        )
+        self.assertEqual(control.enqueue_command(command), (True, "queued"))
+        await control.process_next()
+        self.assertTrue(self.results[-1]["ok"])
+        self.assertEqual(self.results[-1]["status"], "acknowledged_unverified")
+        self.assertEqual(self.audit[-1]["verification"], "acknowledged_unverified")
+
     async def test_prompt_command_keeps_keypad_owned_until_menu_exit_sequence(self):
         control = self.make_control(keypad=True, alarm=False)
         control.set_automation_available(True)
