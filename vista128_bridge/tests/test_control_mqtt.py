@@ -121,7 +121,7 @@ class ControlMqttTests(unittest.TestCase):
                 "interaction_complete": True,
             },
         )
-        self.assertRegex(received[0][2]["started_at"], r"^2026-08-29T")
+        self.assertRegex(received[0][2]["started_at"], r"^\d{4}-\d{2}-\d{2}T")
         self.assertRegex(received[0][2]["request_id"], r"^[0-9a-f]{32}$")
 
     def test_rejected_keypad_interaction_is_audited_without_envelope(self):
