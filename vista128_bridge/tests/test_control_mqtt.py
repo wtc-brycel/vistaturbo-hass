@@ -108,7 +108,7 @@ class ControlMqttTests(unittest.TestCase):
             {
                 key: value
                 for key, value in received[0][2].items()
-                if key not in {"started_at", "request_id"}
+                if key not in {"started_at", "request_id", "audit_interaction_id"}
             },
             {
                 "interaction_id": "interaction-1",
