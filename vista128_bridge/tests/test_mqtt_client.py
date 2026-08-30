@@ -81,6 +81,7 @@ class MqttPublisherTests(unittest.TestCase):
         }
         expected = {
             "fire": "Partition 1 Fire Alarm",
+            "panic_audible": "Partition 1 Audible Panic Alarm",
             "burglary": "Partition 1 Burglary Alarm",
             "auxiliary": "Partition 1 Auxiliary Alarm",
             "active": "Partition 1 Alarm Active",
@@ -104,6 +105,7 @@ class MqttPublisherTests(unittest.TestCase):
             initialized=True,
             session_fresh=True,
             fire_alarm_led=True,
+            audible_panic_alarm=False,
             burglary_alarm_led=False,
             auxiliary_alarm_led=False,
         )
@@ -113,6 +115,7 @@ class MqttPublisherTests(unittest.TestCase):
         self.publisher.publish_alarm_states(state)
         published = {item[0]: item[1] for item in self.publisher._client.published}
         self.assertEqual(published["vista128/keypad/1/alarm/fire"], "ON")
+        self.assertEqual(published["vista128/keypad/1/alarm/panic_audible"], "OFF")
         self.assertEqual(published["vista128/keypad/1/alarm/burglary"], "OFF")
         self.assertEqual(published["vista128/keypad/1/alarm/auxiliary"], "OFF")
         self.assertEqual(published["vista128/keypad/1/alarm/active"], "ON")
@@ -127,7 +130,7 @@ class MqttPublisherTests(unittest.TestCase):
         self.publisher.publish_keypad_state(keypad)
         self.publisher.publish_alarm_states(state)
         published = {item[0]: item[1] for item in self.publisher._client.published}
-        for alarm_type in ("fire", "burglary", "auxiliary", "active"):
+        for alarm_type in ("fire", "panic_audible", "burglary", "auxiliary", "active"):
             self.assertEqual(
                 published[f"vista128/keypad/1/alarm/{alarm_type}/available"],
                 "OFF",
@@ -142,6 +145,7 @@ class MqttPublisherTests(unittest.TestCase):
         }
         for alarm_type, name in {
             "fire": "Fire Alarm",
+            "panic_audible": "Audible Panic Alarm",
             "burglary": "Burglary Alarm",
             "auxiliary": "Auxiliary Alarm",
             "active": "Alarm Active",
@@ -152,6 +156,7 @@ class MqttPublisherTests(unittest.TestCase):
 
         state = VistaState()
         state.keypads[1].fire_alarm_led = False
+        state.keypads[1].audible_panic_alarm = False
         state.keypads[1].burglary_alarm_led = False
         state.keypads[1].auxiliary_alarm_led = False
         # Partition 4 is not a configured keypad partition, but a live alarm there
@@ -179,6 +184,7 @@ class MqttPublisherTests(unittest.TestCase):
             keypad.session_fresh = True
             keypad.fire_alarm_led = False
             keypad.supervisory_led = False
+            keypad.audible_panic_alarm = False
             keypad.burglary_alarm_led = False
             keypad.auxiliary_alarm_led = False
         state.arming_initialized = True
@@ -191,12 +197,14 @@ class MqttPublisherTests(unittest.TestCase):
         published = {item[0]: item[1] for item in self.publisher._client.published}
         self.assertEqual(published["vista128/alarm/fire/available"], "ON")
         self.assertEqual(published["vista128/alarm/fire"], "OFF")
+        self.assertEqual(published["vista128/alarm/panic_audible/available"], "ON")
+        self.assertEqual(published["vista128/alarm/panic_audible"], "OFF")
         self.assertEqual(published["vista128/alarm/active/available"], "ON")
         self.assertEqual(published["vista128/alarm/active"], "OFF")
 
     def test_silent_and_duress_are_panel_alarm_entities(self):
         self.publisher.publish_discovery()
-        for alarm_type in ("silent", "duress", "supervisory"):
+        for alarm_type in ("panic_audible", "silent", "duress", "supervisory"):
             topic = f"homeassistant/binary_sensor/vista128_bridge/alarm_{alarm_type}/config"
             self.assertTrue(any(item[0] == topic and item[1] for item in self.publisher._client.published))
 
@@ -412,7 +420,6 @@ class MqttPublisherTests(unittest.TestCase):
             published["homeassistant/sensor/vista128_bridge/automation_availability_source/config"]
         )
         self.assertEqual(source["state_topic"], "vista128/panel/automation_availability_source")
-
 
 
 if __name__ == "__main__":
