@@ -78,6 +78,7 @@ class VistaSynchronizer:
         self._pending_transaction: PendingTransaction | None = None
         self._session_tainted = False
         self._resync_reason = ""
+        self._recovery_resync_pending = False
         self._startup_complete = False
         self._program_mode = False
         self.failures_total = 0
@@ -107,6 +108,7 @@ class VistaSynchronizer:
         self._pending_transaction = None
         self._session_tainted = False
         self._resync_reason = ""
+        self._recovery_resync_pending = False
         self._startup_complete = False
         self._program_mode = False
 
@@ -230,6 +232,14 @@ class VistaSynchronizer:
 
     def set_program_mode(self, active: bool) -> None:
         self._program_mode = active
+        if (
+            not active
+            and self._recovery_resync_pending
+            and self._startup_complete
+            and self.is_connected()
+        ):
+            self._recovery_resync_pending = False
+            self._resync_requested.set()
 
     def request_full_resync(self, reason: str) -> None:
         if not self.is_connected():
@@ -238,6 +248,17 @@ class VistaSynchronizer:
             return
         self._resync_reason = reason
         self._resync_requested.set()
+
+    def request_recovery_resync(self, reason: str) -> bool:
+        """Queue one full snapshot after detected loss of trustworthy RX state."""
+        if not self.is_connected() or self._session_tainted:
+            return False
+        self._resync_reason = reason
+        if not self._startup_complete or self._program_mode:
+            self._recovery_resync_pending = True
+            return True
+        self._resync_requested.set()
+        return True
 
     def request_keypad_refresh(self, partition: int) -> None:
         if not self.keypad_settings.enabled or not self.is_connected():
@@ -262,6 +283,9 @@ class VistaSynchronizer:
             self.force_reconnect()
             return
         self._check_snapshot()
+        if self._recovery_resync_pending and not self._program_mode:
+            self._recovery_resync_pending = False
+            self._resync_requested.set()
         if self.event_history_enabled and self.event_history_startup_dump_enabled:
             await self.run_event_log_dump()
 
@@ -322,16 +346,26 @@ class VistaSynchronizer:
     async def resync_loop(self) -> None:
         while self.is_connected():
             await self._resync_requested.wait()
-            self._resync_requested.clear()
+            if not self.is_connected():
+                return
+            # Coalesce a burst of recovery requests before issuing the expensive
+            # full snapshot. Requests arriving while the transaction itself is
+            # running remain set and will receive another pass afterward.
+            await asyncio.sleep(0.5)
             if not self.is_connected():
                 return
             reason = self._resync_reason or "panel event"
-            await asyncio.sleep(0.5)
-            await self.run_sync(
+            self._resync_requested.clear()
+            ok = await self.run_sync(
                 STARTUP_QUERIES,
                 source="resync",
                 description=f"full VISTA resynchronization ({reason})",
             )
+            if not ok:
+                LOG.warning("Full VISTA resynchronization failed; reconnecting")
+                self.force_reconnect()
+                return
+            self._check_snapshot()
 
     async def _refresh_keypads(self, partitions: Sequence[int]) -> None:
         if self._program_mode:
