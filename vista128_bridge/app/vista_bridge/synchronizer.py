@@ -157,16 +157,17 @@ class VistaSynchronizer:
     async def run_arming_refresh(self) -> bool:
         # Verification is a read-only reconciliation of one already-known
         # dimension. Do not make all HA state unavailable merely because the
-        # verification query is in flight; a timeout already taints/reconnects
-        # the session and therefore invalidates state through the session reset.
+        # verification query is in flight. If verification actually fails, the
+        # arming dimension is no longer trustworthy and becomes unavailable.
         ok = await self.run_sync(
             (ARMING_STATUS_QUERY,),
             source="control-verify",
             description="post-control arming verification",
             invalidate_snapshot=False,
         )
-        if ok:
-            self._check_snapshot()
+        if not ok:
+            self._invalidate_queries((ARMING_STATUS_QUERY,))
+        self._check_snapshot()
         return ok
 
     def mark_descriptor_complete(self) -> bool:
