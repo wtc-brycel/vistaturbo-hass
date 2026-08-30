@@ -101,70 +101,77 @@ Port numbers are device-specific. The current StarTech installation uses TCP por
 
 ## Configuration
 
+The Home Assistant Options editor intentionally exposes deployment choices and user-facing features rather than every runtime constant. Normal installations should only need the panel connection, partitions, desired control surfaces, and any optional features in use.
+
+Default options:
+
 ```yaml
 panel_host: 10.2.2.141
 panel_port: 10001
 panel_timezone: America/New_York
+keypad_partitions: "1"
+
+control_enabled: false
+keypad_control_enabled: false
+native_alarm_control_enabled: false
+chime_zones: ""
+
+event_history_startup_dump_enabled: false
+
+transport_print_enabled: false
+transport_host: ""
+transport_http_port: 9101
+transport_print_width: 32
+
+raw_logging: false
+debug_raw_tx_enabled: false
+```
+
+The editor also supports these optional settings without requiring them to exist in older installations:
+
+```yaml
+event_history_max_age_days: 90
 mqtt_base_topic: vista128
 mqtt_discovery_prefix: homeassistant
-reconnect_min_seconds: 1
-connect_timeout_seconds: 5
-reconnect_max_seconds: 30
-frame_idle_ms: 250
-raw_logging: false
-raw_mqtt_enabled: false
 mqtt_tls_enabled: false
 mqtt_tls_ca: ""
 mqtt_tls_client_cert: ""
 mqtt_tls_client_key: ""
-mqtt_outbound_queue_max: 256
-mqtt_inflight_messages_max: 20
-startup_sync_enabled: true
-startup_sync_initial_delay_ms: 1000
-startup_sync_command_delay_ms: 500
-startup_sync_response_timeout_seconds: 5
-periodic_sync_enabled: true
-periodic_sync_interval_seconds: 300
-periodic_sync_reconnect_after_failures: 3
-keypad_display_enabled: true
-keypad_partitions: "1"
-keypad_poll_interval_seconds: 7
-keypad_event_refresh_delay_ms: 250
-chime_zones: ""
-control_enabled: false
-keypad_control_enabled: false
-native_alarm_control_enabled: false
-control_response_timeout_seconds: 3
-control_verify_delay_ms: 400
-event_history_enabled: true
-event_history_startup_dump_enabled: false
-event_history_recent_limit: 20
-keypad_audit_enabled: true
-event_history_max_age_days: 90
-event_history_max_rows: 10000
-transport_print_enabled: false
-transport_host: ""
-transport_http_port: 9101
-transport_print_timeout_seconds: 5
-transport_print_retry_seconds: 10
-transport_print_queue_max: 5000
-transport_print_width: 32
-debug_raw_tx_enabled: false
-tx_queue_max: 128
-raw_tx_queue_max: 16
+raw_mqtt_enabled: false
 ```
 
 `panel_host` is the IP address or resolvable hostname of the serial-to-IP device. `panel_port` is its raw TCP listener.
 
 `keypad_partitions` is a comma-separated list of partitions whose keypad display should be queried, for example `"1"` or `"1,2"`. A real keypad should exist on each queried partition. Partition 1 is the default.
 
-`startup_sync_enabled` should remain `true` for normal operation. The startup transaction establishes the authoritative arming, Zone Status, and zone-to-partition snapshot used by Home Assistant. Disabling it intentionally prevents the bridge from establishing that complete snapshot on a new TCP session.
+`chime_zones` is Vista Turbo RS232's centralized dashboard-chime policy. Supply comma-separated VISTA zone numbers and ascending ranges, for example `"1,2,5-8,27"`. Valid zones are 1 through 128. An empty string disables bridge-generated chime events. A listed zone increments `chime_sequence` only for a new false-to-faulted `F5` transition after arming state is initialized and while the resolved partition is disarmed. Duplicate fault reports and faults while armed do not chime.
 
-The keypad display is queried every 7 seconds by default. Valid unsolicited system events also request a debounced keypad refresh for the affected configured partition. All keypad queries share the same serialized transaction lock as startup and periodic synchronization.
+### Internal operating defaults
+
+Protocol timing and bounded-resource controls are intentionally not user-facing. The supported runtime defaults are:
+
+- TCP connect timeout: 5 seconds
+- reconnect backoff: 1 to 30 seconds
+- serial idle-frame flush: 250 ms
+- MQTT disconnected queue: 256 messages
+- MQTT in-flight window: 20 messages
+- startup synchronization: enabled, with 1000 ms initial delay, 500 ms command pacing, and 5 second response timeout
+- periodic arming reconciliation: enabled every 300 seconds; reconnect after 3 consecutive failures
+- keypad display polling: enabled every 7 seconds with a 250 ms event-refresh debounce
+- control response timeout: 3 seconds; verification delay: 400 ms
+- event journal: enabled, recent Home Assistant window 20 rows, keypad audit enabled, internal row cap 10000
+- TransPort delivery: 5 second timeout, 10 second retry delay, internal pending queue cap 5000
+- command queues: 128 normal commands and 16 guarded raw commands
+
+These values are implementation behavior, not tuning knobs. Old stored values for removed tuning options are deleted from Supervisor configuration during startup so upgrades do not leave stale schema warnings.
+
+### MQTT security and namespaces
+
+The App gets broker host, port, username, and password from Home Assistant's MQTT service. `mqtt_base_topic` and `mqtt_discovery_prefix` remain optional overrides for installations that deliberately customized their MQTT namespace.
 
 Panel TCP transport is unauthenticated plaintext. The VISTA packet checksum is error detection, not authentication. Place the serial server on an isolated security VLAN and use a firewall rule allowing only this bridge to reach its TCP port.
 
-MQTT can remain plaintext for an isolated trusted LAN, but the preferred setting is TLS:
+MQTT can remain plaintext for an isolated trusted LAN. TLS remains available with the optional settings:
 
 ```yaml
 mqtt_tls_enabled: true
@@ -174,15 +181,11 @@ mqtt_tls_client_cert: /config/mqtt/client.pem
 mqtt_tls_client_key: /config/mqtt/client.key
 ```
 
-When enabled, the broker certificate is verified and TLS failures never downgrade to plaintext. Broker ACLs are required with or without TLS. Grant normal operation topics such as `vista128/keypad/+/command` and `vista128/partition/+/command` separately from the privileged raw topic.
-
-Paho's disconnected QoS outbound queue is bounded by `mqtt_outbound_queue_max` (default 256), and its in-flight QoS window is bounded by `mqtt_inflight_messages_max` (default 20). When either limit is reached, new publishes fail visibly; the App does not create a second retry queue. Increase these only with a deliberate memory budget.
-
-`chime_zones` is Vista Turbo RS232's own centralized dashboard-chime policy. It is intentionally separate from any chime programming transported on the VISTA ECP bus. Supply comma-separated VISTA zone numbers and ascending ranges, for example `"1,2,5-8,27"`. Valid zones are 1 through 128. An empty string disables bridge-generated chime events. A listed zone increments `chime_sequence` only for a new false-to-faulted `F5` transition after arming state is initialized and while the resolved partition is disarmed. Duplicate fault reports and faults while armed do not chime. The keypad entity also exposes `chime_zone`, `chime_descriptor`, and `chime_at`.
+When enabled, the broker certificate is verified and TLS failures never downgrade to plaintext. The client certificate and key must be configured together. Broker ACLs are required with or without TLS. Grant normal operation topics such as `vista128/keypad/+/command` and `vista128/partition/+/command` separately from the privileged raw topic.
 
 ## Experimental keypad and native alarm control
 
-RC7 contains the first panel write path, but it remains disabled by default. Enabling one feature requires the global gate plus that feature gate:
+Panel write paths remain disabled by default. Enabling a control surface requires the global gate plus the corresponding feature gate:
 
 ```yaml
 control_enabled: true
@@ -190,25 +193,25 @@ keypad_control_enabled: true
 native_alarm_control_enabled: true
 ```
 
-`keypad_control_enabled` permits only ordinary `0-9`, `*`, and `#` keypad strokes. A-D function buttons and panic encodings are not exposed through the normal keypad command topic. The Home Assistant keypad publishes each key immediately as a one-key non-retained QoS 1 JSON request with `complete: true`; there is no browser-side SEND or finish-command boundary. Each key is an atomic serialized panel transaction, and the card preserves press order for its own key stream. A separate short-lived audit interaction ID groups rapid human entry into one bounded audit row without delaying panel delivery or using the audit identity as a control/reservation token. The bridge rejects retained control messages and ties queued commands to one panel TCP session so a reconnect cannot replay a stale key or alarm request. The former one-byte key payload remains compatible with existing callers; new integrations should use JSON.
+`keypad_control_enabled` permits ordinary keypad interaction through the serialized logical keypad path. The bridge ties queued commands to one panel TCP session so a reconnect cannot replay a stale key or alarm request. Control transactions share the same transaction serialization used by synchronization.
 
-When `keypad_audit_enabled` is true, each accepted or rejected logical command is recorded in the local bounded `keypad_interactions` table as one upserted row per interaction ID. The row includes the exact completed sequence, actor metadata supplied by Home Assistant, partition, source, normalized action when known, structured operands when known, timestamps, and outcome. PINs are therefore present in this administrator-only local audit by design; they are not emitted in MQTT result telemetry, HA entities, or bridge logs. Actor metadata is attribution, not authentication, and must not replace MQTT/HA/broker access control.
+The bounded local keypad-interaction audit records accepted and rejected logical interactions with actor metadata supplied by Home Assistant, partition, source, normalized action and operands when known, timestamps, outcome, and the exact completed logical keypad sequence. PINs are therefore present in this administrator-only local audit by design; they are not emitted in MQTT result telemetry, Home Assistant entities, or bridge logs. Actor metadata is attribution, not authentication, and must not replace MQTT/Home Assistant/broker access control.
 
-`native_alarm_control_enabled` adds Home Assistant Away, Home/Stay, Night/Instant, and Disarm actions to the MQTT alarm-control-panel entity. Home Assistant uses remote-code validation and passes the entered four-digit code to the bridge for the native VISTA command. The bounded local keypad-interaction audit stores the exact completed logical command sequence, including that four-digit code, with actor, partition, action, and outcome metadata. It is not stored in MQTT discovery or control-result telemetry, and control TX ASCII and hex payloads remain redacted from the bridge log.
+`native_alarm_control_enabled` adds Home Assistant Away, Home/Stay, Night/Instant, and Disarm actions to the MQTT alarm-control-panel entity. Home Assistant uses remote-code validation and passes the entered four-digit code to the bridge for the native VISTA command. The local audit stores the exact completed logical command sequence, including that four-digit code, with actor, partition, action, and outcome metadata.
 
-Every control transaction shares the same serialization lock used by state synchronization. The bridge requires the panel to have reported `08XN` Communication On / Automation Interface Available. `08XF` immediately blocks new control and discards queued requests. `08OK` is treated as flow-control acknowledgement only. Native arm/disarm is followed by a fresh arming-status query and compared with the requested mode.
+The bridge requires the panel to have reported `08XN` Communication On / Automation Interface Available. `08XF` immediately blocks new control and discards queued requests. `08OK` is treated as flow-control acknowledgement only. Native arm/disarm is followed by a fresh arming-status query and compared with the requested mode.
 
-Keypad strokes do not perform a blocking KD query after every digit. After `08OK`, the normal keypad-refresh path is requested so rapid code entry stays responsive while the display catches up asynchronously.
-
-`control_response_timeout_seconds` defaults to 3. `control_verify_delay_ms` defaults to 400 and applies to native alarm verification.
+The compact semantic command topic at `vista128/control/execute` accepts actions including `arm`, `disarm`, `bypass_zones`, `quick_bypass`, `group_bypass`, `chime`, `goto_partition`, `output_control`, `system_command`, and `keypad_command`. PINs must be exactly four digits and zones are normalized to exactly three digits. Semantic results omit PINs and raw sequences. Raw `sequence` overrides are reserved for explicit logical-keypad or interactive commands. `system_command` compiles its validated `#nn` namespace without an arbitrary raw override. `output_control` and `instant_activation` require complete menu-exit sequences, not just their `#70`/`#77` prefixes; #77 also requires an action-specific operand before confirmation and quit. GOTO accepts target `0` to return to the original partition.
 
 ## Event journal and historical panel log
 
-`event_history_enabled` defaults to `true`. The App stores decoded events in `/data/vista128_events.sqlite3` using SQLite WAL mode. Live `1Bnq` notifications are written immediately. The journal is local to the App data directory and survives App upgrades/restarts. The same database contains a bounded keypad-interaction audit when `keypad_audit_enabled` is enabled; it includes sensitive panel security information such as completed PIN-bearing commands, so protect the App data directory and configure its retention deliberately.
+The event journal is a core feature and is enabled internally. The App stores decoded events in `/data/vista128_events.sqlite3` using SQLite WAL mode. Live `1Bnq` notifications are written immediately. The journal survives App upgrades and restarts.
 
-`event_history_recent_limit` controls how many recent rows (1 through 100, default 20) are mirrored into the Home Assistant **Event Journal** sensor attributes. This is intentionally a window rather than the complete journal so Home Assistant Recorder does not repeatedly persist hundreds of historical events. The SQLite event journal and the optional `keypad_interactions` audit table are bounded by `event_history_max_age_days` (default 90) and `event_history_max_rows` (default 10000); pruning runs in bounded batches. The audit keeps one row per completed logical keypad interaction, including the exact command sequence and PIN when present, plus actor, partition, action, operands, timestamps, and outcome. It is local-only, creates no HA entity, and contains sensitive panel/security information. Protect the App data directory. The Event Journal entity remains available while the panel TCP link is down as long as the bridge process itself is online.
+The same database contains the bounded keypad-interaction audit. Because that audit contains sensitive panel security information such as completed PIN-bearing commands, protect the App data directory.
 
-`event_history_startup_dump_enabled` defaults to `false` in the first release containing this feature. When enabled, a successful startup synchronization is followed by the documented historical-log request:
+`event_history_max_age_days` controls retention and defaults to 90 days when omitted. An internal 10000-row cap prevents unbounded database growth. The Home Assistant **Event Journal** sensor mirrors only the most recent 20 rows in attributes so Recorder does not repeatedly persist the complete journal.
+
+`event_history_startup_dump_enabled` defaults to `false`. When enabled, a successful startup synchronization is followed by the documented historical-log request:
 
 ```text
 08LD00A8
@@ -216,8 +219,7 @@ Keypad strokes do not perform a blocking KD query after every digit. After `08OK
 
 Historical entries are decoded from `ld` packets and the transaction completes on `08lc0069`. The query uses the same serialized transaction lock as keypad and state synchronization. Historical rows are merged with matching live occurrences, and repeated identical events within one panel minute are preserved with stable occurrence numbers. Imported historical entries never call the live event state machine and therefore cannot create alarm/chime/printer/keypad side effects.
 
-The protocol parser also recognizes `08XF` (Communication Off) and `10DC` (Display Changed). `08XF` drives the **Automation Interface Available** diagnostic. `10DC` is logged passively only until it is observed and validated on the current panel.
-
+The protocol parser also recognizes `08XF` (Communication Off) and `10DC` (Display Changed). `08XF` drives the **Automation Interface Available** diagnostic. `10DC` is logged passively until it is observed and validated on the current panel.
 
 ## Automation availability and control gating
 
@@ -462,10 +464,7 @@ Default topics include:
 - `vista128/sync/consecutive_failures`
 - `vista128/panel/clock_offset_seconds`
 
-When `raw_mqtt_enabled` is explicitly enabled, valid raw frames are additionally
-published to the non-retained `vista128/raw/frame` diagnostic topic. Raw frame
-logging is separately controlled by `raw_logging`, and both settings are false
-by default.
+When `raw_mqtt_enabled` is explicitly enabled, valid raw frames are additionally published to the non-retained `vista128/raw/frame` diagnostic topic. Raw frame logging is separately controlled by `raw_logging`, and both settings are false by default.
 
 The observed `69ZS` packet is recognized and validated for diagnostics but does not update zone state. `49ZS` block reports are used for zone state.
 
@@ -487,7 +486,7 @@ Delivery rules:
 - HTTP 4xx: failed
 - timeout, disconnect, or 5xx after submission starts: uncertain, no automatic replay
 
-The printer endpoint is trusted-network-only unless the configured endpoint genuinely provides authenticated TLS. An unauthenticated HTTP response confirms only the endpoint response, not end-to-end physical printing. `transport_print_queue_max` bounds pending jobs; terminal completed, failed, and uncertain spool records are also capped at that same limit without deleting pending work.
+The printer endpoint is trusted-network-only unless the configured endpoint genuinely provides authenticated TLS. An unauthenticated HTTP response confirms only the endpoint response, not end-to-end physical printing. The pending spool is internally bounded at 5000 jobs; terminal completed, failed, and uncertain spool records are capped without deleting pending work.
 
 ## Raw transmit
 
@@ -497,7 +496,7 @@ The printer endpoint is trusted-network-only unless the configured endpoint genu
 {"ascii":"..."}
 ```
 
-The topic is intentionally separate from normal HA/keypad operation so broker ACLs can deny raw transmit to ordinary automation users. The old confirmation phrase was not authentication and is not accepted. The bridge validates ASCII or hex encoding, limits payloads to 512 bytes, uses a bounded low-priority raw queue, and cannot starve synchronization/control traffic. Raw MQTT frame publication and raw payload logging are both off by default; opt-in diagnostics prefer message type, length, validity, checksum status, and timestamps and do not retain raw ASCII.
+The topic is intentionally separate from normal Home Assistant/keypad operation so broker ACLs can deny raw transmit to ordinary automation users. The bridge validates ASCII or hex encoding, limits payloads to 512 bytes, uses a bounded low-priority raw queue, and cannot starve synchronization/control traffic. Raw MQTT frame publication and raw payload logging are both off by default; opt-in diagnostics prefer message type, length, validity, checksum status, and timestamps and do not retain raw ASCII.
 
 ## Design constraints
 
