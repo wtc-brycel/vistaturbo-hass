@@ -32,9 +32,11 @@ def keypad_disabled() -> KeypadSettings:
 
 
 class SyncStrategyTests(unittest.IsolatedAsyncioTestCase):
-    async def test_periodic_loop_polls_arming_status_only(self):
+    async def test_periodic_loop_polls_arming_status_only_without_availability_flap(self):
         connected = True
         sent = []
+        invalidated = []
+        snapshot_checks = []
         sync = None
 
         def is_connected():
@@ -57,6 +59,8 @@ class SyncStrategyTests(unittest.IsolatedAsyncioTestCase):
             is_connected,
             send_query,
             lambda: None,
+            on_query_start=lambda query: invalidated.append(query.name),
+            on_snapshot_check=lambda: snapshot_checks.append(True),
         )
 
         await sync.periodic_loop()
@@ -66,6 +70,60 @@ class SyncStrategyTests(unittest.IsolatedAsyncioTestCase):
             [("periodic", "arming_status", b"08as0064\r\n")],
         )
         self.assertNotIn("zone_status", {label for _, label, _ in sent})
+        self.assertEqual(invalidated, [])
+        self.assertEqual(snapshot_checks, [True])
+
+    async def test_failed_periodic_reconciliation_invalidates_arming_freshness(self):
+        connected = True
+        invalidated = []
+        snapshot_checks = []
+
+        def send_query(data, source, label):
+            nonlocal connected
+            connected = False
+            return False, "tx_queue_full"
+
+        sync = VistaSynchronizer(
+            sync_settings(),
+            keypad_disabled(),
+            False,
+            False,
+            lambda: connected,
+            send_query,
+            lambda: None,
+            on_query_start=lambda query: invalidated.append(query.name),
+            on_snapshot_check=lambda: snapshot_checks.append(True),
+        )
+
+        await sync.periodic_loop()
+
+        self.assertEqual(invalidated, ["arming_status"])
+        self.assertEqual(snapshot_checks, [True])
+        self.assertEqual(sync.failures_consecutive, 1)
+
+    async def test_post_control_arming_verification_does_not_invalidate_snapshot(self):
+        invalidated = []
+        sync = None
+
+        def send_query(data, source, label):
+            loop = asyncio.get_running_loop()
+            loop.call_soon(sync.mark_protocol_message, label)
+            loop.call_soon(sync.mark_ready)
+            return True, "queued"
+
+        sync = VistaSynchronizer(
+            sync_settings(),
+            keypad_disabled(),
+            False,
+            False,
+            lambda: True,
+            send_query,
+            lambda: None,
+            on_query_start=lambda query: invalidated.append(query.name),
+        )
+
+        self.assertTrue(await sync.run_arming_refresh())
+        self.assertEqual(invalidated, [])
 
     async def test_full_resync_retains_zone_snapshot_queries_and_rechecks_freshness(self):
         connected = True
@@ -83,9 +141,9 @@ class SyncStrategyTests(unittest.IsolatedAsyncioTestCase):
         )
         sync._startup_complete = True
 
-        async def capture_run_sync(queries, *, source, description):
+        async def capture_run_sync(queries, *, source, description, **kwargs):
             nonlocal connected
-            calls.append((tuple(query.name for query in queries), source, description))
+            calls.append((tuple(query.name for query in queries), source, description, kwargs))
             connected = False
             return True
 
@@ -94,11 +152,12 @@ class SyncStrategyTests(unittest.IsolatedAsyncioTestCase):
         await sync.resync_loop()
 
         self.assertEqual(len(calls), 1)
-        names, source, description = calls[0]
+        names, source, description, kwargs = calls[0]
         self.assertEqual(names, tuple(query.name for query in STARTUP_QUERIES))
         self.assertIn("zone_status", names)
         self.assertEqual(source, "resync")
         self.assertIn("state_loss", description)
+        self.assertEqual(kwargs, {})
         self.assertEqual(snapshot_checks, [True])
 
     async def test_recovery_requests_are_debounced_into_one_full_snapshot(self):
@@ -115,7 +174,7 @@ class SyncStrategyTests(unittest.IsolatedAsyncioTestCase):
         )
         sync._startup_complete = True
 
-        async def capture_run_sync(queries, *, source, description):
+        async def capture_run_sync(queries, *, source, description, **kwargs):
             nonlocal connected
             calls.append((tuple(query.name for query in queries), source, description))
             connected = False
@@ -144,7 +203,7 @@ class SyncStrategyTests(unittest.IsolatedAsyncioTestCase):
         )
         sync._startup_complete = True
 
-        async def capture_run_sync(queries, *, source, description):
+        async def capture_run_sync(queries, *, source, description, **kwargs):
             nonlocal connected, second_requested
             calls.append((tuple(query.name for query in queries), source, description))
             if not second_requested:
@@ -176,7 +235,7 @@ class SyncStrategyTests(unittest.IsolatedAsyncioTestCase):
         )
         sync._startup_complete = True
 
-        async def failed_run_sync(queries, *, source, description):
+        async def failed_run_sync(queries, *, source, description, **kwargs):
             return False
 
         sync.run_sync = failed_run_sync
@@ -197,7 +256,7 @@ class SyncStrategyTests(unittest.IsolatedAsyncioTestCase):
             lambda: None,
         )
 
-        async def successful_startup_sync(queries, *, source, description):
+        async def successful_startup_sync(queries, *, source, description, **kwargs):
             return True
 
         sync.run_sync = successful_startup_sync
