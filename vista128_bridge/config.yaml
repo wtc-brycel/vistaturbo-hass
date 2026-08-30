@@ -29,7 +29,7 @@ options:
   mqtt_tls_ca: ""
   mqtt_tls_client_cert: ""
   mqtt_tls_client_key: ""
-  mqtt_outbound_queue_max: 256
+  mqtt_outbound_queue_max: 4096
   mqtt_inflight_messages_max: 20
   startup_sync_enabled: true
   startup_sync_initial_delay_ms: 1000
