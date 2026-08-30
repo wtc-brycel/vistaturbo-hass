@@ -4,6 +4,9 @@ from dataclasses import dataclass
 import os
 
 
+MQTT_OUTBOUND_QUEUE_MIN = 4096
+
+
 def _bool_env(name: str, default: bool = False) -> bool:
     value = os.getenv(name)
     if value is None:
@@ -63,7 +66,7 @@ class MqttSettings:
     tls_ca: str = ""
     tls_client_cert: str = ""
     tls_client_key: str = ""
-    outbound_queue_max: int = 256
+    outbound_queue_max: int = MQTT_OUTBOUND_QUEUE_MIN
     inflight_messages_max: int = 20
 
 
@@ -136,6 +139,9 @@ class Settings:
 
     @classmethod
     def from_env(cls) -> "Settings":
+        requested_outbound_queue = int(
+            os.environ.get("MQTT_OUTBOUND_QUEUE_MAX", str(MQTT_OUTBOUND_QUEUE_MIN))
+        )
         settings = cls(
             panel=PanelSettings(
                 host=os.environ["PANEL_HOST"].strip(),
@@ -159,8 +165,9 @@ class Settings:
                 tls_ca=os.environ.get("MQTT_TLS_CA", "").strip(),
                 tls_client_cert=os.environ.get("MQTT_TLS_CLIENT_CERT", "").strip(),
                 tls_client_key=os.environ.get("MQTT_TLS_CLIENT_KEY", "").strip(),
-                outbound_queue_max=int(
-                    os.environ.get("MQTT_OUTBOUND_QUEUE_MAX", "256")
+                outbound_queue_max=max(
+                    MQTT_OUTBOUND_QUEUE_MIN,
+                    requested_outbound_queue,
                 ),
                 inflight_messages_max=int(
                     os.environ.get("MQTT_INFLIGHT_MESSAGES_MAX", "20")
@@ -240,8 +247,10 @@ class Settings:
             raise ValueError(
                 "mqtt_tls_client_cert and mqtt_tls_client_key must be configured together"
             )
-        if not 1 <= self.mqtt.outbound_queue_max <= 10000:
-            raise ValueError("mqtt_outbound_queue_max must be 1..10000")
+        if not MQTT_OUTBOUND_QUEUE_MIN <= self.mqtt.outbound_queue_max <= 10000:
+            raise ValueError(
+                f"mqtt_outbound_queue_max must be {MQTT_OUTBOUND_QUEUE_MIN}..10000"
+            )
         if not 1 <= self.mqtt.inflight_messages_max <= 1000:
             raise ValueError("mqtt_inflight_messages_max must be 1..1000")
         if self.sync.periodic_interval_seconds < 60:
