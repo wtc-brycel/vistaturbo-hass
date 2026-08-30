@@ -128,6 +128,26 @@ class SyncStrategyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(invalidated, [])
         self.assertEqual(snapshot_checks, [True])
 
+    async def test_failed_post_control_verification_invalidates_arming_freshness(self):
+        invalidated = []
+        snapshot_checks = []
+        sync = VistaSynchronizer(
+            sync_settings(),
+            keypad_disabled(),
+            False,
+            False,
+            lambda: True,
+            lambda data, source, label: (False, "tx_queue_full"),
+            lambda: None,
+            on_query_start=lambda query: invalidated.append(query.name),
+            on_snapshot_check=lambda: snapshot_checks.append(True),
+        )
+
+        self.assertFalse(await sync.run_arming_refresh())
+        self.assertEqual(invalidated, ["arming_status"])
+        self.assertEqual(snapshot_checks, [True])
+        self.assertEqual(sync.failures_consecutive, 1)
+
     async def test_full_resync_retains_zone_snapshot_queries_and_rechecks_freshness(self):
         connected = True
         calls = []
