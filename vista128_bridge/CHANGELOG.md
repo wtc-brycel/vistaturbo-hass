@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.6-rc.14
+
+- Remove the synthetic keypad SEND/finish-command workflow and restore immediate physical-keypad semantics for `0-9`, `*`, and `#`.
+- Publish each press as an ordered one-key QoS 1 non-retained request with `complete: true`; panel delivery never waits for inactivity.
+- Keep control transaction IDs atomic while grouping rapid entry under a separate bounded audit interaction ID so individual PIN digits are not stored as separate audit rows.
+- Add browser regressions for immediate rapid/slow entry, literal `*`/`#`, absence of SEND UI, actor attribution, and redacted DOM events.
+- Bump the App to RC14 and the keypad card to `0.3.26`.
+
 ## 0.2.6-rc.12
 
 - Add a canonical `VistaCommand` model, deterministic keypad parser, bounded compiler, and native-preferred execution planner for semantic Home Assistant/MQTT control.
