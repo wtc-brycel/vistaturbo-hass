@@ -2,7 +2,7 @@
 
 Home Assistant App for the native RS-232 automation interface on Honeywell/Resideo VISTA Turbo alarm panels.
 
-> **Release candidate status:** 0.2.6-rc.14 is the current release candidate. It has been developed and tested for monitoring on a VISTA-128BPT; experimental control gates default to off.
+> **Release candidate status:** 0.2.6-rc.15 is the current release candidate. It has been developed and tested for monitoring on a VISTA-128BPT; experimental control gates default to off.
 
 ## What you get in Home Assistant
 
@@ -152,7 +152,7 @@ debug_raw_tx_enabled: false
 
 `keypad_partitions` accepts a comma-separated partition list such as `"1"` or `"1,2"`. `chime_zones` accepts comma-separated zone numbers and ascending ranges such as `"1,2,5-8,27"`; listed zones chime only on a new fault transition while the resolved partition is known to be disarmed.
 
-The MQTT disconnected-QoS queue and in-flight window are bounded internally. Publish overflow is reported rather than retried through an unbounded application queue.
+The MQTT disconnected-QoS queue and in-flight window are bounded internally. RC15 uses a 4096-message outbound queue to provide headroom for the 128-zone startup cleanup/discovery burst while retaining a finite memory bound. Publish overflow is reported rather than retried through an unbounded application queue.
 
 See `DOCS.md` for runtime defaults, optional MQTT security/namespace overrides, and protocol details.
 
