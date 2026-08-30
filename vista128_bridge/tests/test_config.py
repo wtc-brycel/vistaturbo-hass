@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "app"))
 
-from vista_bridge.config import Settings  # noqa: E402
+from vista_bridge.config import MQTT_OUTBOUND_QUEUE_MIN, Settings  # noqa: E402
 
 
 class ConfigTests(unittest.TestCase):
@@ -35,8 +35,30 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(settings.event_history.max_rows, 500)
         self.assertFalse(settings.raw_logging)
         self.assertFalse(settings.raw_mqtt_enabled)
-        self.assertEqual(settings.mqtt.outbound_queue_max, 512)
+        self.assertEqual(settings.mqtt.outbound_queue_max, MQTT_OUTBOUND_QUEUE_MIN)
         self.assertEqual(settings.mqtt.inflight_messages_max, 32)
+
+    def test_existing_small_mqtt_queue_is_raised_for_full_bootstrap(self):
+        environment = {
+            "PANEL_HOST": "127.0.0.1",
+            "PANEL_PORT": "10001",
+            "MQTT_HOST": "127.0.0.1",
+            "MQTT_OUTBOUND_QUEUE_MAX": "256",
+        }
+        with patch.dict(os.environ, environment, clear=True):
+            settings = Settings.from_env()
+        self.assertEqual(settings.mqtt.outbound_queue_max, 4096)
+
+    def test_larger_mqtt_queue_setting_is_preserved(self):
+        environment = {
+            "PANEL_HOST": "127.0.0.1",
+            "PANEL_PORT": "10001",
+            "MQTT_HOST": "127.0.0.1",
+            "MQTT_OUTBOUND_QUEUE_MAX": "8192",
+        }
+        with patch.dict(os.environ, environment, clear=True):
+            settings = Settings.from_env()
+        self.assertEqual(settings.mqtt.outbound_queue_max, 8192)
 
     def test_tls_client_certificate_and_key_must_be_a_pair(self):
         environment = {
