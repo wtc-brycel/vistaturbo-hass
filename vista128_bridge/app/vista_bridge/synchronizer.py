@@ -159,12 +159,15 @@ class VistaSynchronizer:
         # dimension. Do not make all HA state unavailable merely because the
         # verification query is in flight; a timeout already taints/reconnects
         # the session and therefore invalidates state through the session reset.
-        return await self.run_sync(
+        ok = await self.run_sync(
             (ARMING_STATUS_QUERY,),
             source="control-verify",
             description="post-control arming verification",
             invalidate_snapshot=False,
         )
+        if ok:
+            self._check_snapshot()
+        return ok
 
     def mark_descriptor_complete(self) -> bool:
         transaction = self._pending_transaction
