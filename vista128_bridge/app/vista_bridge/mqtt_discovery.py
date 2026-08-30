@@ -41,6 +41,11 @@ KEYPAD_ALARM_SPECS = {
         "label": "Fire Alarm",
         "icon": "mdi:fire-alert",
     },
+    "panic_audible": {
+        "attribute": "audible_panic_alarm",
+        "label": "Audible Panic Alarm",
+        "icon": "mdi:alarm-bell",
+    },
     "burglary": {
         "attribute": "burglary_alarm_led",
         "label": "Burglary Alarm",
@@ -53,9 +58,9 @@ KEYPAD_ALARM_SPECS = {
     },
 }
 
-# Panel-wide alarm entities are derived from the event/state model, not from
-# keypad LEDs. Silent and duress alarms have no ordinary speaker LED but are
-# still security alarms and must be represented here.
+# Panel-wide alarm entities are derived from the event/state model, not only
+# from physical keypad LEDs. Silent and duress alarms have no ordinary speaker
+# LED but are still security alarms and must be represented here.
 PANEL_ALARM_SPECS = {
     **KEYPAD_ALARM_SPECS,
     "silent": {

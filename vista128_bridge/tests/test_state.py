@@ -189,7 +189,7 @@ class StateTests(unittest.TestCase):
         self.assertTrue(keypad.silenced_led)
         self.assertTrue(state.partitions[1].fire_silenced)
 
-    def test_audible_alarm_families_drive_native_keypad_sound_state(self):
+    def test_auxiliary_is_distinct_from_burglary_and_audible_panic(self):
         state = VistaState()
         keypad = state.keypads[1]
         keypad.initialized = True
@@ -199,17 +199,46 @@ class StateTests(unittest.TestCase):
         keypad.auxiliary_alarm_led = False
 
         state.apply_system_event(SystemEvent("31", "Audible Alarm", 10, 0, 1, 0, 0, 15, 8, 26))
-        self.assertTrue(keypad.burglary_alarm_led)
-        self.assertEqual(keypad.sound_mode, "burglary")
-        state.apply_system_event(SystemEvent("32", "Audible Alarm Restore", 10, 0, 1, 0, 0, 15, 8, 26))
         self.assertFalse(keypad.burglary_alarm_led)
+        self.assertFalse(keypad.auxiliary_alarm_led)
+        self.assertIn("panic_audible", state.partitions[1].alarm_types())
+        self.assertNotIn("burglary", state.partitions[1].alarm_types())
+        state.apply_system_event(SystemEvent("32", "Audible Alarm Restore", 10, 0, 1, 0, 0, 15, 8, 26))
+        self.assertNotIn("panic_audible", state.partitions[1].alarm_types())
 
         state.apply_system_event(SystemEvent("B1", "24 Hour Auxiliary Alarm", 11, 0, 1, 0, 0, 15, 8, 26))
         self.assertTrue(keypad.auxiliary_alarm_led)
+        self.assertFalse(keypad.burglary_alarm_led)
         self.assertEqual(keypad.sound_mode, "auxiliary")
+        self.assertIn("auxiliary", state.partitions[1].alarm_types())
+        self.assertNotIn("burglary", state.partitions[1].alarm_types())
         state.apply_system_event(SystemEvent("B2", "24 Hour Auxiliary Alarm Restore", 11, 0, 1, 0, 0, 15, 8, 26))
         self.assertFalse(keypad.auxiliary_alarm_led)
         self.assertEqual(keypad.sound_mode, "none")
+        self.assertNotIn("auxiliary", state.partitions[1].alarm_types())
+
+    def test_burglary_event_families_do_not_set_auxiliary(self):
+        families = (
+            ("41", "42", "Perimeter Alarm"),
+            ("51", "52", "Interior Alarm"),
+            ("61", "62", "24 Hour Burglary Alarm"),
+            ("71", "72", "Day/Night Burglary Alarm"),
+            ("81", "82", "Entry/Exit Burglary Alarm"),
+        )
+        for start, restore, description in families:
+            with self.subTest(start=start):
+                state = VistaState()
+                keypad = state.keypads[1]
+                keypad.burglary_alarm_led = False
+                keypad.auxiliary_alarm_led = False
+                state.apply_system_event(SystemEvent(start, description, 12, 0, 1, 0, 0, 15, 8, 26))
+                self.assertTrue(state.partitions[1].burglary_alarm_active)
+                self.assertFalse(state.partitions[1].auxiliary_alarm_active)
+                self.assertTrue(keypad.burglary_alarm_led)
+                self.assertFalse(keypad.auxiliary_alarm_led)
+                state.apply_system_event(SystemEvent(restore, f"{description} Restore", 12, 0, 1, 0, 0, 15, 8, 26))
+                self.assertFalse(state.partitions[1].burglary_alarm_active)
+                self.assertFalse(keypad.burglary_alarm_led)
 
     def test_silent_and_duress_events_do_not_drive_burglary_speaker_state(self):
         state = VistaState()

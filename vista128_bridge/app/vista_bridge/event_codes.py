@@ -39,8 +39,14 @@ EVENT_DESCRIPTIONS: dict[str, str] = {
     "52": "Interior Alarm Restore",
     "53": "Expansion Module Tamper",
     "54": "Expansion Module Tamper Restore",
+    "61": "24 Hour Zone Alarm",
+    "62": "24 Hour Zone Alarm Restore",
     "63": "RF Expansion Module Supervision",
     "64": "RF Expansion Module Supervision Restore",
+    "71": "Day/Night Burglary Alarm",
+    "72": "Day/Night Burglary Alarm Restore",
+    "81": "Entry/Exit Burglary Alarm",
+    "82": "Entry/Exit Burglary Alarm Restore",
     "89": "RF Low Battery",
     "8A": "RF Low Battery Restore",
     "9E": "Recent Close By User",
@@ -85,6 +91,9 @@ ALARM_RESTORE_TO_START = {
     "42": "41",
     "44": "43",
     "52": "51",
+    "62": "61",
+    "72": "71",
+    "82": "81",
     "B2": "B1",
     "C2": "C1",
     "D2": "D1",
@@ -92,17 +101,25 @@ ALARM_RESTORE_TO_START = {
 }
 ALARM_START_CODES = set(ALARM_RESTORE_TO_START.values())
 
+# VISTA automation events distinguish burglary zone families from panic and
+# auxiliary alarms. Keep those semantics separate even when they may share an
+# audible local annunciation pattern.
 BURGLARY_RESTORE_TO_START = {
-    "32": "31",  # audible alarm
     "42": "41",  # perimeter alarm
     "52": "51",  # interior alarm
+    "62": "61",  # 24 hour zone alarm, CID 133 burglary
+    "72": "71",  # day/night burglary alarm
+    "82": "81",  # entry/exit burglary alarm
 }
 BURGLARY_START_CODES = set(BURGLARY_RESTORE_TO_START.values())
 
 AUXILIARY_RESTORE_TO_START = {
-    "B2": "B1",  # 24 hour auxiliary alarm
+    "B2": "B1",  # 24 hour auxiliary alarm (CID 150)
 }
 AUXILIARY_START_CODES = set(AUXILIARY_RESTORE_TO_START.values())
+
+AUDIBLE_PANIC_RESTORE_TO_START = {"32": "31"}
+AUDIBLE_PANIC_START_CODES = set(AUDIBLE_PANIC_RESTORE_TO_START.values())
 
 SILENT_RESTORE_TO_START = {"22": "21"}
 SILENT_START_CODES = set(SILENT_RESTORE_TO_START.values())
@@ -110,17 +127,41 @@ SILENT_START_CODES = set(SILENT_RESTORE_TO_START.values())
 DURESS_RESTORE_TO_START = {"12": "11"}
 DURESS_START_CODES = set(DURESS_RESTORE_TO_START.values())
 
-# These are the alarm classes represented by the event stream.  Keep this
-# separate from keypad annunciator fields: silent and duress alarms are valid
-# alarm evidence even though they do not have a normal keypad speaker LED.
+# These are the alarm classes represented by the event stream. Keep this
+# separate from keypad annunciator fields: panic, silent, and duress alarms are
+# valid alarm evidence even when they do not map to an ordinary keypad LED.
 ALARM_TYPE_START_CODES = {
     "fire": {"01", "C1", "D1"},
     "burglary": BURGLARY_START_CODES,
     "auxiliary": AUXILIARY_START_CODES,
+    "panic_audible": AUDIBLE_PANIC_START_CODES,
     "silent": SILENT_START_CODES,
     "duress": DURESS_START_CODES,
     "supervisory": {"43", "E1"},
 }
+
+ALARM_TYPE_RESTORE_CODES = {
+    "fire": {"02", "C2", "D2"},
+    "burglary": set(BURGLARY_RESTORE_TO_START),
+    "auxiliary": set(AUXILIARY_RESTORE_TO_START),
+    "panic_audible": set(AUDIBLE_PANIC_RESTORE_TO_START),
+    "silent": set(SILENT_RESTORE_TO_START),
+    "duress": set(DURESS_RESTORE_TO_START),
+    "supervisory": {"44", "E2"},
+}
+
+
+def classify_alarm_event(code: str) -> tuple[str | None, str | None]:
+    """Return canonical alarm class and transition for a VISTA event code."""
+    normalized = str(code).upper()
+    for alarm_type, start_codes in ALARM_TYPE_START_CODES.items():
+        if normalized in start_codes:
+            return alarm_type, "alarm"
+    for alarm_type, restore_codes in ALARM_TYPE_RESTORE_CODES.items():
+        if normalized in restore_codes:
+            return alarm_type, "restore"
+    return None, None
+
 
 ZONE_EVENT_TRANSITIONS: dict[str, tuple[str, bool]] = {
     "03": ("trouble", True),

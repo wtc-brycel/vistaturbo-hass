@@ -6,6 +6,8 @@ from .event_codes import (
     ALARM_TYPE_START_CODES,
     ALARM_RESTORE_TO_START,
     ALARM_START_CODES,
+    AUDIBLE_PANIC_RESTORE_TO_START,
+    AUDIBLE_PANIC_START_CODES,
     AUXILIARY_RESTORE_TO_START,
     AUXILIARY_START_CODES,
     BURGLARY_RESTORE_TO_START,
@@ -165,6 +167,10 @@ class PartitionState:
         return bool(self.active_auxiliary_tokens)
 
     @property
+    def audible_panic_alarm_active(self) -> bool:
+        return self._has_event_alarm_type("panic_audible")
+
+    @property
     def silent_alarm_active(self) -> bool:
         return self._has_event_alarm_type("silent")
 
@@ -218,6 +224,7 @@ class PartitionState:
             "supervisory_active": self.supervisory_active,
             "burglary_alarm_active": self.burglary_alarm_active,
             "auxiliary_alarm_active": self.auxiliary_alarm_active,
+            "panic_audible_alarm_active": self.audible_panic_alarm_active,
             "silent_alarm_active": self.silent_alarm_active,
             "duress_alarm_active": self.duress_alarm_active,
         }
@@ -240,6 +247,7 @@ class KeypadState:
     supervisory_led: bool | None = None
     burglary_alarm_led: bool | None = None
     auxiliary_alarm_led: bool | None = None
+    audible_panic_alarm: bool | None = None
     chime_sequence: int = 0
     chime_zone: int | None = None
     chime_descriptor: str = ""
@@ -258,6 +266,8 @@ class KeypadState:
     def sound_mode(self) -> str:
         if self.fire_alarm_led is True and self.silenced_led is not True:
             return "fire"
+        if self.audible_panic_alarm is True:
+            return "panic_audible"
         if self.burglary_alarm_led is True:
             return "burglary"
         if self.auxiliary_alarm_led is True:
@@ -289,6 +299,7 @@ class KeypadState:
             "supervisory": self.supervisory_led,
             "burglary_alarm": self.burglary_alarm_led,
             "auxiliary_alarm": self.auxiliary_alarm_led,
+            "panic_audible_alarm": self.audible_panic_alarm,
             "sound_mode": self.sound_mode,
             "chime_sequence": self.chime_sequence,
             "chime_zone": self.chime_zone,
@@ -340,6 +351,7 @@ class VistaState:
                     "supervisory_led",
                     "burglary_alarm_led",
                     "auxiliary_alarm_led",
+                    "audible_panic_alarm",
                 )
             )
             for keypad in self.keypads.values()
@@ -401,6 +413,7 @@ class VistaState:
             keypad.supervisory_led = None
             keypad.burglary_alarm_led = None
             keypad.auxiliary_alarm_led = None
+            keypad.audible_panic_alarm = None
 
     def record_chime(self, partition: int, zone_number: int, received_at: str) -> KeypadState | None:
         zone = self.zones.get(zone_number)
@@ -495,6 +508,11 @@ class VistaState:
             keypad.supervisory_led = True
         elif normal_ready:
             keypad.supervisory_led = False
+
+        if partition_state.audible_panic_alarm_active:
+            keypad.audible_panic_alarm = True
+        elif normal_ready:
+            keypad.audible_panic_alarm = False
 
         if partition_state.burglary_alarm_active:
             keypad.burglary_alarm_led = True
@@ -688,6 +706,17 @@ class VistaState:
 
         token_prefix = f"{event.zone:03d}:"
 
+        if event.code in AUDIBLE_PANIC_START_CODES and keypad is not None:
+            keypad.audible_panic_alarm = True
+
+        audible_panic_start = AUDIBLE_PANIC_RESTORE_TO_START.get(event.code)
+        if (
+            audible_panic_start is not None
+            and keypad is not None
+            and not partition.audible_panic_alarm_active
+        ):
+            keypad.audible_panic_alarm = False
+
         if event.code in BURGLARY_START_CODES:
             token = token_prefix + event.code
             if token not in partition.active_burglary_tokens:
@@ -728,6 +757,7 @@ class VistaState:
                 changed_partitions.add(event.partition)
             if keypad is not None:
                 keypad.burglary_alarm_led = False
+                keypad.audible_panic_alarm = False
 
     def _apply_trouble_event(self, event: SystemEvent, changed_partitions: set[int]) -> None:
         battery_state = SYSTEM_BATTERY_EVENT_STATES.get(event.code)
@@ -850,6 +880,7 @@ class VistaState:
                 alarm_type
                 for alarm_type, value in (
                     ("fire", keypad.fire_alarm_led),
+                    ("panic_audible", keypad.audible_panic_alarm),
                     ("burglary", keypad.burglary_alarm_led),
                     ("auxiliary", keypad.auxiliary_alarm_led),
                 )
