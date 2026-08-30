@@ -66,7 +66,7 @@ class MqttSettings:
     tls_ca: str = ""
     tls_client_cert: str = ""
     tls_client_key: str = ""
-    outbound_queue_max: int = MQTT_OUTBOUND_QUEUE_MIN
+    outbound_queue_max: int = 256
     inflight_messages_max: int = 20
 
 
