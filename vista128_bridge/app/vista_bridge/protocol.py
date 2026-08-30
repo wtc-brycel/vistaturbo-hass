@@ -22,8 +22,12 @@ STARTUP_QUERIES: tuple[ProtocolQuery, ...] = (
     ProtocolQuery("zone_descriptor", b"08ZD009A\r\n", timeout_seconds=45, required=False),
 )
 
-STATE_SYNC_QUERIES: tuple[ProtocolQuery, ...] = STARTUP_QUERIES[:2]
 ARMING_STATUS_QUERY = STARTUP_QUERIES[0]
+# Honeywell documents Zone Status as an initial-synchronization request, not a
+# routine polling command. Live System Notification events maintain zone state;
+# startup and explicit full-resync paths still use STARTUP_QUERIES when a full
+# zone snapshot is required.
+STATE_SYNC_QUERIES: tuple[ProtocolQuery, ...] = (ARMING_STATUS_QUERY,)
 EVENT_LOG_QUERY = ProtocolQuery(
     "event_log", b"08LD00A8\r\n", timeout_seconds=45, required=False
 )

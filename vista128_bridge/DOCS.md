@@ -158,6 +158,8 @@ raw_tx_queue_max: 16
 
 `keypad_partitions` is a comma-separated list of partitions whose keypad display should be queried, for example `"1"` or `"1,2"`. A real keypad should exist on each queried partition. Partition 1 is the default.
 
+`startup_sync_enabled` should remain `true` for normal operation. The startup transaction establishes the authoritative arming, Zone Status, and zone-to-partition snapshot used by Home Assistant. Disabling it intentionally prevents the bridge from establishing that complete snapshot on a new TCP session.
+
 The keypad display is queried every 7 seconds by default. Valid unsolicited system events also request a debounced keypad refresh for the affected configured partition. All keypad queries share the same serialized transaction lock as startup and periodic synchronization.
 
 Panel TCP transport is unauthenticated plaintext. The VISTA packet checksum is error detection, not authentication. Place the serial server on an isolated security VLAN and use a firewall rule allowing only this bridge to reach its TCP port.
@@ -174,7 +176,7 @@ mqtt_tls_client_key: /config/mqtt/client.key
 
 When enabled, the broker certificate is verified and TLS failures never downgrade to plaintext. Broker ACLs are required with or without TLS. Grant normal operation topics such as `vista128/keypad/+/command` and `vista128/partition/+/command` separately from the privileged raw topic.
 
-Paho's disconnected QoS outbound queue is bounded by `mqtt_outbound_queue_max` (default 256), and its in-flight QoS window is bounded by `mqtt_inflight_messages_max` (default 20). When either limit is reached, new publishes fail visibly; the App does not create an unbounded retry queue. Increase these only with a deliberate memory budget.
+Paho's disconnected QoS outbound queue is bounded by `mqtt_outbound_queue_max` (default 256), and its in-flight QoS window is bounded by `mqtt_inflight_messages_max` (default 20). When either limit is reached, new publishes fail visibly; the App does not create a second retry queue. Increase these only with a deliberate memory budget.
 
 `chime_zones` is Vista Turbo RS232's own centralized dashboard-chime policy. It is intentionally separate from any chime programming transported on the VISTA ECP bus. Supply comma-separated VISTA zone numbers and ascending ranges, for example `"1,2,5-8,27"`. Valid zones are 1 through 128. An empty string disables bridge-generated chime events. A listed zone increments `chime_sequence` only for a new false-to-faulted `F5` transition after arming state is initialized and while the resolved partition is disarmed. Duplicate fault reports and faults while armed do not chime. The keypad entity also exposes `chime_zone`, `chime_descriptor`, and `chime_at`.
 
@@ -195,50 +197,6 @@ When `keypad_audit_enabled` is true, each accepted or rejected logical command i
 `native_alarm_control_enabled` adds Home Assistant Away, Home/Stay, Night/Instant, and Disarm actions to the MQTT alarm-control-panel entity. Home Assistant uses remote-code validation and passes the entered four-digit code to the bridge for the native VISTA command. The bounded local keypad-interaction audit stores the exact completed logical command sequence, including that four-digit code, with actor, partition, action, and outcome metadata. It is not stored in MQTT discovery or control-result telemetry, and control TX ASCII and hex payloads remain redacted from the bridge log.
 
 Every control transaction shares the same serialization lock used by state synchronization. The bridge requires the panel to have reported `08XN` Communication On / Automation Interface Available. `08XF` immediately blocks new control and discards queued requests. `08OK` is treated as flow-control acknowledgement only. Native arm/disarm is followed by a fresh arming-status query and compared with the requested mode.
-
-## Semantic VISTA commands
-
-RC12 adds one structured MQTT command endpoint without creating a separate Home Assistant entity for every panel feature:
-
-```text
-vista128/control/execute
-```
-
-Example semantic arm request:
-
-```json
-{
-  "action": "arm",
-  "mode": "away",
-  "partition": 1,
-  "code": "1234",
-  "transaction_id": "ha-script-42",
-  "source": "ha_frontend",
-  "actor_id": "user-id",
-  "actor_name": "Home Admin"
-}
-```
-
-Example deterministic keypad-emulated bypass request:
-
-```json
-{
-  "action": "bypass_zones",
-  "partition": 1,
-  "code": "1234",
-  "zones": [1, 27, 104]
-}
-```
-
-The command model validates every PIN as exactly four digits and every keypad zone operand as exactly three digits, zero-padded (`001`, `027`, `104`). The execution planner prefers the native VISTA automation command for core arm/disarm operations only when the native one-partition operation represents the complete command; global partition selections and subtype-bearing commands stay on the keypad path. Other supported deterministic operations use the existing owned keypad transaction path and are segmented into no more than five KS strokes per panel frame. Interactive, model-specific, and unknown operations retain their exact logical keypad sequence and are marked with an explicit confidence/classification rather than being guessed.
-
-The existing `keypad/<partition>/command` topic remains compatible for logical keypad segments and the legacy one-byte form remains accepted. A semantic `keypad_command` request is the bounded escape hatch for an obscure logical sequence; it is not raw serial TX. A semantic command cannot override its meaning with an arbitrary `sequence`; use the explicit logical-keypad or interactive path for a sequence-led operation. `output_control` and `instant_activation` require their complete interactive sequences: `#70` must continue with `*` and exit the device menu with `00`, while `#77` must include its action specifier, confirmation, and quit-menu steps. The bridge rejects these commands when only the namespace prefix is supplied, so ownership is not released while the panel remains in a menu. Raw serial TX remains separately privileged at `admin/raw_tx`, is disabled by default, and must not be granted by normal control ACLs.
-
-The local SQLite `keypad_interactions` audit remains one row per interaction ID. It stores the exact completed logical sequence, including PINs where entered, actor attribution, timestamps, partition, source, normalized command type, structured operands, execution mechanism, parser confidence, status, and verification. This journal is administrator-only local data, is not published to MQTT or HA Recorder, and is bounded by `event_history_max_age_days` and `event_history_max_rows`. Existing databases migrate automatically by adding nullable-equivalent empty columns with safe defaults. Actor metadata identifies the caller but is not an authorization boundary; MQTT credentials and broker ACLs still provide access control.
-
-The result topic exposes only non-sensitive command metadata and outcome. It does not include `code`, `raw_sequence`, or the exact logical sequence. `queued` and acknowledged are distinct from verified. Native arm/disarm commands are verified against a fresh arming-status response; keypad menu commands report panel acknowledgement when no authoritative semantic verification exists.
-
-The parser recognizes normal arm/disarm, stay and instant subtypes, maximum, walk test, chime, bypass and group-bypass forms, GOTO (including `CCCC*0` to return to the original partition), user-management entry, quick-arm and quick-exit forms, the documented `#nn` namespace, `#70` output operands, and `#77` action codes with their typed action specifiers, confirmation, and quit-menu steps. Semantic `system_command` requests compile their validated `#nn` namespace directly; arbitrary raw sequences remain reserved for explicit logical-keypad/interactive requests. Programming entry/exit, global partition selection when the panel context identifies it, and configuration-dependent A-D function/macro forms are also represented. Bare four-digit code entry, prompts, held-key distinctions, and model-specific extensions without sufficient panel context remain ambiguous or unclassified. Programming-mode numeric data is kept in a programming state rather than reinterpreted as normal arm/disarm input.
 
 Keypad strokes do not perform a blocking KD query after every digit. After `08OK`, the normal keypad-refresh path is requested so rapid code entry stays responsive while the display catches up asynchronously.
 
@@ -284,18 +242,19 @@ A new TCP session requests:
 
 `AS`, `ZS`, and `ZP` complete on `08OK`. `ZD` completes on the panel's `zd000""` terminator.
 
-Every packet is checked against its declared length and checksum before it can change Home Assistant state. Invalid packets contribute only diagnostic metadata by default; their raw content is not echoed to MQTT.
+Every packet is checked against its declared length and checksum before it can change Home Assistant state. Invalid packets do not apply their payload. Because a corrupt frame could have been an unsolicited state transition, the bridge immediately marks the dynamic panel snapshot stale and schedules a debounced full resynchronization. Corruption detected while startup or programming owns the panel is deferred until recovery can run safely. A failed recovery resync forces a clean TCP reconnect.
 
 ## Periodic reconciliation
 
-The bridge repeats these dynamic queries every 300 seconds by default:
+The bridge repeats only the Arming Status query every 300 seconds by default:
 
 ```text
 08as0064    arming status
-08zs004B    zone status
 ```
 
-This catches missed or unknown state transitions without repeatedly requesting static metadata. After repeated failed reconciliations, the bridge closes the panel TCP session and lets the normal reconnect path establish a clean session.
+Honeywell documents the Zone Status request as an initial-synchronization operation rather than a routine polling command. After the startup snapshot, valid unsolicited `nq` System Notification events maintain zone transitions. `08zs004B` is issued again only as part of an explicit full recovery snapshot, such as after detected receive corruption, panel power-up, or program-mode exit.
+
+After repeated failed periodic arming reconciliations, the bridge closes the panel TCP session and lets the normal reconnect path establish a clean session. A failed full recovery snapshot reconnects immediately because the bridge already knows its state is not authoritative.
 
 ## Keypad display polling
 
@@ -472,7 +431,7 @@ attributes:
       descriptor: MAIN BEDROOM WINDOW
 ```
 
-The per-zone binary sensors and aggregate sensors refresh from `49ZS` during startup and periodic reconciliation. Relevant unsolicited events also update them immediately.
+The per-zone binary sensors and aggregate sensors are initialized from `49ZS` during startup and full recovery snapshots. Relevant unsolicited events update them immediately between those snapshots.
 
 RF low-battery and sensor-tamper conditions are learned from unsolicited event codes rather than the `49ZS` snapshot. They are not presented as equivalent persistent zone-condition entities.
 
@@ -543,7 +502,9 @@ The topic is intentionally separate from normal HA/keypad operation so broker AC
 ## Design constraints
 
 - The VISTA is authoritative.
-- Invalid packets never change state.
+- Invalid packets never apply their payload and immediately invalidate dynamic-state freshness.
+- Zone Status is startup/recovery-only, not a routine polling source.
+- Failed recovery snapshots force a clean reconnect.
 - No optimistic alarm state.
 - Pending panel commands are discarded on disconnect.
 - Unknown valid events remain visible.

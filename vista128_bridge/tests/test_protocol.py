@@ -39,14 +39,12 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(EVENT_LOG_QUERY.timeout_seconds, 45)
         self.assertFalse(EVENT_LOG_QUERY.required)
 
-    def test_periodic_state_sync_is_dynamic_state_only(self):
+    def test_periodic_state_sync_is_arming_only(self):
         self.assertEqual(
             [(query.name, query.data) for query in STATE_SYNC_QUERIES],
-            [
-                ("arming_status", b"08as0064\r\n"),
-                ("zone_status", b"08zs004B\r\n"),
-            ],
+            [("arming_status", b"08as0064\r\n")],
         )
+        self.assertNotIn("zone_status", {query.name for query in STATE_SYNC_QUERIES})
 
     def test_identifies_known_messages(self):
         self.assertEqual(identify_message(b"08OK009E"), "ready")
