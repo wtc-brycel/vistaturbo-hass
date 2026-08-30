@@ -101,8 +101,9 @@ class SyncStrategyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(snapshot_checks, [True])
         self.assertEqual(sync.failures_consecutive, 1)
 
-    async def test_post_control_arming_verification_does_not_invalidate_snapshot(self):
+    async def test_post_control_arming_verification_rechecks_without_invalidating_snapshot(self):
         invalidated = []
+        snapshot_checks = []
         sync = None
 
         def send_query(data, source, label):
@@ -120,10 +121,12 @@ class SyncStrategyTests(unittest.IsolatedAsyncioTestCase):
             send_query,
             lambda: None,
             on_query_start=lambda query: invalidated.append(query.name),
+            on_snapshot_check=lambda: snapshot_checks.append(True),
         )
 
         self.assertTrue(await sync.run_arming_refresh())
         self.assertEqual(invalidated, [])
+        self.assertEqual(snapshot_checks, [True])
 
     async def test_full_resync_retains_zone_snapshot_queries_and_rechecks_freshness(self):
         connected = True
