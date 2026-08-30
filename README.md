@@ -2,7 +2,7 @@
 
 Vista Turbo HASS is a local Home Assistant integration for the native RS-232 automation interface on Honeywell/Resideo VISTA Turbo alarm panels.
 
-> **Current status:** 0.2.6-rc.11 release candidate. Tested on a VISTA-128BPT. Monitoring remains enabled by default; experimental keypad and native alarm control are available only when explicitly enabled in the App.
+> **Current status:** 0.2.6-rc.12 release candidate. Tested on a VISTA-128BPT. Monitoring remains enabled by default; experimental keypad and native alarm control are available only when explicitly enabled in the App.
 
 ## What it does
 
@@ -21,6 +21,8 @@ Vista Turbo HASS is a local Home Assistant integration for the native RS-232 aut
 - Includes a responsive Home Assistant event-journal card for recent panel history
 - Reconciles arming state periodically while live System Notification events maintain zone changes
 - Uses full Zone Status snapshots only for startup and explicit recovery, not routine polling
+- Provides a canonical `VistaCommand` semantic command model with serialized execution, verification, and bounded local audit
+- Distinguishes auxiliary, burglary, audible panic, silent, duress, fire, and supervisory alarm evidence where authoritative protocol semantics exist
 - Optionally prints event receipts through TransPort
 - Fail-safe panel-wide alarm aggregation and explicit state-freshness availability
 - Bounded event retention, control queues, and privileged raw diagnostics
@@ -29,7 +31,7 @@ The panel remains authoritative. Home Assistant is not required for normal alarm
 
 ## Connection
 
-The App talks to the VISTA through a transparent serial-to-IP server:
+The current release talks to the VISTA through a transparent serial-to-IP server and publishes Home Assistant state through MQTT:
 
 ```text
 VISTA Turbo panel
@@ -61,6 +63,14 @@ A detected invalid panel frame is treated as possible lost state. The bridge imm
 
 `startup_sync_enabled` should remain enabled for normal operation. Disabling startup synchronization intentionally prevents the bridge from establishing its complete authoritative zone/partition snapshot on a new session.
 
+## Accepted Home Assistant architecture
+
+The long-term product architecture is now explicitly Home Assistant-native. The existing App remains the sole VISTA protocol/domain engine. A companion `custom_components/vistaturbo` integration will become the primary Home Assistant-facing layer using native entities, actions, Home Assistant identity/permissions, Repairs, diagnostics, and a push-first private App API/WebSocket. A Supervisor ingress application will provide the authenticated alarm-system management console, beginning with panel user management and expanding deliberately into other supported administration.
+
+MQTT remains supported during migration, but is now compatibility infrastructure rather than the permanent architectural contract for new functionality. New VISTA protocol logic belongs only in the App; Home Assistant integration code consumes semantic bridge APIs and must not duplicate panel byte/protocol behavior.
+
+The complete accepted decision, security boundaries, identity/credential rules, entity-model rules, management-console scope, roadmap tracks, and PR-review invariants are recorded in [`docs/architecture/0001-home-assistant-native-suite.md`](docs/architecture/0001-home-assistant-native-suite.md).
+
 ## Repository and release security
 
 The production add-on image is built from the Home Assistant base `3.24` multi-architecture image pinned by digest in `vista128_bridge/Dockerfile`. The bridge's Python dependency is hash-checked, and frontend browser tests use the locked Playwright `1.62.1` release.
@@ -77,26 +87,26 @@ Add this repository to the Home Assistant App Store:
 https://github.com/wtc-brycel/vistaturbo-hass
 ```
 
-Install or update **Vista Turbo RS232** to `0.2.6-rc.11`, then configure the TCP address and port of the serial server. Partition 1 keypad polling is enabled by default every 7 seconds.
+Install or update **Vista Turbo RS232** to `0.2.6-rc.12`, then configure the TCP address and port of the serial server. Partition 1 keypad polling is enabled by default every 7 seconds.
 
-The App requires the Home Assistant MQTT service.
+The current App release requires the Home Assistant MQTT service. The accepted native-integration architecture will remove MQTT as a required Home Assistant transport once native feature parity is sufficient.
 
 ## Install the keypad card
 
-The matching `vista-keypad-card.js` is attached to the `v0.2.6-rc.11` GitHub release and is also kept in `frontend/` in this repository.
+The matching `vista-keypad-card.js` is attached to the `v0.2.6-rc.12` GitHub release and is also kept in `frontend/` in this repository.
 
 From the Home Assistant Terminal or SSH add-on:
 
 ```sh
 mkdir -p /config/www
-curl -fL "https://github.com/wtc-brycel/vistaturbo-hass/releases/download/v0.2.6-rc.11/vista-keypad-card.js" \
+curl -fL "https://github.com/wtc-brycel/vistaturbo-hass/releases/download/v0.2.6-rc.12/vista-keypad-card.js" \
   -o /config/www/vista-keypad-card.js
 ```
 
 Then add a JavaScript module resource in **Settings -> Dashboards -> Resources**:
 
 ```text
-/local/vista-keypad-card.js?v=0.3.24
+/local/vista-keypad-card.js?v=0.3.25
 ```
 
 A minimal 6160CR-2 card is:
@@ -157,7 +167,7 @@ P1   DISARMED
 BYPAS-RDY TO ARM
 ```
 
-The keypad entity also publishes Ready, Trouble, Armed, backlight, Power, Fire Alarm, Silenced, Supervisory, Burglary Alarm, Auxiliary Alarm, and a normalized `sound_mode`. The native KD packet supplies Ready, Trouble, and Armed directly. Supplemental states are reconstructed from validated VISTA events plus keypad reconciliation. Unknown reconstructed state remains `null` rather than being guessed.
+The keypad entity also publishes Ready, Trouble, Armed, backlight, Power, Fire Alarm, Silenced, Supervisory, Burglary Alarm, Auxiliary Alarm, Audible Panic Alarm, and a normalized `sound_mode`. The native KD packet supplies Ready, Trouble, and Armed directly. Supplemental states are reconstructed from validated VISTA events plus keypad reconciliation. Unknown reconstructed state remains `null` rather than being guessed.
 
 Configured dashboard chime events are published through `chime_sequence`, `chime_zone`, `chime_descriptor`, and `chime_at`. Event-derived states are invalidated after a panel TCP gap, and panel entities require both the bridge process and panel TCP session to be available before Home Assistant shows them as available.
 
@@ -206,7 +216,7 @@ haptic:
   keypress_ms: 10
 ```
 
-The bridge classifies unsilenced fire, audible burglary, and 24-hour auxiliary alarms directly on the keypad entity. Trouble, supervisory, and configured chime events also drive one-shot keypad sounds. External Home Assistant alarm/aux entity mappings remain optional overrides rather than normal requirements.
+The bridge classifies unsilenced fire, audible panic, burglary, and 24-hour auxiliary alarms using distinct semantic evidence. Trouble, supervisory, and configured chime events also drive one-shot keypad sounds. External Home Assistant alarm/aux entity mappings remain optional overrides rather than normal requirements.
 
 When sound is enabled, the card uses the first pointer or keyboard interaction anywhere on the Lovelace page to unlock browser audio. A small `AUDIO` flag remains visible only while the browser still blocks playback. Haptic feedback depends on browser support and may be unavailable on iPhone.
 
@@ -220,6 +230,7 @@ This is not intended as a general integration for non-Turbo VISTA panels.
 
 ## More information
 
+- [`docs/architecture/0001-home-assistant-native-suite.md`](docs/architecture/0001-home-assistant-native-suite.md) - accepted Home Assistant-native product architecture
 - [`vista128_bridge/DOCS.md`](vista128_bridge/DOCS.md) - configuration, wiring, MQTT topics, and protocol behavior
 - [`vista128_bridge/CHANGELOG.md`](vista128_bridge/CHANGELOG.md) - version history
 - [`frontend/README.md`](frontend/README.md) - keypad card installation and configuration
