@@ -36,7 +36,7 @@ class ProtocolTests(unittest.TestCase):
     def test_event_log_query_is_exact_and_long_running(self):
         self.assertEqual(EVENT_LOG_QUERY.name, "event_log")
         self.assertEqual(EVENT_LOG_QUERY.data, b"08LD00A8\r\n")
-        self.assertEqual(EVENT_LOG_QUERY.timeout_seconds, 45)
+        self.assertEqual(EVENT_LOG_QUERY.timeout_seconds, 120)
         self.assertFalse(EVENT_LOG_QUERY.required)
 
     def test_periodic_state_sync_is_arming_only(self):
