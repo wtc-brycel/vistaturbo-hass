@@ -50,17 +50,9 @@ async function clickKey(page, key) {
   await page.waitForTimeout(20);
 }
 
-async function completeKeypad(page) {
-  await page.evaluate(() => {
-    document.getElementById("card").shadowRoot.querySelector("#keypad-complete").click();
-  });
-  await page.waitForTimeout(50);
-}
-
-test("enabled keypad publishes a logical QoS 1 command through Home Assistant", async ({ page }) => {
+test("enabled keypad publishes each physical keypress immediately through Home Assistant", async ({ page }) => {
   await mount(page);
   await clickKey(page, "1");
-  await completeKeypad(page);
   const calls = await page.evaluate(() => window.controlCalls);
   expect(calls).toHaveLength(1);
   expect(calls[0][0]).toBe("mqtt");
@@ -78,10 +70,23 @@ test("enabled keypad publishes a logical QoS 1 command through Home Assistant", 
   expect(calls[0][2].retain).toBe(false);
 });
 
-test("signed-in actor metadata travels with the logical keypad transaction", async ({ page }) => {
+test("keypad has no synthetic SEND or finish-command control", async ({ page }) => {
+  await mount(page);
+  const result = await page.evaluate(() => {
+    const root = document.getElementById("card").shadowRoot;
+    return {
+      sendButton: Boolean(root.querySelector("#keypad-complete")),
+      text: root.textContent,
+    };
+  });
+  expect(result.sendButton).toBe(false);
+  expect(result.text).not.toContain("Press SEND");
+  expect(result.text).not.toContain("finish the command");
+});
+
+test("signed-in actor metadata travels with each immediate keypad keypress", async ({ page }) => {
   await mount(page, { user: { id: "alice-id", name: "Alice" } });
   await clickKey(page, "1");
-  await completeKeypad(page);
   const payload = await page.evaluate(() => JSON.parse(window.controlCalls[0][2].payload));
   expect(payload).toMatchObject({
     actor_id: "alice-id",
@@ -89,12 +94,13 @@ test("signed-in actor metadata travels with the logical keypad transaction", asy
     partition: 1,
     source: "ha_frontend",
     action: "keypad_sequence",
+    keys: "1",
+    complete: true,
   });
-  expect(payload.keys).toBe("1");
   expect(payload.transaction_id).toEqual(expect.any(String));
 });
 
-test("rapid keypad entry is sent as one complete logical command", async ({ page }) => {
+test("rapid keypad entry publishes every key immediately and in order", async ({ page }) => {
   await mount(page);
   await page.evaluate(() => {
     const root = document.getElementById("card").shadowRoot;
@@ -102,44 +108,23 @@ test("rapid keypad entry is sent as one complete logical command", async ({ page
       root.querySelector(`.layout-physical-view button[data-key="${key}"]`).click();
     }
   });
-  await completeKeypad(page);
-  const calls = await page.evaluate(() => window.controlCalls);
-  expect(calls).toHaveLength(1);
-  expect(JSON.parse(calls[0][2].payload)).toMatchObject({
-    keys: "1234#",
-    complete: true,
-  });
-});
-
-test("commands longer than one KS frame keep one interaction ID", async ({ page }) => {
-  await mount(page);
-  await page.evaluate(() => {
-    const root = document.getElementById("card").shadowRoot;
-    for (const key of ["1", "2", "3", "4", "5", "6", "7", "8"]) {
-      root.querySelector(`.layout-physical-view button[data-key="${key}"]`).click();
-    }
-  });
-  await completeKeypad(page);
+  await page.waitForTimeout(80);
   const payloads = await page.evaluate(() => window.controlCalls.map((entry) => JSON.parse(entry[2].payload)));
-  expect(payloads.map((payload) => payload.keys)).toEqual(["12345", "678"]);
-  expect(payloads.map((payload) => payload.complete)).toEqual([false, true]);
-  expect(payloads[0].transaction_id).toEqual(payloads[1].transaction_id);
+  expect(payloads.map((payload) => payload.keys)).toEqual(["1", "2", "3", "4", "#"]);
+  expect(payloads.every((payload) => payload.complete === true)).toBe(true);
+  expect(new Set(payloads.map((payload) => payload.transaction_id)).size).toBe(5);
 });
 
-test("slow entry never completes on inactivity and closes explicitly with SEND", async ({ page }) => {
+test("slow entry never waits for an inactivity boundary", async ({ page }) => {
   await mount(page);
-  for (const key of ["1", "2", "3", "4", "5", "6"]) {
+  for (const [index, key] of ["1", "2", "3", "4", "5", "6"].entries()) {
     await clickKey(page, key);
+    expect(await page.evaluate(() => window.controlCalls.length)).toBe(index + 1);
     await page.waitForTimeout(700);
   }
-  const intermediate = await page.evaluate(() => window.controlCalls.map((entry) => JSON.parse(entry[2].payload)));
-  expect(intermediate).toHaveLength(1);
-  expect(intermediate[0]).toMatchObject({ keys: "12345", complete: false });
-  await completeKeypad(page);
   const payloads = await page.evaluate(() => window.controlCalls.map((entry) => JSON.parse(entry[2].payload)));
-  expect(payloads.map((payload) => payload.keys)).toEqual(["12345", "6"]);
-  expect(payloads.map((payload) => payload.complete)).toEqual([false, true]);
-  expect(payloads[0].transaction_id).toEqual(payloads[1].transaction_id);
+  expect(payloads.map((payload) => payload.keys)).toEqual(["1", "2", "3", "4", "5", "6"]);
+  expect(payloads.every((payload) => payload.complete === true)).toBe(true);
 });
 
 test("keypress DOM event does not expose the entered digit", async ({ page }) => {
@@ -149,22 +134,19 @@ test("keypress DOM event does not expose the entered digit", async ({ page }) =>
     document.getElementById("card").addEventListener("vista-keypad-key", (event) => window.keyEvents.push(event.detail));
   });
   await clickKey(page, "7");
-  await completeKeypad(page);
   const events = await page.evaluate(() => window.keyEvents);
   expect(events).toHaveLength(1);
   expect(events[0].action).toBe("keypress");
   expect(events[0].key).toBeUndefined();
 });
 
-test("star and pound publish their literal keypad symbols", async ({ page }) => {
+test("star and pound publish their literal keypad symbols immediately", async ({ page }) => {
   await mount(page);
   await clickKey(page, "*");
-  await completeKeypad(page);
   await clickKey(page, "#");
-  await completeKeypad(page);
   const calls = await page.evaluate(() => window.controlCalls.map((entry) => JSON.parse(entry[2].payload)));
   expect(calls.map((payload) => payload.keys)).toEqual(["*", "#"]);
-  expect(calls.every((payload) => payload.action === "keypad_sequence")).toBe(true);
+  expect(calls.every((payload) => payload.action === "keypad_sequence" && payload.complete === true)).toBe(true);
 });
 
 test("A-D function keys remain inert instead of colliding with KS encodings", async ({ page }) => {
