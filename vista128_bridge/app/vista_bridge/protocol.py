@@ -28,8 +28,11 @@ ARMING_STATUS_QUERY = STARTUP_QUERIES[0]
 # startup and explicit full-resync paths still use STARTUP_QUERIES when a full
 # zone snapshot is required.
 STATE_SYNC_QUERIES: tuple[ProtocolQuery, ...] = (ARMING_STATUS_QUERY,)
+# A full VISTA-128BPT event log can contain 512 records. The captured panel
+# streams roughly eight entries per second, so a complete dump can legitimately
+# exceed the former 45-second ceiling while making continuous progress.
 EVENT_LOG_QUERY = ProtocolQuery(
-    "event_log", b"08LD00A8\r\n", timeout_seconds=45, required=False
+    "event_log", b"08LD00A8\r\n", timeout_seconds=120, required=False
 )
 
 ARMING_STATUS_TO_HA = {
