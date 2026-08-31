@@ -313,19 +313,35 @@ class CommandModelTests(unittest.TestCase):
                 )
             )
 
-        system = command_from_request(
-            {
-                "action": "system_command",
-                "partition": 1,
-                "code": "1234",
-                "system_command": "#41",
-            }
-        )
-        system_plan = plan_command(
-            system, native_available=False, keypad_available=True
-        )
-        self.assertEqual(system_plan.mechanism, "keypad")
-        self.assertEqual(system_plan.keypad_sequence, "1234#41")
+        for namespace, command_type in {
+            "#41": "randomize_outputs",
+            "#42": "randomize_outputs_window",
+            "#65": "programming_lockout_window",
+            "#71": "programmed_output_action",
+            "#72": "programmed_output_action",
+            "#73": "access_enter_exit_request",
+        }.items():
+            with self.subTest(namespace=namespace):
+                system = command_from_request(
+                    {
+                        "action": "system_command",
+                        "partition": 1,
+                        "code": "1234",
+                        "system_command": namespace,
+                    }
+                )
+                self.assertEqual(system.command_type, command_type)
+                system_plan = plan_command(
+                    system, native_available=False, keypad_available=True
+                )
+                self.assertEqual(system_plan.mechanism, "keypad")
+                self.assertEqual(system_plan.keypad_sequence, "1234" + namespace)
+                parsed = KeypadParser().parse(
+                    system_plan.keypad_sequence, partition=1
+                )
+                self.assertEqual(parsed.command_type, system.command_type)
+                self.assertEqual(parsed.code, system.code)
+                self.assertEqual(parsed.operands, system.operands)
 
         for namespace in (
             "#60", "#61", "#62", "#63", "#70", "#74", "#75", "#77",
@@ -408,6 +424,24 @@ class CommandModelTests(unittest.TestCase):
         self.assertEqual(parsed.command_type, command.command_type)
         self.assertEqual(parsed.confidence, "high")
         self.assertEqual(parsed.code, command.code)
+        self.assertEqual(parsed.operands, command.operands)
+
+    def test_instant_activation_all_partitions_round_trip(self):
+        command = command_from_request(
+            {
+                "action": "instant_activation",
+                "partition": 1,
+                "code": "1234",
+                "action_code": "21",
+                "action_specifier": "0",
+            }
+        )
+        self.assertEqual(command.operands["action_specifier"], "0")
+        self.assertNotIn("partitions", command.operands)
+        sequence = compile_keypad_sequence(command)
+        self.assertEqual(sequence, "1234#7721*0*1*1*")
+        parsed = KeypadParser().parse(sequence, partition=1)
+        self.assertEqual(parsed.command_type, command.command_type)
         self.assertEqual(parsed.operands, command.operands)
 
     def test_instant_activation_requires_matching_action_specific_operand(self):
