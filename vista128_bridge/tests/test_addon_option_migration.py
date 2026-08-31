@@ -28,6 +28,7 @@ class AddonOptionMigrationTests(unittest.TestCase):
             "CONTROL_RESPONSE_TIMEOUT_SECONDS": "3",
             "CONTROL_VERIFY_DELAY_MS": "400",
             "EVENT_HISTORY_ENABLED": "true",
+            "EVENT_HISTORY_STARTUP_DUMP_ENABLED": "false",
             "EVENT_HISTORY_RECENT_LIMIT": "20",
             "KEYPAD_AUDIT_ENABLED": "true",
             "EVENT_HISTORY_MAX_ROWS": "10000",
@@ -69,7 +70,6 @@ class AddonOptionMigrationTests(unittest.TestCase):
             "control_enabled",
             "keypad_control_enabled",
             "native_alarm_control_enabled",
-            "event_history_startup_dump_enabled",
             "transport_print_enabled",
             "transport_host",
             "transport_http_port",
@@ -80,14 +80,16 @@ class AddonOptionMigrationTests(unittest.TestCase):
         for key in exposed_keys:
             with self.subTest(key=key):
                 self.assertIn(f"bashio::config '{key}'", RUN_SH)
+        self.assertNotIn("bashio::config 'event_history_startup_dump_enabled'", RUN_SH)
 
-    def test_run_script_removes_only_obsolete_stored_tuning(self) -> None:
+    def test_run_script_removes_obsolete_stored_options(self) -> None:
         for key in (
             "connect_timeout_seconds",
             "startup_sync_initial_delay_ms",
             "periodic_sync_interval_seconds",
             "keypad_poll_interval_seconds",
             "control_verify_delay_ms",
+            "event_history_startup_dump_enabled",
             "event_history_max_rows",
             "transport_print_queue_max",
             "tx_queue_max",
@@ -97,7 +99,6 @@ class AddonOptionMigrationTests(unittest.TestCase):
 
         for retained in (
             "event_history_max_age_days",
-            "event_history_startup_dump_enabled",
             "mqtt_base_topic",
             "mqtt_discovery_prefix",
             "mqtt_tls_enabled",
