@@ -363,11 +363,23 @@ class CommandModelTests(unittest.TestCase):
                 "zone_list": "02",
             }
         )
-        self.assertEqual(command.command_type, "unbypass_zone_list")
-        self.assertEqual(command.operands, {"zone_list": "02"})
+        self.assertEqual(command.command_type, "instant_activation")
         self.assertEqual(
-            compile_keypad_sequence(command), "1234#7731*02*1*1*"
+            command.operands,
+            {
+                "action_code": "31",
+                "action": "automatic_unbypass",
+                "zone_list": "02",
+                "interactive": True,
+                "action_specifier": "02",
+            },
         )
+        sequence = compile_keypad_sequence(command)
+        self.assertEqual(sequence, "1234#7731*02*1*1*")
+        parsed = KeypadParser().parse(sequence, partition=1)
+        self.assertEqual(parsed.command_type, command.command_type)
+        self.assertEqual(parsed.code, command.code)
+        self.assertEqual(parsed.operands, command.operands)
 
         with self.assertRaisesRegex(CommandValidationError, "01..15"):
             command_from_request(
@@ -378,6 +390,25 @@ class CommandModelTests(unittest.TestCase):
                     "zone_list": "16",
                 }
             )
+
+    def test_instant_activation_supports_access_group_lock(self):
+        command = command_from_request(
+            {
+                "action": "instant_activation",
+                "partition": 1,
+                "code": "1234",
+                "action_code": "65",
+                "group": "04",
+            }
+        )
+        self.assertEqual(command.operands["action"], "access_group_lock")
+        sequence = compile_keypad_sequence(command)
+        self.assertEqual(sequence, "1234#7765*04*1*1*")
+        parsed = KeypadParser().parse(sequence, partition=1)
+        self.assertEqual(parsed.command_type, command.command_type)
+        self.assertEqual(parsed.confidence, "high")
+        self.assertEqual(parsed.code, command.code)
+        self.assertEqual(parsed.operands, command.operands)
 
     def test_instant_activation_requires_matching_action_specific_operand(self):
         command = command_from_request(
@@ -477,6 +508,12 @@ class CommandModelTests(unittest.TestCase):
                 "partition": 1,
                 "code": "1234",
                 "zones": [1, 27],
+            },
+            {
+                "action": "unbypass_zones",
+                "partition": 1,
+                "code": "1234",
+                "zone_list": "02",
             },
         )
         for request in cases:
