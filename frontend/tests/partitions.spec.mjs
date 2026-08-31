@@ -148,7 +148,7 @@ test("partition management never renders a second keypad or fake LCD", async ({ 
       lcd: r.querySelectorAll(".lcd").length,
       keypadDetail: Boolean(r.getElementById("keypad-detail")),
       detailTabs: r.querySelectorAll('[role="tab"]').length,
-      text: r.innerText,
+      text: r.querySelector(".partition-app").innerText,
     };
   });
   expect(state.keypadCards).toBe(0);
