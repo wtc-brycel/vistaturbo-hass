@@ -29,10 +29,23 @@ window.VISTA_MANAGEMENT_STYLES = String(window.VISTA_MANAGEMENT_STYLES || "") + 
 .surface .partition-select.selected::before{content:"";position:absolute;inset-block:9px;inset-inline-start:0;width:3px;border-radius:0 3px 3px 0;background:var(--vt-primary)}
 .surface .partition-select.selected .partition-select-number{color:var(--vt-primary)}
 .partition-edit{border-color:var(--vt-inner-divider)}
+.switch-row input[type="checkbox"]{appearance:none;-webkit-appearance:none;width:40px;height:22px;margin:0;border:0;border-radius:11px;background:color-mix(in srgb,var(--vt-secondary) 48%,transparent);position:relative;cursor:pointer;flex:0 0 auto;transition:background .12s ease}
+.switch-row input[type="checkbox"]::before{content:"";position:absolute;width:18px;height:18px;inset-block-start:2px;inset-inline-start:2px;border-radius:50%;background:var(--vt-card);box-shadow:0 1px 2px rgba(0,0,0,.28);transition:transform .12s ease}
+.switch-row input[type="checkbox"]:checked{background:var(--vt-primary)}
+.switch-row input[type="checkbox"]:checked::before{transform:translateX(18px);background:#fff}
+.switch-row input[type="checkbox"]:focus-visible,.partition-edit-head input[type="checkbox"]:focus-visible{outline:2px solid var(--vt-primary);outline-offset:3px}
+.partition-edit-head input[type="checkbox"]{appearance:none;-webkit-appearance:none;width:20px;height:20px;margin:0;border:2px solid var(--vt-secondary);border-radius:2px;background:transparent;display:grid;place-items:center;cursor:pointer}
+.partition-edit-head input[type="checkbox"]:checked{border-color:var(--vt-primary);background:var(--vt-primary)}
+.partition-edit-head input[type="checkbox"]:checked::after{content:"";width:9px;height:5px;border-left:2px solid #fff;border-bottom:2px solid #fff;transform:translateY(-1px) rotate(-45deg)}
+.partition-edit-head input[type="checkbox"]:disabled{opacity:.55;cursor:default}
 dialog{width:min(var(--ha-dialog-width-md,580px),calc(100vw - 32px));border-radius:var(--ha-dialog-border-radius,28px);box-shadow:var(--vt-elevation-dialog)}
 dialog::backdrop{background:rgba(0,0,0,.4)}
 .dialog-head{min-height:64px;padding:8px 8px 4px 20px;border-bottom:0}
 .dialog-head h3{font-size:20px;font-weight:500;line-height:1.25}
+dialog:not(.admin-dialog) .dialog-head .icon-button{position:relative;font-size:0}
+dialog:not(.admin-dialog) .dialog-head .icon-button::before,dialog:not(.admin-dialog) .dialog-head .icon-button::after{content:"";position:absolute;width:18px;height:2px;border-radius:1px;background:currentColor}
+dialog:not(.admin-dialog) .dialog-head .icon-button::before{transform:rotate(45deg)}
+dialog:not(.admin-dialog) .dialog-head .icon-button::after{transform:rotate(-45deg)}
 .dialog-scroll{padding:16px 24px 8px}
 .dialog-actions{padding:12px 16px 16px;border-top:0}
 @media(max-width:600px){
