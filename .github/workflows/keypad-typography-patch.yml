@@ -33,7 +33,7 @@ jobs:
               global text
               count = text.count(old)
               if count != 1:
-                  raise SystemExit(f"expected one match, found {count}: {old[:80]!r}")
+                  raise SystemExit(f"expected one match, found {count}: {old!r}")
               text = text.replace(old, new, 1)
 
           replace_once(
@@ -42,15 +42,9 @@ jobs:
           )
 
           replace_once(
-              '''      :host {
-                display:block;
-                --led-flash-period:${flashPeriod}ms;
-              }''',
-              '''      :host {
-                display:block;
-                --led-flash-period:${flashPeriod}ms;
-                --vista-keypad-font:"Arial Narrow","Roboto Condensed","Liberation Sans Narrow","Nimbus Sans Narrow",Arial,sans-serif;
-              }''',
+              '        --led-flash-period:${flashPeriod}ms;',
+              '        --led-flash-period:${flashPeriod}ms;\n'
+              '        --vista-keypad-font:"Arial Narrow","Roboto Condensed","Liberation Sans Narrow","Nimbus Sans Narrow",Arial,sans-serif;',
           )
 
           font_decl = 'font-family:"Arial Narrow","Roboto Condensed",Arial,sans-serif;'
@@ -60,80 +54,38 @@ jobs:
           text = text.replace(font_decl, 'font-family:var(--vista-keypad-font);')
 
           replace_once(
-              '''      .function-label {
-                font-size:clamp(5px,1.42cqw,16px);
-                line-height:1;
-                font-weight:800;
-                letter-spacing:-.02em;
-                white-space:nowrap;
-              }''',
-              '''      .function-label {
-                font-size:clamp(5px,1.42cqw,16px);
-                line-height:1;
-                font-weight:700;
-                letter-spacing:-.02em;
-                white-space:nowrap;
-              }''',
+              '        font-size:clamp(5px,1.42cqw,16px);\n'
+              '        line-height:1;\n'
+              '        font-weight:800;',
+              '        font-size:clamp(5px,1.42cqw,16px);\n'
+              '        line-height:1;\n'
+              '        font-weight:700;',
           )
 
           replace_once(
-              '''      .number-main {
-                font-family:var(--vista-keypad-font);
-                font-size:clamp(9px,3.05cqw,34px);
-                font-weight:400;
-                line-height:.9;
-                transform:scaleX(.76);
-                transform-origin:center;
-              }''',
-              '''      .number-main {
-                font-family:var(--vista-keypad-font);
-                font-size:clamp(9px,3.05cqw,34px);
-                font-weight:400;
-                line-height:.9;
-                transform:none;
-              }''',
+              '        line-height:.9;\n'
+              '        transform:scaleX(.76);\n'
+              '        transform-origin:center;',
+              '        line-height:.9;\n'
+              '        transform:none;',
           )
 
           replace_once(
-              '''      .number-legend {
-                font-family:var(--vista-keypad-font);
-                font-size:clamp(4px,1.22cqw,13px);
-                font-weight:700;
-                font-style:italic;
-                line-height:1;
-                white-space:nowrap;
-              }''',
-              '''      .number-legend {
-                font-family:var(--vista-keypad-font);
-                font-size:clamp(4px,1.22cqw,13px);
-                font-weight:600;
-                font-style:italic;
-                line-height:1;
-                white-space:nowrap;
-              }''',
+              '        font-size:clamp(4px,1.22cqw,13px);\n'
+              '        font-weight:700;\n'
+              '        font-style:italic;',
+              '        font-size:clamp(4px,1.22cqw,13px);\n'
+              '        font-weight:600;\n'
+              '        font-style:italic;',
           )
 
           replace_once(
-              '''      .led-row {
-                display:grid;
-                grid-template-columns:1fr var(--ann-led-width);
-                align-items:center;
-                column-gap:.38cqw;
-                min-height:4.18cqw;
-                font-size:clamp(6px,1.72cqw,18px);
-                font-weight:700;
-                line-height:1;
-              }''',
-              '''      .led-row {
-                display:grid;
-                grid-template-columns:1fr var(--ann-led-width);
-                align-items:center;
-                column-gap:.38cqw;
-                min-height:4.18cqw;
-                font-size:clamp(6px,1.72cqw,18px);
-                font-weight:600;
-                line-height:1;
-              }''',
+              '        font-size:clamp(6px,1.72cqw,18px);\n'
+              '        font-weight:700;\n'
+              '        line-height:1;',
+              '        font-size:clamp(6px,1.72cqw,18px);\n'
+              '        font-weight:600;\n'
+              '        line-height:1;',
           )
 
           replace_once(
@@ -142,36 +94,28 @@ jobs:
           )
 
           replace_once(
-              '''    const charW = (w - marginX * 2) / 16;
-              const lineH = (h - marginY * 2) / 2;
-              const dot = Math.min(charW / 6.45, lineH / 8.05);
-              const gap = dot * .19;
-              const px = dot - gap;''',
-              '''    const charW = (w - marginX * 2) / 16;
-              const lineH = (h - marginY * 2) / 2;
-              // The physical alpha display is a 5x7 matrix in a 6x8 character
-              // cell. Preserve that pitch and snap to device pixels so small
-              // compact cards keep visible separation between LCD elements.
-              const dot = Math.min(charW / 6, lineH / 8);
-              const gap = dot * .34;
-              const px = dot - gap;
-              const snap = (value) => Math.round(value * scale) / scale;
-              const pixelSize = Math.max(1 / scale, snap(px));''',
+              '    const dot = Math.min(charW / 6.45, lineH / 8.05);\n'
+              '    const gap = dot * .19;\n'
+              '    const px = dot - gap;',
+              '    // The physical alpha display is a 5x7 matrix in a 6x8 character\n'
+              '    // cell. Preserve that pitch and snap to device pixels so small\n'
+              '    // compact cards keep visible separation between LCD elements.\n'
+              '    const dot = Math.min(charW / 6, lineH / 8);\n'
+              '    const gap = dot * .34;\n'
+              '    const px = dot - gap;\n'
+              '    const snap = (value) => Math.round(value * scale) / scale;\n'
+              '    const pixelSize = Math.max(1 / scale, snap(px));',
           )
 
           replace_once(
-              '''              ctx.fillRect(
-                Math.round(baseX + gx * dot),
-                Math.round(baseY + gy * dot),
-                Math.max(1, Math.ceil(px)),
-                Math.max(1, Math.ceil(px))
-              );''',
-              '''              ctx.fillRect(
-                snap(baseX + gx * dot),
-                snap(baseY + gy * dot),
-                pixelSize,
-                pixelSize
-              );''',
+              '                Math.round(baseX + gx * dot),\n'
+              '                Math.round(baseY + gy * dot),\n'
+              '                Math.max(1, Math.ceil(px)),\n'
+              '                Math.max(1, Math.ceil(px))',
+              '                snap(baseX + gx * dot),\n'
+              '                snap(baseY + gy * dot),\n'
+              '                pixelSize,\n'
+              '                pixelSize',
           )
 
           path.write_text(text, encoding="utf-8")
