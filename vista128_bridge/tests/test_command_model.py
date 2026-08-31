@@ -96,6 +96,7 @@ class CommandModelTests(unittest.TestCase):
         self.assertEqual(automatic_unbypass.command_type, "instant_activation")
         self.assertEqual(automatic_unbypass.operands["action"], "automatic_unbypass")
         self.assertEqual(automatic_unbypass.operands["zone_list"], "02")
+        self.assertEqual(automatic_unbypass.confidence, "high")
         system = KeypadParser().parse("1234#60", partition=1)
         self.assertEqual(system.command_type, "event_log_display")
         self.assertEqual(
@@ -111,6 +112,21 @@ class CommandModelTests(unittest.TestCase):
             ),
         )
         self.assertEqual(extension.command_type, "fire_walk_test_one_man")
+
+    def test_parser_does_not_high_confidence_invalid_77_specifier(self):
+        invalid_partition = KeypadParser().parse(
+            "1234#7721*9*1*1*", partition=1
+        )
+        self.assertEqual(invalid_partition.command_type, "instant_activation")
+        self.assertNotEqual(invalid_partition.confidence, "high")
+        self.assertNotIn("partitions", invalid_partition.operands)
+
+        invalid_zone_list = KeypadParser().parse(
+            "1234#7731*16*1*1*", partition=1
+        )
+        self.assertEqual(invalid_zone_list.command_type, "instant_activation")
+        self.assertNotEqual(invalid_zone_list.confidence, "high")
+        self.assertNotIn("zone_list", invalid_zone_list.operands)
 
     def test_parser_marks_context_dependent_and_programming_commands(self):
         bare = KeypadParser().parse("1234", partition=1)
@@ -311,6 +327,54 @@ class CommandModelTests(unittest.TestCase):
         self.assertEqual(system_plan.mechanism, "keypad")
         self.assertEqual(system_plan.keypad_sequence, "1234#60")
 
+        for namespace in ("#70", "#77"):
+            with self.assertRaisesRegex(
+                CommandValidationError, "typed or explicit interactive"
+            ):
+                command_from_request(
+                    {
+                        "action": "system_command",
+                        "partition": 1,
+                        "code": "1234",
+                        "system_command": namespace,
+                    }
+                )
+
+    def test_unbypass_zones_requires_documented_zone_list(self):
+        with self.assertRaisesRegex(CommandValidationError, "zone list"):
+            command_from_request(
+                {
+                    "action": "unbypass_zones",
+                    "partition": 1,
+                    "code": "1234",
+                    "zones": [1, 27],
+                }
+            )
+
+        command = command_from_request(
+            {
+                "action": "unbypass_zones",
+                "partition": 1,
+                "code": "1234",
+                "zone_list": "02",
+            }
+        )
+        self.assertEqual(command.command_type, "unbypass_zone_list")
+        self.assertEqual(command.operands, {"zone_list": "02"})
+        self.assertEqual(
+            compile_keypad_sequence(command), "1234#7731*02*1*1*"
+        )
+
+        with self.assertRaisesRegex(CommandValidationError, "01..15"):
+            command_from_request(
+                {
+                    "action": "unbypass_zones",
+                    "partition": 1,
+                    "code": "1234",
+                    "zone_list": "16",
+                }
+            )
+
     def test_instant_activation_requires_matching_action_specific_operand(self):
         command = command_from_request(
             {
@@ -372,6 +436,18 @@ class CommandModelTests(unittest.TestCase):
                     "operands": {"subtype": "1"},
                 }
             )
+
+        for action in ("chime", "quick_bypass", "walk_test"):
+            with self.subTest(action=action):
+                with self.assertRaisesRegex(CommandValidationError, "unsupported operand"):
+                    command_from_request(
+                        {
+                            "action": action,
+                            "partition": 1,
+                            "code": "1234",
+                            "operands": {"bogus": "not-consumed"},
+                        }
+                    )
 
     def test_compile_and_plan_choose_native_or_keypad(self):
         command = command_from_request(
