@@ -9,6 +9,7 @@ COMPONENT = REPO_ROOT / "custom_components" / "vistaturbo"
 ADDON_CONFIG = REPO_ROOT / "vista128_bridge" / "config.yaml"
 RUN_SCRIPT = REPO_ROOT / "vista128_bridge" / "run.sh"
 NATIVE_API = REPO_ROOT / "vista128_bridge" / "app" / "vista_bridge" / "native_api.py"
+MESSAGE_HANDLER = REPO_ROOT / "vista128_bridge" / "app" / "vista_bridge" / "message_handler.py"
 
 
 class NativeComponentContractTests(unittest.TestCase):
@@ -59,11 +60,38 @@ class NativeComponentContractTests(unittest.TestCase):
         self.assertNotIn("keypress", alarm_source.lower())
         self.assertNotIn("raw_sequence", alarm_source)
 
-    def test_native_alarm_capability_change_reloads_entity_platforms(self) -> None:
+    def test_ha2_uses_dedicated_ordered_event_stream(self) -> None:
+        source = NATIVE_API.read_text(encoding="utf-8")
+        handler_source = MESSAGE_HANDLER.read_text(encoding="utf-8")
+        api_source = (COMPONENT / "api.py").read_text(encoding="utf-8")
         hub_source = (COMPONENT / "hub.py").read_text(encoding="utf-8")
-        self.assertIn("_native_alarm_capability", hub_source)
+        event_source = (COMPONENT / "event.py").read_text(encoding="utf-8")
+        init_source = (COMPONENT / "__init__.py").read_text(encoding="utf-8")
+
+        self.assertIn('path == "/v1/events"', source)
+        self.assertIn("Last-Event-ID", api_source)
+        self.assertIn("EVENT_REPLAY_MAX", source)
+        self.assertIn("replay_window_exceeded", source)
+        self.assertIn("native_event_callback", handler_source)
+        self.assertIn("async_listen_events", hub_source)
+        self.assertIn("last_event_sequence", hub_source)
+        self.assertIn("EventEntity", event_source)
+        self.assertIn("_trigger_event", event_source)
+        self.assertIn("Platform.EVENT", init_source)
+
+    def test_native_capability_changes_reload_entity_platforms(self) -> None:
+        hub_source = (COMPONENT / "hub.py").read_text(encoding="utf-8")
+        self.assertIn("_entity_capabilities", hub_source)
         self.assertIn("async_schedule_reload", hub_source)
         self.assertIn("capability_changed", hub_source)
+
+    def test_native_diagnostics_never_include_machine_token_or_panel_layout(self) -> None:
+        diagnostics_source = (COMPONENT / "diagnostics.py").read_text(encoding="utf-8")
+        self.assertNotIn("CONF_TOKEN", diagnostics_source)
+        self.assertNotIn('snapshot.get("zones", [])[0]', diagnostics_source)
+        self.assertNotIn("descriptor", diagnostics_source)
+        self.assertIn("gap_detected", diagnostics_source)
+        self.assertIn("entity_source_counts", diagnostics_source)
 
     def test_machine_auth_does_not_create_human_reauth_surface(self) -> None:
         init_source = (COMPONENT / "__init__.py").read_text(encoding="utf-8")
@@ -77,6 +105,8 @@ class NativeComponentContractTests(unittest.TestCase):
         self.assertIn("def _validate_snapshot", api_source)
         self.assertIn('payload.get("schema") != API_SCHEMA', api_source)
         self.assertGreaterEqual(api_source.count("_validate_snapshot("), 3)
+        self.assertIn("_validate_panel_event", api_source)
+        self.assertIn("_validate_event_gap", api_source)
 
 
 if __name__ == "__main__":

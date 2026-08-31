@@ -9,7 +9,7 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "app"))
 
-from vista_bridge.native_api import NativeApiServer  # noqa: E402
+from vista_bridge.native_api import EVENT_REPLAY_MAX, NativeApiServer  # noqa: E402
 
 
 class FakePartition:
@@ -97,6 +97,7 @@ class FakeBridge:
             control=SimpleNamespace(enabled=True, native_alarm_enabled=True),
         )
         self.control = FakeControl()
+        self.handler = SimpleNamespace(native_event_callback=None)
         self.connected = True
         self.commands = []
         self.enqueue_result = (True, "queued")
@@ -107,6 +108,30 @@ class FakeBridge:
     def enqueue_command_control(self, command, metadata=None):
         self.commands.append((command, metadata or {}))
         return self.enqueue_result
+
+    def emit_native_event(self, event_type: str, code: str) -> None:
+        callback = self.handler.native_event_callback
+        if callback is None:
+            raise AssertionError("native event callback is not attached")
+        callback(
+            {
+                "event_type": event_type,
+                "code": code,
+                "description": event_type.replace("_", " ").title(),
+                "zone": 1,
+                "descriptor": "FRONT DOOR",
+                "user": 0,
+                "partition": 1,
+                "panel_timestamp": "2026-08-31T09:00:00",
+                "received_at": "2026-08-31T13:00:00+00:00",
+                "panel_clock_offset_seconds": 0,
+                "alarm_type": None,
+                "alarm_transition": None,
+                "zone_state": None,
+                "zone_active": None,
+                "session_generation": 1,
+            }
+        )
 
 
 async def _request(
@@ -144,6 +169,47 @@ async def _request(
     return status, json.loads(response_body)
 
 
+async def _open_event_stream(
+    port: int, *, last_event_id: int = 0
+) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
+    reader, writer = await asyncio.open_connection("127.0.0.1", port)
+    headers = [
+        "GET /v1/events HTTP/1.1",
+        "Host: 127.0.0.1",
+        "Authorization: Bearer test-machine-token",
+        "Connection: keep-alive",
+    ]
+    if last_event_id:
+        headers.append(f"Last-Event-ID: {last_event_id}")
+    writer.write(("\r\n".join(headers) + "\r\n\r\n").encode("ascii"))
+    await writer.drain()
+    head = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), timeout=2)
+    status = int(head.split(b" ", 2)[1])
+    if status != 200:
+        raise AssertionError(f"event stream returned HTTP {status}")
+    return reader, writer
+
+
+async def _read_sse_message(reader: asyncio.StreamReader) -> tuple[str, dict]:
+    event_name = ""
+    data_lines: list[str] = []
+    while True:
+        raw = await asyncio.wait_for(reader.readline(), timeout=2)
+        if not raw:
+            raise AssertionError("event stream closed before an SSE message arrived")
+        line = raw.decode("utf-8").rstrip("\r\n")
+        if not line:
+            if data_lines:
+                return event_name, json.loads("\n".join(data_lines))
+            continue
+        if line.startswith(":"):
+            continue
+        if line.startswith("event:"):
+            event_name = line[6:].strip()
+        elif line.startswith("data:"):
+            data_lines.append(line[5:].lstrip())
+
+
 class NativeApiTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.bridge = FakeBridge()
@@ -162,7 +228,7 @@ class NativeApiTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self) -> None:
         await self.server.stop()
 
-    async def test_snapshot_exposes_semantic_state_and_control_capability(self) -> None:
+    async def test_snapshot_exposes_semantic_state_and_native_capabilities(self) -> None:
         status, payload = await _request(
             self.server.port,
             "/v1/snapshot",
@@ -172,8 +238,13 @@ class NativeApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["schema"], 1)
         self.assertFalse(payload["api"]["read_only"])
         self.assertTrue(payload["api"]["alarm_control"])
+        self.assertTrue(payload["api"]["event_stream"])
         self.assertTrue(payload["control"]["native_alarm"])
         self.assertTrue(payload["control"]["automation_available"])
+        self.assertTrue(payload["events"]["stream"])
+        self.assertEqual(payload["events"]["replay_capacity"], EVENT_REPLAY_MAX)
+        self.assertIn("fire_alarm", payload["events"]["types"])
+        self.assertIn("fault", payload["events"]["types"])
         self.assertEqual(payload["partitions"][0]["state"], "armed_away")
         self.assertEqual(payload["zones"][0]["descriptor"], "FRONT DOOR")
         self.assertEqual(payload["keypads"][0]["line_1"], "P1   ARMED AWAY ")
@@ -293,6 +364,45 @@ class NativeApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status, 200)
         self.assertGreater(after["revision"], before["revision"])
         self.assertTrue(after["zones"][0]["faulted"])
+
+    async def test_event_stream_preserves_back_to_back_events_and_replays(self) -> None:
+        reader, writer = await _open_event_stream(self.server.port)
+        self.bridge.emit_native_event("fault", "F5")
+        self.bridge.emit_native_event("fault_restore", "F6")
+
+        name1, event1 = await _read_sse_message(reader)
+        name2, event2 = await _read_sse_message(reader)
+        self.assertEqual((name1, name2), ("panel_event", "panel_event"))
+        self.assertEqual((event1["sequence"], event2["sequence"]), (1, 2))
+        self.assertEqual((event1["code"], event2["code"]), ("F5", "F6"))
+        writer.close()
+        await writer.wait_closed()
+
+        self.bridge.emit_native_event("trouble", "03")
+        self.bridge.emit_native_event("trouble_restore", "04")
+
+        reader, writer = await _open_event_stream(self.server.port, last_event_id=2)
+        name3, event3 = await _read_sse_message(reader)
+        name4, event4 = await _read_sse_message(reader)
+        self.assertEqual((name3, name4), ("panel_event", "panel_event"))
+        self.assertEqual((event3["sequence"], event4["sequence"]), (3, 4))
+        self.assertEqual((event3["code"], event4["code"]), ("03", "04"))
+        writer.close()
+        await writer.wait_closed()
+
+    async def test_event_stream_reports_replay_window_gap(self) -> None:
+        for index in range(EVENT_REPLAY_MAX + 3):
+            self.bridge.emit_native_event("fault", f"{index % 100:02d}")
+
+        reader, writer = await _open_event_stream(self.server.port, last_event_id=1)
+        name, gap = await _read_sse_message(reader)
+        self.assertEqual(name, "gap")
+        self.assertEqual(gap["reason"], "replay_window_exceeded")
+        self.assertGreater(gap["earliest"], 2)
+        self.assertEqual(gap["latest"], EVENT_REPLAY_MAX + 3)
+        self.assertEqual(gap["reset_to"], gap["earliest"] - 1)
+        writer.close()
+        await writer.wait_closed()
 
 
 if __name__ == "__main__":

@@ -83,6 +83,20 @@ EVENT_DESCRIPTIONS: dict[str, str] = {
     "FE": "Fail To Print Restore",
 }
 
+
+def event_type_for_code(code: str) -> str:
+    """Return a stable Home Assistant event type for one VISTA event code."""
+    description = EVENT_DESCRIPTIONS.get(str(code).upper(), "Unknown Event")
+    normalized = "".join(
+        character.lower() if character.isalnum() else " " for character in description
+    )
+    return "_".join(normalized.split()) or "unknown_event"
+
+
+NATIVE_EVENT_TYPES = tuple(
+    sorted({event_type_for_code(code) for code in EVENT_DESCRIPTIONS} | {"unknown_event"})
+)
+
 ALARM_RESTORE_TO_START = {
     "02": "01",
     "12": "11",
