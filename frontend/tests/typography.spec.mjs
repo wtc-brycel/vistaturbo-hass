@@ -7,7 +7,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const cardSource = readFileSync(join(here, "..", "vista-keypad-card.js"), "utf8");
 const ENTITY = "sensor.vista_partition_1_keypad";
 
-async function mountCard(page, { width = 390, layout = "auto" } = {}) {
+async function mountCard(page, { width = 390, layout = "auto", model = "6160cr2" } = {}) {
   await page.setViewportSize({ width: Math.max(430, width + 40), height: 900 });
   await page.setContent(`<!doctype html><html><head><meta charset="utf-8"><style>
     html,body{margin:0;padding:0;background:#eee}
@@ -20,11 +20,11 @@ async function mountCard(page, { width = 390, layout = "auto" } = {}) {
   });
   await page.addScriptTag({ content: cardSource });
 
-  await page.evaluate(({ entity, layout }) => {
+  await page.evaluate(({ entity, layout, model }) => {
     const card = document.getElementById("card");
     card.setConfig({
       entity,
-      model: "6160cr2",
+      model,
       layout,
       case_color: "dark",
       read_only: true,
@@ -49,7 +49,7 @@ async function mountCard(page, { width = 390, layout = "auto" } = {}) {
         },
       },
     };
-  }, { entity: ENTITY, layout });
+  }, { entity: ENTITY, layout, model });
 
   await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
 }
@@ -109,6 +109,28 @@ test("physical 6160CR-2 uses the same keypad print typography", async ({ page })
   expect(typography.numberFamily).toContain("Arial Narrow");
   expect(typography.legendWeight).toBe("600");
   expect(typography.statusWeight).toBe("600");
+});
+
+test("First Alert keeps its model-specific heavier numeral treatment", async ({ page }) => {
+  await mountCard(page, { width: 390, model: "firstalert" });
+
+  const typography = await page.evaluate(() => {
+    const root = document.getElementById("card").shadowRoot;
+    const compact = root.querySelector(".layout-compact-view");
+    const numberStyle = getComputedStyle(compact.querySelector(".number-main"));
+    const legendStyle = getComputedStyle(compact.querySelector(".number-legend"));
+    return {
+      numberTransform: numberStyle.transform,
+      numberWeight: numberStyle.fontWeight,
+      legendWeight: legendStyle.fontWeight,
+      legendStyle: legendStyle.fontStyle,
+    };
+  });
+
+  expect(typography.numberTransform).toBe("none");
+  expect(typography.numberWeight).toBe("600");
+  expect(typography.legendWeight).toBe("600");
+  expect(typography.legendStyle).toBe("normal");
 });
 
 test("LCD renderer keeps a canonical 6x8 cell pitch and device-pixel snapping", () => {
