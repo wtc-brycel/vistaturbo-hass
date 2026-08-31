@@ -28,8 +28,8 @@ def _mapping_keys(text: str, section: str) -> list[str]:
 
 class AddonConfigSchemaTests(unittest.TestCase):
     def test_default_configuration_surface_is_small(self) -> None:
-        self.assertLessEqual(len(_mapping_keys(CONFIG_TEXT, "options")), 15)
-        self.assertLessEqual(len(_mapping_keys(CONFIG_TEXT, "schema")), 23)
+        self.assertLessEqual(len(_mapping_keys(CONFIG_TEXT, "options")), 14)
+        self.assertLessEqual(len(_mapping_keys(CONFIG_TEXT, "schema")), 22)
 
     def test_schema_order_keeps_categories_contiguous(self) -> None:
         self.assertEqual(
@@ -43,7 +43,6 @@ class AddonConfigSchemaTests(unittest.TestCase):
                 "keypad_control_enabled",
                 "native_alarm_control_enabled",
                 "chime_zones",
-                "event_history_startup_dump_enabled",
                 "event_history_max_age_days",
                 "transport_print_enabled",
                 "transport_host",
@@ -61,9 +60,10 @@ class AddonConfigSchemaTests(unittest.TestCase):
             ],
         )
 
-    def test_engineering_tuning_is_not_exposed(self) -> None:
+    def test_unsupported_and_engineering_settings_are_not_exposed(self) -> None:
         exposed = set(_mapping_keys(CONFIG_TEXT, "schema"))
         hidden_keys = {
+            "event_history_startup_dump_enabled",
             "mqtt_outbound_queue_max",
             "mqtt_inflight_messages_max",
             "reconnect_min_seconds",

@@ -337,8 +337,24 @@ class VistaState:
         return self.zone_status_blocks_seen >= {1, 2} and self.zone_partition_blocks_seen >= {1, 2}
 
     @property
+    def live_snapshot_complete(self) -> bool:
+        return bool(self.arming_initialized and self.zone_snapshot_complete)
+
+    @property
     def alarm_knowledge_complete(self) -> bool:
         return self.security_snapshot_complete
+
+    @property
+    def alarm_keypad_partitions(self) -> tuple[int, ...]:
+        assigned = {
+            zone.partition
+            for zone in self.zones.values()
+            if zone.partition in self.keypads
+        }
+        if not assigned:
+            return tuple(self.keypads)
+        assigned.add(1)
+        return tuple(sorted(assigned))
 
     @property
     def keypad_alarm_snapshot_complete(self) -> bool:
@@ -354,7 +370,10 @@ class VistaState:
                     "audible_panic_alarm",
                 )
             )
-            for keypad in self.keypads.values()
+            for keypad in (
+                self.keypads[partition]
+                for partition in self.alarm_keypad_partitions
+            )
         )
 
     def begin_query_snapshot(self, query_name: str) -> None:
@@ -371,13 +390,11 @@ class VistaState:
             self.security_snapshot_complete = False
 
     def mark_authoritative_snapshot(self) -> bool:
-        """Mark the panel security view authoritative only after every source is fresh."""
+        """Refresh alarm completeness while returning core live-state freshness."""
         self.security_snapshot_complete = bool(
-            self.arming_initialized
-            and self.zone_snapshot_complete
-            and self.keypad_alarm_snapshot_complete
+            self.live_snapshot_complete and self.keypad_alarm_snapshot_complete
         )
-        return self.security_snapshot_complete
+        return self.live_snapshot_complete
 
     def reset_connection_derived_annunciators(self) -> None:
         self.session_generation += 1

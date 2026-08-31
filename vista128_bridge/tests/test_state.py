@@ -280,7 +280,8 @@ class StateTests(unittest.TestCase):
         self._authoritative_no_alarm(state)
         state.keypads[8].supervisory_led = None
         state.security_snapshot_complete = False
-        self.assertFalse(state.mark_authoritative_snapshot())
+        self.assertTrue(state.mark_authoritative_snapshot())
+        self.assertFalse(state.alarm_knowledge_complete)
         self.assertIsNone(state.panel_alarm_states()["active"])
 
     def test_complete_no_alarm_snapshot_reports_off(self):

@@ -23,9 +23,6 @@ configuration:
   chime_zones:
     name: Chime · Zones
     description: Comma-separated zone numbers that should produce chime events.
-  event_history_startup_dump_enabled:
-    name: History · Import panel log on startup
-    description: Request the VISTA historical event log after startup synchronization.
   event_history_max_age_days:
     name: History · Retention
     description: Days to retain the local event journal and keypad audit; defaults to 90 when unset.

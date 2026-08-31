@@ -37,7 +37,6 @@ class ConfigurationContractTests(unittest.TestCase):
                 "keypad_control_enabled",
                 "native_alarm_control_enabled",
                 "chime_zones",
-                "event_history_startup_dump_enabled",
                 "transport_print_enabled",
                 "transport_host",
                 "transport_http_port",
@@ -57,6 +56,7 @@ class ConfigurationContractTests(unittest.TestCase):
     def test_removed_engineering_options_are_not_schema_fields(self) -> None:
         schema = set(_mapping_keys("schema"))
         self.assertNotIn("event_history_enabled", schema)
+        self.assertNotIn("event_history_startup_dump_enabled", schema)
         self.assertNotIn("transport_print_queue_max", schema)
         self.assertNotIn("mqtt_outbound_queue_max", schema)
         self.assertNotIn("keypad_poll_interval_seconds", schema)
