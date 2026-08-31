@@ -295,8 +295,6 @@ class VistaSynchronizer:
         if self._recovery_resync_pending and not self._program_mode:
             self._recovery_resync_pending = False
             self._resync_requested.set()
-        if self.event_history_enabled and self.event_history_startup_dump_enabled:
-            await self.run_event_log_dump()
 
     async def periodic_loop(self) -> None:
         while self.is_connected():
@@ -313,7 +311,7 @@ class VistaSynchronizer:
                 invalidate_snapshot=False,
             )
             if ok and self.keypad_settings.enabled:
-                await self._refresh_keypads(tuple(range(1, 9)))
+                await self._refresh_keypads(self.keypad_settings.partitions)
             if not ok:
                 # A routine reconciliation does not create an availability gap
                 # while it is in flight. If it actually fails, however, the
@@ -337,7 +335,7 @@ class VistaSynchronizer:
 
         self._keypad_refresh_partitions.clear()
         self._keypad_refresh_requested.clear()
-        await self._refresh_keypads(tuple(range(1, 9)))
+        await self._refresh_keypads(self.keypad_settings.partitions)
         self._check_snapshot()
 
         while self.is_connected():
@@ -386,7 +384,10 @@ class VistaSynchronizer:
     async def _refresh_keypads(self, partitions: Sequence[int]) -> None:
         if self._program_mode:
             return
+        configured = set(self.keypad_settings.partitions)
         for partition in partitions:
+            if partition not in configured:
+                continue
             if not self.is_connected():
                 return
             await self.run_keypad_refresh(partition)
