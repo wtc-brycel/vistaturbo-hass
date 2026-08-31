@@ -16,7 +16,12 @@ from .api import (
 from .const import CONF_PORT, CONF_TOKEN, DOMAIN
 from .hub import VistaTurboHub
 
-PLATFORMS = [Platform.ALARM_CONTROL_PANEL, Platform.BINARY_SENSOR, Platform.SENSOR]
+PLATFORMS = [
+    Platform.ALARM_CONTROL_PANEL,
+    Platform.BINARY_SENSOR,
+    Platform.EVENT,
+    Platform.SENSOR,
+]
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 type VistaTurboConfigEntry = ConfigEntry[VistaTurboHub]
 
@@ -49,8 +54,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: VistaTurboConfigEntry) -
     hub = VistaTurboHub(hass, entry, client, snapshot)
     entry.runtime_data = hub
     entry.async_on_unload(entry.add_update_listener(_async_reload_entry))
-    entry.async_create_background_task(hass, hub.async_listen(), "vistaturbo-native-stream")
+
+    # Register event listeners before starting the transient event stream so a
+    # panel event cannot arrive in the setup window with no HA entity attached.
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    entry.async_create_background_task(
+        hass, hub.async_listen(), "vistaturbo-native-state-stream"
+    )
+    entry.async_create_background_task(
+        hass, hub.async_listen_events(), "vistaturbo-native-event-stream"
+    )
     return True
 
 

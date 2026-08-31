@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 import logging
 
 from .config import Settings
 from .control import VistaControlCoordinator
+from .event_codes import ZONE_EVENT_TRANSITIONS, classify_alarm_event, event_type_for_code
 from .event_store import EventStore
 from .mqtt_client import MqttPublisher
 from .printer import TransPortEventPrinter, panel_clock_offset_seconds
@@ -40,6 +42,7 @@ class ProtocolMessageHandler:
         self.synchronizer = synchronizer
         self.event_store = event_store
         self.control = control
+        self.native_event_callback: Callable[[dict], None] | None = None
         self._history_dump_seen = 0
         self._history_dump_inserted = 0
         self._history_occurrences: dict[str, int] = {}
@@ -280,13 +283,38 @@ class ProtocolMessageHandler:
             received_at=received_at,
             panel_clock_offset_seconds=self.last_panel_clock_offset_seconds,
         )
-        self._handle_system_event_side_effects(event.code)
-        self.synchronizer.request_keypad_refresh(event.partition)
 
         zone_after = self.state.zones.get(event.zone)
         resolved_partition = event.partition
         if resolved_partition not in self.state.partitions and zone_after is not None:
             resolved_partition = zone_after.partition
+
+        if self.native_event_callback is not None:
+            alarm_type, alarm_transition = classify_alarm_event(event.code)
+            zone_transition = ZONE_EVENT_TRANSITIONS.get(event.code)
+            self.native_event_callback(
+                {
+                    "event_type": event_type_for_code(event.code),
+                    "code": event.code,
+                    "description": event.description,
+                    "zone": event.zone,
+                    "descriptor": descriptor,
+                    "user": event.user,
+                    "partition": resolved_partition,
+                    "panel_timestamp": event.panel_timestamp,
+                    "received_at": received_at,
+                    "panel_clock_offset_seconds": self.last_panel_clock_offset_seconds,
+                    "alarm_type": alarm_type,
+                    "alarm_transition": alarm_transition,
+                    "zone_state": zone_transition[0] if zone_transition else None,
+                    "zone_active": zone_transition[1] if zone_transition else None,
+                    "session_generation": self.state.session_generation,
+                }
+            )
+
+        self._handle_system_event_side_effects(event.code)
+        self.synchronizer.request_keypad_refresh(event.partition)
+
         partition_state = self.state.partitions.get(resolved_partition)
         should_chime = (
             event.code == "F5"

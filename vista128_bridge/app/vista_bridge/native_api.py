@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections import deque
 from datetime import datetime, timezone
 import hmac
 import json
@@ -10,6 +11,7 @@ from urllib.parse import urlsplit
 from uuid import uuid4
 
 from .command_model import CommandValidationError, VistaCommand
+from .event_codes import NATIVE_EVENT_TYPES
 
 if TYPE_CHECKING:
     from .bridge import VistaBridge
@@ -21,6 +23,8 @@ MAX_REQUEST_BYTES = 8192
 MAX_CONTROL_BODY_BYTES = 4096
 HEARTBEAT_SECONDS = 20
 OBSERVE_INTERVAL_SECONDS = 0.25
+EVENT_REPLAY_MAX = 256
+EVENT_SUBSCRIBER_QUEUE_MAX = 256
 ALARM_ACTIONS = frozenset({"disarm", "arm_away", "arm_home", "arm_night"})
 
 
@@ -35,9 +39,14 @@ class NativeApiServer:
         self._port = port
         self._server: asyncio.AbstractServer | None = None
         self._observer_task: asyncio.Task[None] | None = None
-        self._subscribers: set[asyncio.Queue[int]] = set()
+        self._subscribers: set[asyncio.Queue[int | None]] = set()
         self._revision = 0
         self._fingerprint = ""
+        self._event_sequence = 0
+        self._event_history: deque[dict] = deque(maxlen=EVENT_REPLAY_MAX)
+        self._event_subscribers: set[asyncio.Queue[dict | None]] = set()
+        self._event_callback = self.publish_panel_event
+        self._previous_native_event_callback = None
 
     @property
     def port(self) -> int:
@@ -52,6 +61,12 @@ class NativeApiServer:
             port=self._port,
             limit=MAX_REQUEST_BYTES,
         )
+        handler = getattr(self._bridge, "handler", None)
+        if handler is not None:
+            self._previous_native_event_callback = getattr(
+                handler, "native_event_callback", None
+            )
+            handler.native_event_callback = self._event_callback
         self._fingerprint = self._snapshot_fingerprint()
         self._observer_task = asyncio.create_task(
             self._observe_state(), name="native-api-state-observer"
@@ -59,15 +74,48 @@ class NativeApiServer:
         LOG.info("Native Home Assistant API listening on internal port %d", self.port)
 
     async def stop(self) -> None:
+        handler = getattr(self._bridge, "handler", None)
+        if (
+            handler is not None
+            and getattr(handler, "native_event_callback", None) is self._event_callback
+        ):
+            handler.native_event_callback = self._previous_native_event_callback
         if self._observer_task is not None:
             self._observer_task.cancel()
             await asyncio.gather(self._observer_task, return_exceptions=True)
             self._observer_task = None
+
+        # Wake persistent SSE handlers before waiting for the asyncio server to
+        # close. Otherwise they can remain blocked in their heartbeat wait for
+        # up to HEARTBEAT_SECONDS during App shutdown.
+        for subscriber in tuple(self._subscribers):
+            while not subscriber.empty():
+                try:
+                    subscriber.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+            try:
+                subscriber.put_nowait(None)
+            except asyncio.QueueFull:
+                pass
+        for subscriber in tuple(self._event_subscribers):
+            while not subscriber.empty():
+                try:
+                    subscriber.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+            try:
+                subscriber.put_nowait(None)
+            except asyncio.QueueFull:
+                pass
+        await asyncio.sleep(0)
+
         if self._server is not None:
             self._server.close()
             await self._server.wait_closed()
             self._server = None
         self._subscribers.clear()
+        self._event_subscribers.clear()
 
     async def _observe_state(self) -> None:
         """Turn in-process semantic state changes into a push stream."""
@@ -81,6 +129,29 @@ class NativeApiServer:
             for subscriber in tuple(self._subscribers):
                 if subscriber.empty():
                     subscriber.put_nowait(self._revision)
+
+    def publish_panel_event(self, payload: dict) -> None:
+        """Publish one live VISTA event without snapshot coalescing."""
+        self._event_sequence += 1
+        event = dict(payload)
+        event["schema"] = API_SCHEMA
+        event["sequence"] = self._event_sequence
+        self._event_history.append(event)
+        for subscriber in tuple(self._event_subscribers):
+            try:
+                subscriber.put_nowait(event)
+            except asyncio.QueueFull:
+                # Force this subscriber to reconnect. Its Last-Event-ID lets the
+                # replay window fill the gap instead of silently dropping data.
+                while not subscriber.empty():
+                    try:
+                        subscriber.get_nowait()
+                    except asyncio.QueueEmpty:
+                        break
+                try:
+                    subscriber.put_nowait(None)
+                except asyncio.QueueFull:
+                    pass
 
     def _snapshot_fingerprint(self) -> str:
         return json.dumps(
@@ -154,6 +225,11 @@ class NativeApiServer:
                     and self._bridge.control.automation_available()
                 ),
             },
+            "events": {
+                "stream": True,
+                "types": list(NATIVE_EVENT_TYPES),
+                "replay_capacity": EVENT_REPLAY_MAX,
+            },
             "partitions": partitions,
             "zones": zones,
             "keypads": keypads,
@@ -163,6 +239,7 @@ class NativeApiServer:
             payload["api"] = {
                 "read_only": not native_alarm_control,
                 "alarm_control": native_alarm_control,
+                "event_stream": True,
             }
         return payload
 
@@ -217,6 +294,12 @@ class NativeApiServer:
                 await self._write_json(writer, 200, self.snapshot())
             elif path == "/v1/stream":
                 await self._stream_events(writer)
+            elif path == "/v1/events":
+                after_sequence, error = self._last_event_id(headers)
+                if error is not None:
+                    await self._write_json(writer, 400, {"error": error})
+                    return
+                await self._stream_panel_events(writer, after_sequence)
             else:
                 await self._write_json(writer, 404, {"error": "not_found"})
             return
@@ -232,6 +315,19 @@ class NativeApiServer:
             return
 
         await self._write_json(writer, 405, {"error": "method_not_allowed"})
+
+    @staticmethod
+    def _last_event_id(headers: dict[str, str]) -> tuple[int, str | None]:
+        raw = headers.get("last-event-id", "").strip()
+        if not raw:
+            return 0, None
+        try:
+            value = int(raw)
+        except ValueError:
+            return 0, "invalid_last_event_id"
+        if value < 0:
+            return 0, "invalid_last_event_id"
+        return value, None
 
     async def _read_control_payload(
         self, reader: asyncio.StreamReader, headers: dict[str, str]
@@ -385,7 +481,7 @@ class NativeApiServer:
             await writer.wait_closed()
 
     async def _stream_events(self, writer: asyncio.StreamWriter) -> None:
-        queue: asyncio.Queue[int] = asyncio.Queue(maxsize=1)
+        queue: asyncio.Queue[int | None] = asyncio.Queue(maxsize=1)
         self._subscribers.add(queue)
         writer.write(
             b"HTTP/1.1 200 OK\r\n"
@@ -397,11 +493,15 @@ class NativeApiServer:
             await self._write_sse_snapshot(writer)
             while True:
                 try:
-                    await asyncio.wait_for(queue.get(), timeout=HEARTBEAT_SECONDS)
+                    revision = await asyncio.wait_for(
+                        queue.get(), timeout=HEARTBEAT_SECONDS
+                    )
                 except asyncio.TimeoutError:
                     writer.write(b": heartbeat\n\n")
                     await writer.drain()
                     continue
+                if revision is None:
+                    return
                 await self._write_sse_snapshot(writer)
         except (ConnectionError, BrokenPipeError, ConnectionResetError, asyncio.CancelledError):
             pass
@@ -413,7 +513,104 @@ class NativeApiServer:
             except (ConnectionError, BrokenPipeError, ConnectionResetError):
                 pass
 
+    async def _stream_panel_events(
+        self, writer: asyncio.StreamWriter, after_sequence: int
+    ) -> None:
+        queue: asyncio.Queue[dict | None] = asyncio.Queue(
+            maxsize=EVENT_SUBSCRIBER_QUEUE_MAX
+        )
+        self._event_subscribers.add(queue)
+        cutoff = self._event_sequence
+        history = tuple(self._event_history)
+        writer.write(
+            b"HTTP/1.1 200 OK\r\n"
+            b"Content-Type: text/event-stream\r\n"
+            b"Cache-Control: no-cache, no-store\r\n"
+            b"Connection: keep-alive\r\n\r\n"
+        )
+        effective_after = after_sequence
+        try:
+            oldest = int(history[0]["sequence"]) if history else cutoff + 1
+            if after_sequence > cutoff:
+                await self._write_sse_payload(
+                    writer,
+                    "gap",
+                    {
+                        "schema": API_SCHEMA,
+                        "reason": "sequence_reset",
+                        "after": after_sequence,
+                        "earliest": oldest,
+                        "latest": cutoff,
+                        "reset_to": 0,
+                    },
+                )
+                effective_after = 0
+            elif after_sequence < oldest - 1:
+                await self._write_sse_payload(
+                    writer,
+                    "gap",
+                    {
+                        "schema": API_SCHEMA,
+                        "reason": "replay_window_exceeded",
+                        "after": after_sequence,
+                        "earliest": oldest,
+                        "latest": cutoff,
+                        "reset_to": oldest - 1,
+                    },
+                )
+                effective_after = oldest - 1
+
+            for event in history:
+                sequence = int(event["sequence"])
+                if effective_after < sequence <= cutoff:
+                    await self._write_sse_payload(
+                        writer, "panel_event", event, event_id=sequence
+                    )
+
+            while True:
+                try:
+                    event = await asyncio.wait_for(
+                        queue.get(), timeout=HEARTBEAT_SECONDS
+                    )
+                except asyncio.TimeoutError:
+                    writer.write(b": heartbeat\n\n")
+                    await writer.drain()
+                    continue
+                if event is None:
+                    return
+                sequence = int(event["sequence"])
+                if sequence <= cutoff:
+                    continue
+                await self._write_sse_payload(
+                    writer, "panel_event", event, event_id=sequence
+                )
+        except (ConnectionError, BrokenPipeError, ConnectionResetError, asyncio.CancelledError):
+            pass
+        finally:
+            self._event_subscribers.discard(queue)
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except (ConnectionError, BrokenPipeError, ConnectionResetError):
+                pass
+
     async def _write_sse_snapshot(self, writer: asyncio.StreamWriter) -> None:
         data = json.dumps(self.snapshot(), separators=(",", ":"))
         writer.write(f"event: snapshot\ndata: {data}\n\n".encode("utf-8"))
+        await writer.drain()
+
+    async def _write_sse_payload(
+        self,
+        writer: asyncio.StreamWriter,
+        event_name: str,
+        payload: dict,
+        *,
+        event_id: int | None = None,
+    ) -> None:
+        data = json.dumps(payload, separators=(",", ":"))
+        parts = [f"event: {event_name}\n"]
+        if event_id is not None:
+            parts.append(f"id: {event_id}\n")
+        parts.append(f"data: {data}\n\n")
+        writer.write("".join(parts).encode("utf-8"))
         await writer.drain()
