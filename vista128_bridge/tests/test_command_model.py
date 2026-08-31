@@ -96,6 +96,7 @@ class CommandModelTests(unittest.TestCase):
         self.assertEqual(automatic_unbypass.command_type, "instant_activation")
         self.assertEqual(automatic_unbypass.operands["action"], "automatic_unbypass")
         self.assertEqual(automatic_unbypass.operands["zone_list"], "02")
+        self.assertEqual(automatic_unbypass.confidence, "high")
         system = KeypadParser().parse("1234#60", partition=1)
         self.assertEqual(system.command_type, "event_log_display")
         self.assertEqual(
@@ -111,6 +112,21 @@ class CommandModelTests(unittest.TestCase):
             ),
         )
         self.assertEqual(extension.command_type, "fire_walk_test_one_man")
+
+    def test_parser_does_not_high_confidence_invalid_77_specifier(self):
+        invalid_partition = KeypadParser().parse(
+            "1234#7721*9*1*1*", partition=1
+        )
+        self.assertEqual(invalid_partition.command_type, "instant_activation")
+        self.assertNotEqual(invalid_partition.confidence, "high")
+        self.assertNotIn("partitions", invalid_partition.operands)
+
+        invalid_zone_list = KeypadParser().parse(
+            "1234#7731*16*1*1*", partition=1
+        )
+        self.assertEqual(invalid_zone_list.command_type, "instant_activation")
+        self.assertNotEqual(invalid_zone_list.confidence, "high")
+        self.assertNotIn("zone_list", invalid_zone_list.operands)
 
     def test_parser_marks_context_dependent_and_programming_commands(self):
         bare = KeypadParser().parse("1234", partition=1)
@@ -297,19 +313,136 @@ class CommandModelTests(unittest.TestCase):
                 )
             )
 
-        system = command_from_request(
+        for namespace, command_type in {
+            "#41": "randomize_outputs",
+            "#42": "randomize_outputs_window",
+            "#65": "programming_lockout_window",
+            "#71": "programmed_output_action",
+            "#72": "programmed_output_action",
+            "#73": "access_enter_exit_request",
+        }.items():
+            with self.subTest(namespace=namespace):
+                system = command_from_request(
+                    {
+                        "action": "system_command",
+                        "partition": 1,
+                        "code": "1234",
+                        "system_command": namespace,
+                    }
+                )
+                self.assertEqual(system.command_type, command_type)
+                system_plan = plan_command(
+                    system, native_available=False, keypad_available=True
+                )
+                self.assertEqual(system_plan.mechanism, "keypad")
+                self.assertEqual(system_plan.keypad_sequence, "1234" + namespace)
+                parsed = KeypadParser().parse(
+                    system_plan.keypad_sequence, partition=1
+                )
+                self.assertEqual(parsed.command_type, system.command_type)
+                self.assertEqual(parsed.code, system.code)
+                self.assertEqual(parsed.operands, system.operands)
+
+        for namespace in (
+            "#60", "#61", "#62", "#63", "#70", "#74", "#75", "#77",
+            "#79", "#80", "#81", "#82", "#83",
+        ):
+            with self.subTest(namespace=namespace):
+                with self.assertRaisesRegex(
+                    CommandValidationError, "typed or explicit interactive"
+                ):
+                    command_from_request(
+                        {
+                            "action": "system_command",
+                            "partition": 1,
+                            "code": "1234",
+                            "system_command": namespace,
+                        }
+                    )
+
+    def test_unbypass_zones_requires_documented_zone_list(self):
+        with self.assertRaisesRegex(CommandValidationError, "zone list"):
+            command_from_request(
+                {
+                    "action": "unbypass_zones",
+                    "partition": 1,
+                    "code": "1234",
+                    "zones": [1, 27],
+                }
+            )
+
+        command = command_from_request(
             {
-                "action": "system_command",
+                "action": "unbypass_zones",
                 "partition": 1,
                 "code": "1234",
-                "system_command": "#60",
+                "zone_list": "02",
             }
         )
-        system_plan = plan_command(
-            system, native_available=False, keypad_available=True
+        self.assertEqual(command.command_type, "instant_activation")
+        self.assertEqual(
+            command.operands,
+            {
+                "action_code": "31",
+                "action": "automatic_unbypass",
+                "zone_list": "02",
+                "interactive": True,
+                "action_specifier": "02",
+            },
         )
-        self.assertEqual(system_plan.mechanism, "keypad")
-        self.assertEqual(system_plan.keypad_sequence, "1234#60")
+        sequence = compile_keypad_sequence(command)
+        self.assertEqual(sequence, "1234#7731*02*1*1*")
+        parsed = KeypadParser().parse(sequence, partition=1)
+        self.assertEqual(parsed.command_type, command.command_type)
+        self.assertEqual(parsed.code, command.code)
+        self.assertEqual(parsed.operands, command.operands)
+
+        with self.assertRaisesRegex(CommandValidationError, "01..15"):
+            command_from_request(
+                {
+                    "action": "unbypass_zones",
+                    "partition": 1,
+                    "code": "1234",
+                    "zone_list": "16",
+                }
+            )
+
+    def test_instant_activation_supports_access_group_lock(self):
+        command = command_from_request(
+            {
+                "action": "instant_activation",
+                "partition": 1,
+                "code": "1234",
+                "action_code": "65",
+                "group": "04",
+            }
+        )
+        self.assertEqual(command.operands["action"], "access_group_lock")
+        sequence = compile_keypad_sequence(command)
+        self.assertEqual(sequence, "1234#7765*04*1*1*")
+        parsed = KeypadParser().parse(sequence, partition=1)
+        self.assertEqual(parsed.command_type, command.command_type)
+        self.assertEqual(parsed.confidence, "high")
+        self.assertEqual(parsed.code, command.code)
+        self.assertEqual(parsed.operands, command.operands)
+
+    def test_instant_activation_all_partitions_round_trip(self):
+        command = command_from_request(
+            {
+                "action": "instant_activation",
+                "partition": 1,
+                "code": "1234",
+                "action_code": "21",
+                "action_specifier": "0",
+            }
+        )
+        self.assertEqual(command.operands["action_specifier"], "0")
+        self.assertNotIn("partitions", command.operands)
+        sequence = compile_keypad_sequence(command)
+        self.assertEqual(sequence, "1234#7721*0*1*1*")
+        parsed = KeypadParser().parse(sequence, partition=1)
+        self.assertEqual(parsed.command_type, command.command_type)
+        self.assertEqual(parsed.operands, command.operands)
 
     def test_instant_activation_requires_matching_action_specific_operand(self):
         command = command_from_request(
@@ -373,6 +506,18 @@ class CommandModelTests(unittest.TestCase):
                 }
             )
 
+        for action in ("chime", "quick_bypass", "walk_test"):
+            with self.subTest(action=action):
+                with self.assertRaisesRegex(CommandValidationError, "unsupported operand"):
+                    command_from_request(
+                        {
+                            "action": action,
+                            "partition": 1,
+                            "code": "1234",
+                            "operands": {"bogus": "not-consumed"},
+                        }
+                    )
+
     def test_compile_and_plan_choose_native_or_keypad(self):
         command = command_from_request(
             {"action": "arm", "mode": "away", "partition": 1, "code": "1234"},
@@ -397,6 +542,12 @@ class CommandModelTests(unittest.TestCase):
                 "partition": 1,
                 "code": "1234",
                 "zones": [1, 27],
+            },
+            {
+                "action": "unbypass_zones",
+                "partition": 1,
+                "code": "1234",
+                "zone_list": "02",
             },
         )
         for request in cases:
