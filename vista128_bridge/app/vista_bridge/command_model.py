@@ -71,12 +71,21 @@ INSTANT_ACCESS_PARTITION_ACTIONS = frozenset({"67", "68", "69", "70", "71", "72"
 INSTANT_TRIGGER_ACTIONS = frozenset({"73", "74"})
 
 # Only namespaces whose documented keypad command is complete at Code+#nn may
-# use the generic semantic system-command surface.  Event-log display/print/
+# use the generic semantic system-command surface. Event-log display/print/
 # clear (#60/#61/#62), clock editing (#63), relay/access/scheduling menus, and
 # other prompt-driven families must use a typed or explicit interactive flow.
-DIRECT_SYSTEM_COMMAND_NAMESPACES = frozenset(
-    {"#41", "#42", "#65", "#71", "#72", "#73"}
-)
+# The convenience system-command request normalizes to the same command type
+# produced by the keypad parser so audit semantics do not depend on input path.
+DIRECT_SYSTEM_COMMAND_TYPES = {
+    "#41": "randomize_outputs",
+    "#42": "randomize_outputs_window",
+    "#65": "programming_lockout_window",
+    "#71": "programmed_output_action",
+    "#72": "programmed_output_action",
+    "#73": "access_enter_exit_request",
+}
+DIRECT_SYSTEM_COMMAND_NAMESPACES = frozenset(DIRECT_SYSTEM_COMMAND_TYPES)
+DIRECT_SYSTEM_COMMAND_CANONICAL_TYPES = frozenset(DIRECT_SYSTEM_COMMAND_TYPES.values())
 
 
 def _instant_specifier_field(action_code: str) -> str:
@@ -696,7 +705,14 @@ class KeypadParser:
                 operands["action_specifier"] = specifier
                 field_name = _instant_specifier_field(action_code)
                 if field_name == "partitions":
-                    operands["partitions"] = [int(value) for value in specifier]
+                    if specifier != "0":
+                        partitions = normalize_partitions(
+                            [int(value) for value in specifier]
+                        )
+                        operands["partitions"] = list(partitions)
+                        operands["action_specifier"] = "".join(
+                            str(value) for value in partitions
+                        )
                 elif field_name:
                     operands[field_name] = specifier
             return VistaCommand(
@@ -886,6 +902,13 @@ def command_from_request(
                 f"system command {namespace} requires a typed or explicit interactive command"
             )
         operands["system_command"] = namespace
+        _validate_operand_schema("system_command", operands)
+        action = DIRECT_SYSTEM_COMMAND_TYPES[namespace]
+        operands = {
+            "system_command": namespace,
+            "suffix": "",
+            "prompt": "",
+        }
     _validate_operand_schema(action, operands)
     return VistaCommand(
         command_type=action,
@@ -904,6 +927,7 @@ def command_from_request(
 
 def _validate_operand_schema(command_type: str, operands: Mapping[str, Any]) -> None:
     """Reject operands which the selected compiler/operation cannot consume."""
+    direct_system_operands = {"system_command", "suffix", "prompt"}
     allowed = {
         "disarm": {"partitions", "global_arming"},
         "arm_away": {"partitions", "global_arming"},
@@ -931,6 +955,11 @@ def _validate_operand_schema(command_type: str, operands: Mapping[str, Any]) -> 
             "access_point", "partition", "trigger",
         },
         "system_command": {"system_command"},
+        "randomize_outputs": direct_system_operands,
+        "randomize_outputs_window": direct_system_operands,
+        "programming_lockout_window": direct_system_operands,
+        "programmed_output_action": direct_system_operands,
+        "access_enter_exit_request": direct_system_operands,
         "keypad_command": set(),
         "interactive_menu": set(),
         "programming_session": set(),
@@ -1017,7 +1046,9 @@ def _normalize_instant_activation_operands(
             if specifier != "0" and len(set(specifier)) != len(specifier):
                 raise CommandValidationError("#77 partition action contains duplicate partitions")
             if specifier != "0":
-                operands["partitions"] = [int(value) for value in specifier]
+                partitions = normalize_partitions([int(value) for value in specifier])
+                operands["partitions"] = list(partitions)
+                specifier = "".join(str(value) for value in partitions)
         operands["action_specifier"] = specifier
         return
     value = operands.get(field_name, operands.get("action_specifier", ""))
@@ -1119,6 +1150,21 @@ def compile_keypad_sequence(command: VistaCommand) -> str:
         )
     if command_type == "instant_activation":
         return _compile_instant_activation_sequence(command)
+    if command_type in DIRECT_SYSTEM_COMMAND_CANONICAL_TYPES:
+        namespace = operands.get("system_command")
+        if (
+            not isinstance(namespace, str)
+            or namespace not in DIRECT_SYSTEM_COMMAND_NAMESPACES
+            or DIRECT_SYSTEM_COMMAND_TYPES[namespace] != command_type
+        ):
+            raise CommandValidationError(
+                "direct system command namespace does not match its canonical command type"
+            )
+        if operands.get("suffix", "") or operands.get("prompt", ""):
+            raise CommandValidationError(
+                "direct system command cannot include a prompt or command suffix"
+            )
+        return code + namespace
     if command_type == "system_command":
         namespace = operands.get("system_command")
         if not isinstance(namespace, str) or re.fullmatch(r"#[0-9]{2}", namespace) is None:
