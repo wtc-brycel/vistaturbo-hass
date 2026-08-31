@@ -22,9 +22,16 @@ window.VISTA_MANAGEMENT_STYLES = String(window.VISTA_MANAGEMENT_STYLES || "") + 
 .surface .detail-tabs,.surface .record-tabs{background:var(--vt-subtle-surface);border-bottom-color:var(--vt-inner-divider)}
 .input,.select{min-height:52px;border-radius:8px 8px 0 0}
 .filter-chip{height:32px}
-.user-row{position:relative;border-bottom-color:var(--vt-inner-divider)}
+.users-toolbar{padding-bottom:6px}
+.filter-row{padding-bottom:10px;border-bottom:1px solid var(--vt-inner-divider)}
+.user-list{border-top:0}
+.user-row{position:relative;min-height:62px;border-bottom-color:var(--vt-inner-divider)}
 .user-row.selected::before{content:"";position:absolute;inset-block:9px;inset-inline-start:0;width:3px;border-radius:0 3px 3px 0;background:var(--vt-primary)}
 .user-row.selected .user-number{color:var(--vt-primary)}
+.mini-pill,.origin-pill{border-radius:999px;padding-inline:7px}
+.detail-actions{background:var(--vt-subtle-surface);border-top-color:var(--vt-inner-divider)}
+.authority-table th{background:var(--vt-subtle-surface);border-bottom-color:var(--vt-inner-divider)}
+.authority-table td{border-bottom-color:var(--vt-inner-divider)}
 .surface .partition-select{position:relative;border-bottom-color:var(--vt-inner-divider)}
 .surface .partition-select.selected::before{content:"";position:absolute;inset-block:9px;inset-inline-start:0;width:3px;border-radius:0 3px 3px 0;background:var(--vt-primary)}
 .surface .partition-select.selected .partition-select-number{color:var(--vt-primary)}
