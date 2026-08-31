@@ -1,0 +1,20 @@
+{
+  "title": "Vista Turbo",
+  "config": {
+    "step": {
+      "hassio_confirm": {
+        "title": "Vista Turbo RS232 detected",
+        "description": "Connect Home Assistant directly to the Vista Turbo RS232 app. MQTT remains available for compatibility during migration."
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot connect to the Vista Turbo app"
+    },
+    "abort": {
+      "already_configured": "This Vista Turbo app is already configured",
+      "app_discovery_required": "Start the Vista Turbo RS232 app so Home Assistant can discover it automatically",
+      "invalid_discovery": "The Vista Turbo app supplied invalid discovery information",
+      "unsupported_app_api": "The installed Vista Turbo app uses an unsupported native API version"
+    }
+  }
+}
