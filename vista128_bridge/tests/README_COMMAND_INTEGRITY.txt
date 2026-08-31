@@ -1,1 +1,0 @@
-Regression tests for the post-#23 semantic-integrity correction live in test_command_model.py, test_system_command_policy.py, test_semantic_integrity_smoke.py, and test_event_store_command_integrity.py.
