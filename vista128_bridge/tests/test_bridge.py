@@ -42,13 +42,28 @@ class FakeSynchronizer:
     def __init__(self):
         self.ready_count = 0
         self.recovery_requests = []
+        self.transaction_kind = "arming_status"
+
+    def pending_transaction_kind(self):
+        return self.transaction_kind
 
     def mark_ready(self):
         self.ready_count += 1
+        return True
 
     def request_recovery_resync(self, reason):
         self.recovery_requests.append(reason)
         return True
+
+
+class FakeControl:
+    def __init__(self):
+        self.infer_count = 0
+        self.infer_result = True
+
+    def infer_automation_available(self):
+        self.infer_count += 1
+        return self.infer_result
 
 
 class FakeHandler:
@@ -68,6 +83,7 @@ class BridgeFrameTests(unittest.TestCase):
         bridge.mqtt = FakeMqtt()
         bridge.state = FakeState()
         bridge.synchronizer = FakeSynchronizer()
+        bridge.control = FakeControl()
         bridge.handler = FakeHandler()
         return bridge
 
@@ -75,6 +91,7 @@ class BridgeFrameTests(unittest.TestCase):
         bridge = self.make_bridge()
         bridge._handle_frame(RawFrame.create(b"08OK009F", "crlf"))
         self.assertEqual(bridge.synchronizer.ready_count, 0)
+        self.assertEqual(bridge.control.infer_count, 0)
         self.assertEqual(bridge.invalid_frames, 1)
         self.assertEqual(bridge.handler.calls, [])
         self.assertEqual(bridge.state.query_snapshots, ["zone_status"])
@@ -87,12 +104,40 @@ class BridgeFrameTests(unittest.TestCase):
 
     def test_valid_ready_packet_completes_sync_without_recovery(self):
         bridge = self.make_bridge()
+        bridge.control.infer_result = False
         bridge._handle_frame(RawFrame.create(b"08OK009E", "crlf"))
         self.assertEqual(bridge.synchronizer.ready_count, 1)
         self.assertEqual(bridge.invalid_frames, 0)
         self.assertEqual(len(bridge.handler.calls), 1)
         self.assertEqual(bridge.state.query_snapshots, [])
         self.assertEqual(bridge.synchronizer.recovery_requests, [])
+
+    def test_successful_read_transaction_infers_automation_available(self):
+        bridge = self.make_bridge()
+        bridge.synchronizer.transaction_kind = "arming_status"
+
+        bridge._handle_frame(RawFrame.create(b"08OK009E", "crlf"))
+
+        self.assertEqual(bridge.control.infer_count, 1)
+        self.assertIn(
+            (("panel/automation_available", "ON"), {"retain": True, "qos": 1}),
+            bridge.mqtt.published,
+        )
+        self.assertIn(
+            (
+                ("panel/automation_availability_source", "inferred"),
+                {"retain": True, "qos": 1},
+            ),
+            bridge.mqtt.published,
+        )
+
+    def test_unowned_ready_does_not_infer_automation_available(self):
+        bridge = self.make_bridge()
+        bridge.synchronizer.transaction_kind = None
+
+        bridge._handle_frame(RawFrame.create(b"08OK009E", "crlf"))
+
+        self.assertEqual(bridge.control.infer_count, 0)
 
     def test_control_and_raw_tx_logs_redact_payloads(self):
         bridge = self.make_bridge()
