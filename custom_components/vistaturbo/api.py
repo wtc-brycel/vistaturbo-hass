@@ -25,6 +25,14 @@ class VistaTurboProtocolError(VistaTurboApiError):
     """The app returned an unsupported or malformed API snapshot."""
 
 
+class VistaTurboCommandError(VistaTurboApiError):
+    """The app rejected a semantic control request."""
+
+    def __init__(self, status: str) -> None:
+        super().__init__(status)
+        self.status = status
+
+
 def _validate_snapshot(payload: object) -> dict:
     if not isinstance(payload, dict) or payload.get("schema") != API_SCHEMA:
         raise VistaTurboProtocolError("unsupported Vista Turbo native API schema")
@@ -52,6 +60,48 @@ class VistaTurboApiClient:
                 response.raise_for_status()
                 return _validate_snapshot(await response.json())
         except (VistaTurboAuthError, VistaTurboProtocolError):
+            raise
+        except (ClientError, TimeoutError, json.JSONDecodeError) as err:
+            raise VistaTurboCannotConnect from err
+
+    async def async_alarm_command(
+        self,
+        *,
+        partition: int,
+        action: str,
+        code: str,
+        user_id: str,
+        user_name: str,
+        context_id: str,
+    ) -> dict:
+        payload = {
+            "partition": partition,
+            "action": action,
+            "code": code,
+            "actor": {"user_id": user_id, "name": user_name},
+            "context_id": context_id,
+        }
+        try:
+            async with self._session.post(
+                f"{self._base_url}/v1/control/alarm",
+                headers=self._headers,
+                json=payload,
+                timeout=ClientTimeout(total=10),
+            ) as response:
+                if response.status == 401:
+                    raise VistaTurboAuthError
+                response_payload = await response.json()
+                if response.status != 202:
+                    status = (
+                        str(response_payload.get("error", "command_rejected"))
+                        if isinstance(response_payload, dict)
+                        else "command_rejected"
+                    )
+                    raise VistaTurboCommandError(status)
+                if not isinstance(response_payload, dict):
+                    raise VistaTurboProtocolError("invalid alarm control response")
+                return response_payload
+        except (VistaTurboAuthError, VistaTurboCommandError, VistaTurboProtocolError):
             raise
         except (ClientError, TimeoutError, json.JSONDecodeError) as err:
             raise VistaTurboCannotConnect from err

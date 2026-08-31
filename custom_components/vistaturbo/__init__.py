@@ -16,7 +16,7 @@ from .api import (
 from .const import CONF_PORT, CONF_TOKEN, DOMAIN
 from .hub import VistaTurboHub
 
-PLATFORMS = [Platform.BINARY_SENSOR, Platform.SENSOR]
+PLATFORMS = [Platform.ALARM_CONTROL_PANEL, Platform.BINARY_SENSOR, Platform.SENSOR]
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 type VistaTurboConfigEntry = ConfigEntry[VistaTurboHub]
 

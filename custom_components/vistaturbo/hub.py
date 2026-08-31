@@ -12,6 +12,10 @@ from .api import VistaTurboApiClient, VistaTurboApiError, VistaTurboAuthError
 _LOGGER = logging.getLogger(__name__)
 
 
+def _native_alarm_capability(snapshot: dict) -> bool:
+    return bool(snapshot.get("control", {}).get("native_alarm"))
+
+
 class VistaTurboHub:
     def __init__(
         self,
@@ -52,10 +56,19 @@ class VistaTurboHub:
         while True:
             try:
                 async for snapshot in self.client.async_snapshots():
+                    capability_changed = _native_alarm_capability(
+                        snapshot
+                    ) != _native_alarm_capability(self.snapshot)
                     self.snapshot = snapshot
                     self.api_available = True
                     delay = 1
                     self._notify()
+                    if capability_changed:
+                        _LOGGER.info(
+                            "Vista Turbo native alarm capability changed; reloading integration"
+                        )
+                        self.hass.config_entries.async_schedule_reload(self.entry.entry_id)
+                        return
             except asyncio.CancelledError:
                 raise
             except VistaTurboAuthError:
