@@ -13,7 +13,7 @@ class AddonOptionMigrationTests(unittest.TestCase):
             "RECONNECT_MIN_SECONDS": "1",
             "RECONNECT_MAX_SECONDS": "30",
             "FRAME_IDLE_MS": "250",
-            "MQTT_OUTBOUND_QUEUE_MAX": "256",
+            "MQTT_OUTBOUND_QUEUE_MAX": "4096",
             "MQTT_INFLIGHT_MESSAGES_MAX": "20",
             "STARTUP_SYNC_ENABLED": "true",
             "STARTUP_SYNC_INITIAL_DELAY_MS": "1000",

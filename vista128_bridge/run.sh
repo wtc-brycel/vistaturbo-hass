@@ -91,7 +91,7 @@ export RAW_MQTT_ENABLED="$(config_or_default 'raw_mqtt_enabled' 'false')"
 # Internal operating defaults. These are intentionally not user-facing; they
 # are part of the bridge's supported runtime behavior rather than deployment
 # choices.
-export MQTT_OUTBOUND_QUEUE_MAX="256"
+export MQTT_OUTBOUND_QUEUE_MAX="4096"
 export MQTT_INFLIGHT_MESSAGES_MAX="20"
 export CONNECT_TIMEOUT_SECONDS="5"
 export RECONNECT_MIN_SECONDS="1"
