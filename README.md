@@ -70,17 +70,9 @@ Add it as a JavaScript module under **Settings -> Dashboards -> Resources**:
 /local/vista-keypad-card.js?v=0.3.26
 ```
 
-Minimal card:
+After the resource is installed, add and configure the keypad card through the Home Assistant dashboard UI.
 
-```yaml
-type: custom:vista-keypad-card
-entity: sensor.vista_partition_1_keypad
-model: 6160cr2
-```
-
-Other supported models are `6160` and `firstalert`. Light/dark styling and responsive layout are automatic by default.
-
-See [`frontend/README.md`](frontend/README.md) for card configuration.
+See [`frontend/README.md`](frontend/README.md) for card installation and configuration details.
 
 ## Control
 
