@@ -9,6 +9,7 @@ window.VISTA_MANAGEMENT_STYLES = String(window.VISTA_MANAGEMENT_STYLES || "") + 
   --vt-elevation-dialog:var(--dialog-box-shadow,0 8px 28px rgba(0,0,0,.28));
 }
 .surface{border:var(--vt-card-border-width) solid var(--vt-card-border);box-shadow:var(--vt-card-shadow)}
+:host .rail-head,:host .management-bar{background:var(--vt-surface-header)}
 .surface-head{min-height:52px;background:var(--vt-surface-header);border-bottom:1px solid var(--vt-inner-divider)}
 .surface-head h2,.detail-head h2{font-weight:500;letter-spacing:0}
 .surface-head .count{font-variant-numeric:tabular-nums}
