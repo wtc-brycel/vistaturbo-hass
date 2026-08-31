@@ -1,4 +1,4 @@
-const VISTA_KEYPAD_CARD_VERSION = "0.3.27";
+const VISTA_KEYPAD_CARD_VERSION = "0.3.28";
 const KEYPAD_AUDIT_IDLE_MS = 5000;
 
 const MODEL_ALIASES = {
@@ -1506,7 +1506,7 @@ class VistaKeypadCard extends HTMLElement {
         height:100%;
         display:block;
         image-rendering:pixelated;
-        background:#95d641;
+        background:#82bd37;
       }
 
       .controls-well {
@@ -2452,9 +2452,9 @@ class VistaKeypadCard extends HTMLElement {
       bg.addColorStop(0, "#9ca8b0");
       bg.addColorStop(1, "#808b92");
     } else if (lit) {
-      bg.addColorStop(0, "#b2ed54");
-      bg.addColorStop(.5, "#9ee247");
-      bg.addColorStop(1, "#88cb38");
+      bg.addColorStop(0, "#96ce40");
+      bg.addColorStop(.5, "#85be37");
+      bg.addColorStop(1, "#73aa30");
     } else {
       bg.addColorStop(0, "#7f9570");
       bg.addColorStop(1, "#687a5e");
@@ -2479,14 +2479,14 @@ class VistaKeypadCard extends HTMLElement {
     // cell. Preserve that pitch and snap to device pixels so small
     // compact cards keep visible separation between LCD elements.
     const dot = Math.min(charW / 6, lineH / 8);
-    const gap = dot * .34;
+    const gap = dot * .18;
     const px = dot - gap;
     const snap = (value) => Math.round(value * scale) / scale;
     const pixelSize = Math.max(1 / scale, snap(px));
 
     ctx.fillStyle = firstAlertLcd
       ? (lit ? "#2d3944" : "#29343b")
-      : (lit ? "#17341a" : "#253126");
+      : (lit ? "#102512" : "#253126");
 
     lines.forEach((line, rowIndex) => {
       [...line].forEach((rawChar, charIndex) => {
@@ -2511,7 +2511,7 @@ class VistaKeypadCard extends HTMLElement {
     });
 
     const glare = ctx.createLinearGradient(0, 0, w, h);
-    glare.addColorStop(0, "rgba(255,255,255,.10)");
+    glare.addColorStop(0, "rgba(255,255,255,.055)");
     glare.addColorStop(.32, "rgba(255,255,255,.015)");
     glare.addColorStop(1, "rgba(255,255,255,0)");
     ctx.fillStyle = glare;

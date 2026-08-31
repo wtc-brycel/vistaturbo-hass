@@ -135,7 +135,9 @@ test("First Alert keeps its model-specific heavier numeral treatment", async ({ 
 
 test("LCD renderer keeps a canonical 6x8 cell pitch and device-pixel snapping", () => {
   expect(cardSource).toContain("const dot = Math.min(charW / 6, lineH / 8);");
-  expect(cardSource).toContain("const gap = dot * .34;");
+  expect(cardSource).toContain("const gap = dot * .18;");
+  expect(cardSource).toContain('bg.addColorStop(.5, "#85be37");');
+  expect(cardSource).toContain(': (lit ? "#102512" : "#253126");');
   expect(cardSource).toContain("const snap = (value) => Math.round(value * scale) / scale;");
   expect(cardSource).not.toContain("Math.ceil(px)");
 });
