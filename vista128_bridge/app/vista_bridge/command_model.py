@@ -53,11 +53,11 @@ INSTANT_ACTIVATION_ACTIONS = {
     "42": "access_window", "55": "access_point_grant", "56": "access_point_grant_override",
     "57": "access_point_protect", "58": "access_point_bypass", "59": "access_point_lock",
     "60": "access_point_exit", "61": "access_group_grant", "62": "access_group_grant_override",
-    "63": "access_group_protect", "64": "access_group_bypass", "66": "access_group_exit",
-    "67": "access_partition_grant", "68": "access_partition_grant_override",
-    "69": "access_partition_protect", "70": "access_partition_bypass",
-    "71": "access_partition_lock", "72": "access_partition_exit",
-    "73": "access_trigger_on", "74": "access_trigger_off",
+    "63": "access_group_protect", "64": "access_group_bypass", "65": "access_group_lock",
+    "66": "access_group_exit", "67": "access_partition_grant",
+    "68": "access_partition_grant_override", "69": "access_partition_protect",
+    "70": "access_partition_bypass", "71": "access_partition_lock",
+    "72": "access_partition_exit", "73": "access_trigger_on", "74": "access_trigger_off",
     "77": "access_group_enable", "78": "access_group_disable",
 }
 
@@ -65,7 +65,7 @@ INSTANT_PARTITION_ACTIONS = frozenset({"20", "21", "22", "23", "24", "25", "26",
 INSTANT_RELAY_ACTIONS = frozenset({"01", "02", "03", "04", "05"})
 INSTANT_RELAY_GROUP_ACTIONS = frozenset({"06", "07", "08", "09", "10"})
 INSTANT_ZONE_LIST_ACTIONS = frozenset({"30", "31"})
-INSTANT_ACCESS_GROUP_ACTIONS = frozenset({"42", "61", "62", "63", "64", "66", "77", "78"})
+INSTANT_ACCESS_GROUP_ACTIONS = frozenset({"42", "61", "62", "63", "64", "65", "66", "77", "78"})
 INSTANT_ACCESS_POINT_ACTIONS = frozenset({"55", "56", "57", "58", "59", "60"})
 INSTANT_ACCESS_PARTITION_ACTIONS = frozenset({"67", "68", "69", "70", "71", "72"})
 INSTANT_TRIGGER_ACTIONS = frozenset({"73", "74"})
@@ -742,6 +742,9 @@ def command_from_request(
     if action == "arm":
         mode = request.get("mode", request.get("operands", {}).get("mode") if isinstance(request.get("operands"), Mapping) else "")
         action = f"arm_{str(mode).lower()}" if mode else ""
+    unbypass_alias = action in {
+        "unbypass_zones", "automatic_unbypass", "unbypass_zone_list"
+    }
     aliases = {
         "away": "arm_away", "stay": "arm_home", "arm_stay": "arm_home",
         "home": "arm_home", "night": "arm_night", "instant": "arm_instant",
@@ -749,8 +752,9 @@ def command_from_request(
         "keypad": "keypad_command", "raw_keypad": "keypad_command",
         "raw_logical_keypad": "keypad_command", "logical_keypad": "keypad_command",
         "interactive_keypad": "interactive_menu",
-        "unbypass_zones": "unbypass_zone_list",
-        "automatic_unbypass": "unbypass_zone_list",
+        "unbypass_zones": "instant_activation",
+        "automatic_unbypass": "instant_activation",
+        "unbypass_zone_list": "instant_activation",
     }
     action = aliases.get(action, action)
     partition = request.get("partition")
@@ -769,6 +773,11 @@ def command_from_request(
     if not isinstance(operands, Mapping):
         raise CommandValidationError("command operands must be an object")
     operands = dict(operands)
+    if unbypass_alias:
+        operands.setdefault("action_code", "31")
+        operands.setdefault("action", "automatic_unbypass")
+        if "zone_list" not in operands and "zone_list" in request:
+            operands["zone_list"] = request["zone_list"]
     if action == "arm":
         operands.pop("mode", None)
     for key in ("subtype", "partitions", "global_arming"):
@@ -800,7 +809,7 @@ def command_from_request(
             operands["interactive"] = True
     required_code = {
         "disarm", "arm_away", "arm_home", "arm_night", "arm_instant", "arm_maximum",
-        "force_arm_away", "force_arm_home", "walk_test", "zone_bypass", "unbypass_zone_list",
+        "force_arm_away", "force_arm_home", "walk_test", "zone_bypass",
         "bypass_zones", "quick_bypass",
         "group_bypass", "bypass_display", "user_management", "chime", "goto_partition",
         "user_capabilities", "access_relay", "system_command", "output_control", "instant_activation",
@@ -817,9 +826,6 @@ def command_from_request(
         values = request.get("zones", operands.get("zones", []))
         operands["zones"] = list(normalize_zones(values))
         action = "zone_bypass"
-    if action == "unbypass_zone_list":
-        zone_list = operands.get("zone_list", request.get("zone_list"))
-        operands["zone_list"] = normalize_zone_list(zone_list)
     if action == "group_bypass":
         group = operands.get("group", request.get("group"))
         try:
@@ -845,6 +851,7 @@ def command_from_request(
             raise CommandValidationError("output state must be on or off")
         operands.update({"device": device, "state": state})
     if action == "instant_activation":
+        operands["interactive"] = True
         action_code = operands.get("action_code", request.get("action_code", ""))
         if isinstance(action_code, int):
             action_code = f"{action_code:02d}"
@@ -909,7 +916,6 @@ def _validate_operand_schema(command_type: str, operands: Mapping[str, Any]) -> 
         "walk_test": set(),
         "zone_bypass": {"zones"},
         "bypass_zones": {"zones"},
-        "unbypass_zone_list": {"zone_list"},
         "quick_bypass": set(),
         "group_bypass": {"group"},
         "bypass_display": set(),
@@ -1095,9 +1101,6 @@ def compile_keypad_sequence(command: VistaCommand) -> str:
     if command_type == "zone_bypass":
         zones = normalize_zones(operands.get("zones", []))
         return code + "6" + "".join(zones) + "**"
-    if command_type == "unbypass_zone_list":
-        zone_list = normalize_zone_list(operands.get("zone_list"))
-        return code + "#7731*" + zone_list + "*1*1*"
     if command_type == "quick_bypass":
         return code + "6#"
     if command_type == "group_bypass":
