@@ -440,13 +440,23 @@ class VistaBridge:
             control = getattr(self, "control", None)
             if (
                 acknowledged
-                and transaction_kind == "control"
+                and transaction_kind is not None
                 and control is not None
                 and control.infer_automation_available()
             ):
-                LOG.info("VISTA automation interface inferred available from successful transaction")
-                self.mqtt.publish("panel/automation_available", "ON", retain=True, qos=1)
-                self.mqtt.publish("panel/automation_availability_source", "inferred", retain=True, qos=1)
+                LOG.info(
+                    "VISTA automation interface inferred available from successful %s transaction",
+                    transaction_kind,
+                )
+                self.mqtt.publish(
+                    "panel/automation_available", "ON", retain=True, qos=1
+                )
+                self.mqtt.publish(
+                    "panel/automation_availability_source",
+                    "inferred",
+                    retain=True,
+                    qos=1,
+                )
         self.handler.handle(message_type, frame.data, frame.received_at)
 
     def _invalidate_after_rx_corruption(self) -> None:
