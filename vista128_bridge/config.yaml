@@ -13,6 +13,10 @@ stage: experimental
 init: false
 services:
   - mqtt:need
+discovery:
+  - vistaturbo
+ports:
+  8098/tcp: null
 options:
   # Panel
   panel_host: "192.0.2.10"
