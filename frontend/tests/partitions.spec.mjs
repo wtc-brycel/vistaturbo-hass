@@ -15,8 +15,78 @@ async function mount(page) {
     const app = document.getElementById("app");
     app.data = {
       panel: { authoritative: true, partitions: [
-        { partition: 1, name: "Home", arming_state: "disarmed", ready: true, fire_alarm_active: false, supervisory_active: false, burglary_alarm_active: false, auxiliary_alarm_active: false, panic_audible_alarm_active: false, silent_alarm_active: false, duress_alarm_active: false },
-        { partition: 2, name: "Garage", arming_state: "armed_stay", ready: true, fire_alarm_active: false, supervisory_active: false, burglary_alarm_active: false, auxiliary_alarm_active: true, panic_audible_alarm_active: false, silent_alarm_active: false, duress_alarm_active: false },
+        {
+          partition: 1,
+          name: "Home",
+          arming_state: "disarmed",
+          ready: true,
+          fire_alarm_active: false,
+          supervisory_active: false,
+          burglary_alarm_active: false,
+          auxiliary_alarm_active: false,
+          panic_audible_alarm_active: false,
+          silent_alarm_active: false,
+          duress_alarm_active: false,
+          keypad: {
+            state: "DISARMED | READY TO ARM",
+            attributes: {
+              line_1: "DISARMED        ",
+              line_2: "READY TO ARM    ",
+              ready: true,
+              armed: false,
+              power: true,
+              trouble: false,
+              fire_alarm: false,
+              supervisory: false,
+              burglary_alarm: false,
+              auxiliary_alarm: false,
+              panic_audible_alarm: false,
+              silenced: false,
+              sound_mode: "none",
+              backlight: true,
+              chime_zone: 2,
+              chime_descriptor: "BACK DOOR",
+              updated_at: "2026-08-31T03:00:00-04:00",
+              session_fresh: true,
+            },
+          },
+        },
+        {
+          partition: 2,
+          name: "Garage",
+          arming_state: "armed_stay",
+          ready: true,
+          fire_alarm_active: false,
+          supervisory_active: false,
+          burglary_alarm_active: false,
+          auxiliary_alarm_active: true,
+          panic_audible_alarm_active: false,
+          silent_alarm_active: false,
+          duress_alarm_active: false,
+          keypad: {
+            state: "ARMED ***STAY***",
+            attributes: {
+              line_1: "ARMED ***STAY***",
+              line_2: "GARAGE          ",
+              ready: true,
+              armed: true,
+              power: true,
+              trouble: false,
+              fire_alarm: false,
+              supervisory: false,
+              burglary_alarm: false,
+              auxiliary_alarm: true,
+              panic_audible_alarm: false,
+              silenced: false,
+              sound_mode: "auxiliary",
+              backlight: false,
+              chime_zone: null,
+              chime_descriptor: "",
+              updated_at: "2026-08-31T03:01:00-04:00",
+              session_fresh: false,
+            },
+          },
+        },
       ] },
       zones: [
         { zone: 1, partition: 1, descriptor: "FRONT DOOR", faulted: false, bypassed: false, trouble: false, alarm: false, low_battery: false, tamper: false },
@@ -111,4 +181,56 @@ test("selecting a different partition replaces only the partition detail", async
   expect(state.heading).toContain("Partition 2 · Garage");
   expect(state.zones).toContain("GARAGE MOTION");
   expect(state.zones).not.toContain("FRONT DOOR");
+});
+
+test("partition detail separates zones and real keypad state", async ({ page }) => {
+  await mount(page);
+  const state = await page.evaluate(() => {
+    const app = document.getElementById("app");
+    const r = app.shadowRoot;
+    const tabs = [...r.querySelectorAll('[role="tab"]')].map((tab) => ({ label: tab.textContent.trim(), selected: tab.getAttribute("aria-selected") }));
+    r.querySelector('[data-view="keypad"]').click();
+    return {
+      tabs,
+      activeView: app.activeView,
+      keypad: r.getElementById("keypad-detail").innerText,
+      zonesHidden: r.querySelector('[data-detail-view="zones"]').hidden,
+      keypadHidden: r.querySelector('[data-detail-view="keypad"]').hidden,
+    };
+  });
+  expect(state.tabs).toEqual([
+    { label: "Zones", selected: "true" },
+    { label: "Keypad", selected: "false" },
+  ]);
+  expect(state.activeView).toBe("keypad");
+  expect(state.zonesHidden).toBe(true);
+  expect(state.keypadHidden).toBe(false);
+  expect(state.keypad).toContain("DISARMED");
+  expect(state.keypad).toContain("READY TO ARM");
+  expect(state.keypad).toContain("Ready · On");
+  expect(state.keypad).toContain("Sound mode\nnone");
+  expect(state.keypad).toContain("002 · BACK DOOR");
+  expect(state.keypad).toContain("Fresh");
+});
+
+test("keypad detail follows the selected partition without inventing state", async ({ page }) => {
+  await mount(page);
+  const state = await page.evaluate(() => {
+    const app = document.getElementById("app");
+    const r = app.shadowRoot;
+    r.querySelector('[data-view="keypad"]').click();
+    r.querySelector('[data-partition="2"]').click();
+    return {
+      activePartition: app.activePartition,
+      activeView: app.activeView,
+      keypad: r.getElementById("keypad-detail").innerText,
+    };
+  });
+  expect(state.activePartition).toBe(2);
+  expect(state.activeView).toBe("keypad");
+  expect(state.keypad).toContain("ARMED ***STAY***");
+  expect(state.keypad).toContain("GARAGE");
+  expect(state.keypad).toContain("Auxiliary · On");
+  expect(state.keypad).toContain("Sound mode\nauxiliary");
+  expect(state.keypad).toContain("Stale / unknown");
 });
