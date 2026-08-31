@@ -36,13 +36,34 @@ class NativeComponentContractTests(unittest.TestCase):
         self.assertIn("async_set_unique_id(discovery_info.uuid)", flow_source)
         self.assertNotIn("async_set_unique_id(discovery_info.slug)", flow_source)
 
-    def test_ha0_native_api_has_no_control_surface(self) -> None:
+    def test_ha1_alarm_control_is_semantic_and_never_exposes_keypad_grammar(self) -> None:
         source = NATIVE_API.read_text(encoding="utf-8")
-        self.assertIn('path == "/v1/snapshot"', source)
-        self.assertIn('path == "/v1/stream"', source)
-        self.assertNotIn("/v1/control", source)
+        alarm_source = (COMPONENT / "alarm_control_panel.py").read_text(encoding="utf-8")
+        api_source = (COMPONENT / "api.py").read_text(encoding="utf-8")
+        init_source = (COMPONENT / "__init__.py").read_text(encoding="utf-8")
+
+        self.assertIn('path == "/v1/control/alarm"', source)
+        self.assertIn("VistaCommand(", source)
+        self.assertIn('source="home_assistant"', source)
         self.assertNotIn("enqueue_keypad", source)
-        self.assertNotIn("enqueue_alarm", source)
+        self.assertNotIn("build_keypad_stroke_command", source)
+        self.assertNotIn("/v1/control/keypad", source)
+
+        self.assertIn("async_alarm_command", api_source)
+        self.assertIn("async_alarm_disarm", alarm_source)
+        self.assertIn("async_alarm_arm_away", alarm_source)
+        self.assertIn("async_alarm_arm_home", alarm_source)
+        self.assertIn("async_alarm_arm_night", alarm_source)
+        self.assertIn("context.user_id", alarm_source)
+        self.assertIn("Platform.ALARM_CONTROL_PANEL", init_source)
+        self.assertNotIn("keypress", alarm_source.lower())
+        self.assertNotIn("raw_sequence", alarm_source)
+
+    def test_native_alarm_capability_change_reloads_entity_platforms(self) -> None:
+        hub_source = (COMPONENT / "hub.py").read_text(encoding="utf-8")
+        self.assertIn("_native_alarm_capability", hub_source)
+        self.assertIn("async_schedule_reload", hub_source)
+        self.assertIn("capability_changed", hub_source)
 
     def test_machine_auth_does_not_create_human_reauth_surface(self) -> None:
         init_source = (COMPONENT / "__init__.py").read_text(encoding="utf-8")
