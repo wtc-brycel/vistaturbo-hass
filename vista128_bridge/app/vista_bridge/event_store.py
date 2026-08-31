@@ -15,6 +15,7 @@ AUDIT_TERMINAL_STATUSES = frozenset(
     {
         "accepted",
         "confirmed",
+        "acknowledged_unverified",
         "failed",
         "no_ready_ack",
         "verification_mismatch",
@@ -440,7 +441,8 @@ class EventStore:
                     END,
                     completed_at = CASE
                         WHEN excluded.status IN (
-                            'accepted','confirmed','failed','no_ready_ack',
+                            'accepted','confirmed','acknowledged_unverified',
+                            'failed','no_ready_ack',
                             'verification_mismatch','stale_session',
                             'connection_lost_after_send','request_expired',
                             'transaction_unavailable','control_queue_full',
