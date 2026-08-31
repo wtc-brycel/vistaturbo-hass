@@ -26,9 +26,6 @@ options:
   native_alarm_control_enabled: false
   chime_zones: ""
 
-  # Event history
-  event_history_startup_dump_enabled: false
-
   # Optional TransPort event printer
   transport_print_enabled: false
   transport_host: ""
@@ -52,7 +49,6 @@ schema:
   chime_zones: str
 
   # Event history
-  event_history_startup_dump_enabled: bool
   event_history_max_age_days: "int(1,3650)?"
 
   # Optional TransPort event printer
