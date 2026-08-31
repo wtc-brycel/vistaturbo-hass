@@ -184,6 +184,36 @@ class VistaControlCoordinator:
                 return True, False
             return False, False
 
+    def _admit_keypad_request(
+        self,
+        partition: int,
+        interaction_id: str,
+        interaction_complete: bool,
+    ) -> tuple[bool, bool]:
+        """Admit one keypad request without over-reserving physical keypresses.
+
+        A completed request is already an atomic KS transaction and only needs
+        FIFO ordering. Exclusive ownership is required only while a caller has
+        deliberately left a logical interaction open across multiple requests.
+        If an open interaction already owns the keypad, only that same owner may
+        append its next/final segment.
+        """
+        with self._keypad_reservation_lock:
+            if self._keypad_owner:
+                if (
+                    self._keypad_owner == interaction_id
+                    and self._keypad_owner_partition == partition
+                ):
+                    return True, False
+                return False, False
+            if interaction_complete:
+                return True, False
+            if not interaction_id:
+                return False, False
+            self._keypad_owner = interaction_id
+            self._keypad_owner_partition = partition
+            return True, True
+
     def _release_keypad_interaction(self, interaction_id: str) -> None:
         if not interaction_id:
             return
@@ -362,10 +392,11 @@ class VistaControlCoordinator:
         metadata = metadata if isinstance(metadata, dict) else {}
         request_id = next(self._request_ids)
         interaction_id = str(metadata.get("interaction_id", ""))
+        interaction_complete = bool(metadata.get("interaction_complete", True))
         reservation_created = False
         if kind == "keypad":
-            available, reservation_created = self._reserve_keypad_interaction(
-                partition, interaction_id
+            available, reservation_created = self._admit_keypad_request(
+                partition, interaction_id, interaction_complete
             )
             if not available:
                 return False, "keypad_interaction_busy"
@@ -403,7 +434,7 @@ class VistaControlCoordinator:
                     "keypad_sequence" if kind == "keypad" else value.lower(),
                 )
             ),
-            interaction_complete=bool(metadata.get("interaction_complete", True)),
+            interaction_complete=interaction_complete,
             audit_request_id=str(
                 metadata.get("audit_request_id", metadata.get("request_id", ""))
                 or f"control-{request_id}"
