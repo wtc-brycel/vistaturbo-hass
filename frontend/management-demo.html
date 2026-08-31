@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>Vista Turbo Management Surface</title>
+  <style>
+    :root{--primary-color:#03a9f4;--dark-primary-color:#0288d1;--primary-text-color:#212121;--secondary-text-color:#5f6368;--primary-background-color:#f4f4f4;--secondary-background-color:#ececec;--card-background-color:#fff;--divider-color:rgba(0,0,0,.12);--ha-card-border-radius:12px;--error-color:#db4437;--warning-color:#fb8c00;--success-color:#43a047}html[data-theme="dark"]{--primary-text-color:#e1e1e1;--secondary-text-color:#a3a3a3;--primary-background-color:#111;--secondary-background-color:#181818;--card-background-color:#1c1c1c;--divider-color:rgba(255,255,255,.12);color-scheme:dark}html,body{margin:0;min-height:100%;background:var(--primary-background-color);color:var(--primary-text-color);font-family:Roboto,"Noto Sans",system-ui,sans-serif}body{padding:16px}vista-management-shell{display:block}@media(max-width:600px){body{padding:8px}}
+  </style>
+  <script>if(!customElements.get("ha-card"))customElements.define("ha-card",class extends HTMLElement{});</script>
+  <script src="./vista-keypad-card.js"></script>
+  <script src="./vista-management-styles.js"></script>
+  <script src="./vista-management-material.js"></script>
+  <script src="./vista-management-app.js"></script>
+  <script src="./vista-partitions-app.js"></script>
+  <script src="./vista-event-log-app.js"></script>
+  <script src="./vista-management-shell.js"></script>
+</head>
+<body>
+  <vista-management-shell id="app"></vista-management-shell>
+  <script>
+    const dark=new URLSearchParams(location.search).get("theme")==="dark";document.documentElement.dataset.theme=dark?"dark":"light";
+    const panel={connection:"connected",panel_model:"VISTA-128BPT",panel_name:"Vista Turbo",active_partition:1,max_users:150,authoritative:true,security_snapshot_complete:true,partitions:[{partition:1,name:"Home",arming_state:"disarmed",ready:true,fire_alarm:false,burglary_alarm:false,auxiliary_alarm:false,supervisory:false,panic_audible:false,panic_silent:false,duress:false},{partition:2,name:"Garage",arming_state:"disarmed",ready:false,fire_alarm:false,burglary_alarm:false,auxiliary_alarm:false,supervisory:false,panic_audible:false,panic_silent:false,duress:false},{partition:3,name:"Office",arming_state:"armed_stay",ready:true,fire_alarm:false,burglary_alarm:false,auxiliary_alarm:false,supervisory:false,panic_audible:false,panic_silent:false,duress:false},{partition:4,name:"Workshop",arming_state:"disarmed",ready:true,fire_alarm:false,burglary_alarm:false,auxiliary_alarm:false,supervisory:false,panic_audible:false,panic_silent:false,duress:false}]};
+    const users=[
+      {user_number:2,local_name:"Primary Master",code_status:"set",origin_partition:1,group_bypass:true,access_group:0,rf_button_zone:null,partitions:[{partition:1,authority:"master",global_arm:true},{partition:2,authority:"master",global_arm:true},{partition:3,authority:"manager",global_arm:false}]},
+      {user_number:3,local_name:"Household",code_status:"set",origin_partition:1,group_bypass:true,access_group:0,rf_button_zone:null,partitions:[{partition:1,authority:"manager",global_arm:true},{partition:2,authority:"operator_a",global_arm:false}]},
+      {user_number:7,local_name:"Garage",code_status:"set",origin_partition:2,group_bypass:false,access_group:0,rf_button_zone:null,partitions:[{partition:2,authority:"operator_b",global_arm:false}]},
+      {user_number:12,local_name:"Cleaner",code_status:"set",origin_partition:1,group_bypass:false,access_group:3,rf_button_zone:null,partitions:[{partition:1,authority:"operator_c",global_arm:false}]},
+      {user_number:21,local_name:"Security",code_status:"set",origin_partition:1,group_bypass:true,access_group:1,rf_button_zone:117,partitions:[{partition:1,authority:"operator_a",global_arm:true},{partition:2,authority:"operator_a",global_arm:true},{partition:3,authority:"operator_b",global_arm:false},{partition:4,authority:"operator_b",global_arm:false}]},
+      {user_number:31,local_name:"Duress",code_status:"set",origin_partition:1,group_bypass:false,access_group:0,rf_button_zone:null,partitions:[{partition:1,authority:"duress",global_arm:false}]},
+      {user_number:44,local_name:null,code_status:"set",origin_partition:4,group_bypass:false,access_group:0,rf_button_zone:null,partitions:[{partition:4,authority:"operator_a",global_arm:false}]},
+      {user_number:58,local_name:"Multi-partition example",code_status:"set",origin_partition:1,group_bypass:true,access_group:2,rf_button_zone:null,partitions:[{partition:1,authority:"manager",global_arm:true},{partition:2,authority:"operator_b",global_arm:false},{partition:4,authority:"operator_c",global_arm:false}]},
+      {user_number:73,local_name:"State unavailable example",code_status:"unknown",origin_partition:null,group_bypass:null,access_group:null,rf_button_zone:null,partitions:null,data_status:"unavailable"}
+    ];
+    const operations=[{id:"op-001",kind:"change_code",user_number:12,state:"pending"},{id:"op-003",kind:"delete_user",user_number:44,state:"failed",message:"Panel rejected the operation."},{id:"op-004",kind:"read_user",user_number:73,state:"unavailable"}];
+    const names=["FRONT DOOR","BACK DOOR","LIVING MOTION","HALL SMOKE","KITCHEN SMOKE","BEDROOM WINDOW","OFFICE DOOR","GARAGE ENTRY","GARAGE MOTION","WORKSHOP DOOR"];
+    const zones=Array.from({length:32},(_,i)=>{const zone=i+1,partition=zone<=12?1:zone<=20?2:zone<=26?3:4;return{zone,partition,descriptor:names[i%names.length],faulted:zone===2||zone===17,trouble:zone===24,alarm:false,bypassed:zone===8||zone===27,low_battery:zone===19,tamper:false,raw_status:"0"}});
+    const events=[{id:501,event_code:"F5",description:"Fault",zone:2,user:0,partition:1,panel_timestamp:"2026-08-30T20:57:00-04:00",descriptor:"BACK DOOR",source:"live",received_at:"2026-08-30T20:57:02-04:00"},{id:500,event_code:"B7",description:"Arm STAY",zone:0,user:2,partition:3,panel_timestamp:"2026-08-30T20:42:00-04:00",descriptor:"",source:"both",received_at:"2026-08-30T20:42:01-04:00"},{id:499,event_code:"E6",description:"Bypass",zone:27,user:21,partition:4,panel_timestamp:"2026-08-30T20:31:00-04:00",descriptor:"WORKSHOP DOOR",source:"history",received_at:"2026-08-30T20:35:00-04:00"}];
+    const audit=[{interaction_id:"audit-001",started_at:"2026-08-30T20:36:00-04:00",completed_at:"2026-08-30T20:36:02-04:00",actor_id:"demo-admin",actor_name:"Demo administrator",partition:1,source:"ha_frontend",action:"disarm",status:"confirmed",command_type:"disarm",verification:"confirmed",execution_mechanism:"native",command_sequence:"24681",code:"2468",operands:{partition:1}},{interaction_id:"audit-002",started_at:"2026-08-30T20:22:00-04:00",completed_at:"2026-08-30T20:22:03-04:00",actor_id:"demo-admin",actor_name:"Demo administrator",partition:2,source:"ha_frontend",action:"bypass_zones",status:"acknowledged_unverified",command_type:"bypass_zones",verification:"acknowledged_unverified",execution_mechanism:"keypad",command_sequence:"13576017",code:"1357",operands:{zones:["017"]}}];
+    const keypadState=(partition,line2,ready,armed=false)=>({state:`P${partition} ${armed?"ARMED":"DISARMED"} | ${line2.trim()}`,attributes:{line_1:armed?"ARMED STAY      ":"DISARMED        ",line_2:line2,ready,armed,power:true,backlight:true,control_enabled:true,command_topic:`vista128/keypad/${partition}/command`}});
+    const entities=Object.fromEntries(panel.partitions.map(p=>[p.partition,`sensor.vista_partition_${p.partition}_keypad`]));
+    const hass={themes:{darkMode:dark},user:{id:"demo-admin",name:"Demo administrator"},callService:async(...args)=>console.info("demo service call",...args),states:{[entities[1]]:keypadState(1,"READY TO ARM    ",true),[entities[2]]:keypadState(2,"FAULT 17 GARAGE ",false),[entities[3]]:keypadState(3,"STAY            ",true,true),[entities[4]]:keypadState(4,"READY TO ARM    ",true)}};
+    const app=document.getElementById("app");let admin={unlock_configured:true,elevated:true};const sync=()=>{app.data={panel,users,operations,zones,events,audit,admin,max_users:150,keypad:{entity:entities[1],entities,model:"6160cr2",layout:"auto",read_only:false}};app.hass=hass};sync();app.operationHandler=operation=>{const redacted={...operation};if("code" in redacted)redacted.code="<write-only>";console.info("management operation",redacted)};app.adminHandler=async action=>{admin={...admin,elevated:action!=="lock",unlock_configured:true};sync();return admin};
+  </script>
+</body>
+</html>
