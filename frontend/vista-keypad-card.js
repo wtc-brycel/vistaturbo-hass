@@ -1,4 +1,4 @@
-const VISTA_KEYPAD_CARD_VERSION = "0.3.26";
+const VISTA_KEYPAD_CARD_VERSION = "0.3.27";
 const KEYPAD_AUDIT_IDLE_MS = 5000;
 
 const MODEL_ALIASES = {
@@ -1310,6 +1310,7 @@ class VistaKeypadCard extends HTMLElement {
       :host {
         display:block;
         --led-flash-period:${flashPeriod}ms;
+        --vista-keypad-font:"Arial Narrow","Roboto Condensed","Liberation Sans Narrow","Nimbus Sans Narrow",Arial,sans-serif;
       }
 
       ha-card {
@@ -1546,7 +1547,7 @@ class VistaKeypadCard extends HTMLElement {
         cursor:pointer;
         touch-action:manipulation;
         transition:none;
-        font-family:"Arial Narrow","Roboto Condensed",Arial,sans-serif;
+        font-family:var(--vista-keypad-font);
       }
 
       .physical-key::after {
@@ -1567,7 +1568,7 @@ class VistaKeypadCard extends HTMLElement {
       .function-label {
         font-size:clamp(5px,1.42cqw,16px);
         line-height:1;
-        font-weight:800;
+        font-weight:700;
         letter-spacing:-.02em;
         white-space:nowrap;
       }
@@ -1580,18 +1581,17 @@ class VistaKeypadCard extends HTMLElement {
       }
 
       .number-main {
-        font-family:"Arial Narrow","Roboto Condensed",Arial,sans-serif;
+        font-family:var(--vista-keypad-font);
         font-size:clamp(9px,3.05cqw,34px);
         font-weight:400;
         line-height:.9;
-        transform:scaleX(.76);
-        transform-origin:center;
+        transform:none;
       }
 
       .number-legend {
-        font-family:"Arial Narrow","Roboto Condensed",Arial,sans-serif;
+        font-family:var(--vista-keypad-font);
         font-size:clamp(4px,1.22cqw,13px);
-        font-weight:700;
+        font-weight:600;
         font-style:italic;
         line-height:1;
         white-space:nowrap;
@@ -1606,7 +1606,7 @@ class VistaKeypadCard extends HTMLElement {
         width:29.0cqw;
         height:39.8%;
         color:#f1e7e7;
-        font-family:"Arial Narrow","Roboto Condensed",Arial,sans-serif;
+        font-family:var(--vista-keypad-font);
       }
 
       .cr2.case-white .status-cr2 {
@@ -1676,7 +1676,7 @@ class VistaKeypadCard extends HTMLElement {
         column-gap:.38cqw;
         min-height:4.18cqw;
         font-size:clamp(6px,1.72cqw,18px);
-        font-weight:700;
+        font-weight:600;
         line-height:1;
       }
 
@@ -1918,7 +1918,7 @@ class VistaKeypadCard extends HTMLElement {
         top:59.1%;
         width:23.2%;
         color:#171717;
-        font-family:"Arial Narrow","Roboto Condensed",Arial,sans-serif;
+        font-family:var(--vista-keypad-font);
       }
 
       .k6160.case-red .status-6160,
@@ -2051,7 +2051,7 @@ class VistaKeypadCard extends HTMLElement {
         overflow:hidden;
         text-overflow:clip;
         white-space:nowrap;
-        font:800 10px/1 "Arial Narrow","Roboto Condensed",Arial,sans-serif;
+        font:700 10px/1 var(--vista-keypad-font);
         letter-spacing:.01em;
       }
 
@@ -2168,7 +2168,7 @@ class VistaKeypadCard extends HTMLElement {
         -webkit-tap-highlight-color:transparent;
         border:1px solid;
         filter:drop-shadow(0 7px 10px rgba(0,0,0,.22));
-        font-family:"Arial Narrow","Roboto Condensed",Arial,sans-serif;
+        font-family:var(--vista-keypad-font);
       }
 
       .firstalert-wide {
@@ -2475,9 +2475,14 @@ class VistaKeypadCard extends HTMLElement {
     const marginY = h * .105;
     const charW = (w - marginX * 2) / 16;
     const lineH = (h - marginY * 2) / 2;
-    const dot = Math.min(charW / 6.45, lineH / 8.05);
-    const gap = dot * .19;
+    // The physical alpha display is a 5x7 matrix in a 6x8 character
+    // cell. Preserve that pitch and snap to device pixels so small
+    // compact cards keep visible separation between LCD elements.
+    const dot = Math.min(charW / 6, lineH / 8);
+    const gap = dot * .34;
     const px = dot - gap;
+    const snap = (value) => Math.round(value * scale) / scale;
+    const pixelSize = Math.max(1 / scale, snap(px));
 
     ctx.fillStyle = firstAlertLcd
       ? (lit ? "#2d3944" : "#29343b")
@@ -2494,10 +2499,10 @@ class VistaKeypadCard extends HTMLElement {
           for (let gy = 0; gy < 7; gy++) {
             if (bits & (1 << gy)) {
               ctx.fillRect(
-                Math.round(baseX + gx * dot),
-                Math.round(baseY + gy * dot),
-                Math.max(1, Math.ceil(px)),
-                Math.max(1, Math.ceil(px))
+                snap(baseX + gx * dot),
+                snap(baseY + gy * dot),
+                pixelSize,
+                pixelSize
               );
             }
           }
