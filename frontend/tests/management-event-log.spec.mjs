@@ -90,6 +90,56 @@ test("advanced actor and record-type filters work together", async ({ page }) =>
   expect(text).not.toContain("FRONT DOOR");
 });
 
+test("active filters are visible and can be cleared in one action", async ({ page }) => {
+  await mount(page);
+  await page.evaluate(() => {
+    const r = document.getElementById("app").shadowRoot;
+    const search = r.getElementById("search");
+    search.value = "door";
+    search.dispatchEvent(new Event("input"));
+    const partition = r.getElementById("partition");
+    partition.value = "1";
+    partition.dispatchEvent(new Event("change"));
+    const actor = r.getElementById("actor");
+    actor.value = "bry";
+    actor.dispatchEvent(new Event("input"));
+  });
+  await page.waitForTimeout(220);
+  let state = await page.evaluate(() => {
+    const r = document.getElementById("app").shadowRoot;
+    return {
+      count: r.getElementById("filter-count").innerText,
+      countHidden: r.getElementById("filter-count").hidden,
+      advanced: r.getElementById("advanced-count").innerText,
+      clearHidden: r.getElementById("clear-filters").hidden,
+    };
+  });
+  expect(state.count).toBe("3 active");
+  expect(state.countHidden).toBe(false);
+  expect(state.advanced).toBe("1");
+  expect(state.clearHidden).toBe(false);
+
+  await page.evaluate(() => document.getElementById("app").shadowRoot.getElementById("clear-filters").click());
+  state = await page.evaluate(() => {
+    const r = document.getElementById("app").shadowRoot;
+    return {
+      countHidden: r.getElementById("filter-count").hidden,
+      clearHidden: r.getElementById("clear-filters").hidden,
+      search: r.getElementById("search").value,
+      partition: r.getElementById("partition").value,
+      actor: r.getElementById("actor").value,
+      rows: r.getElementById("rows").innerText,
+    };
+  });
+  expect(state.countHidden).toBe(true);
+  expect(state.clearHidden).toBe(true);
+  expect(state.search).toBe("");
+  expect(state.partition).toBe("all");
+  expect(state.actor).toBe("");
+  expect(state.rows).toContain("FRONT DOOR");
+  expect(state.rows).toContain("Bryce");
+});
+
 test("audit row detail keeps PIN-bearing fields hidden without step-up elevation", async ({ page }) => {
   await mount(page);
   await page.evaluate(() => document.getElementById("app").shadowRoot.querySelector('[data-record-id="audit:a1"]').click());
