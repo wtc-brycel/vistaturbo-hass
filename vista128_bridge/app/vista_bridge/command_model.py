@@ -70,6 +70,12 @@ INSTANT_ACCESS_POINT_ACTIONS = frozenset({"55", "56", "57", "58", "59", "60"})
 INSTANT_ACCESS_PARTITION_ACTIONS = frozenset({"67", "68", "69", "70", "71", "72"})
 INSTANT_TRIGGER_ACTIONS = frozenset({"73", "74"})
 
+# Generic semantic system commands are deliberately narrower than the parser's
+# documented #nn namespace.  Prompt/menu-driven namespaces must use their
+# typed semantic command or an explicit interactive keypad transaction so the
+# keypad owner cannot be released while the panel is still inside a menu.
+DIRECT_SYSTEM_COMMAND_NAMESPACES = frozenset({"#60", "#61", "#62"})
+
 
 def _instant_specifier_field(action_code: str) -> str:
     if action_code in INSTANT_PARTITION_ACTIONS:
@@ -126,6 +132,21 @@ def normalize_zones(values: Any) -> tuple[str, ...]:
     if len(set(normalized)) != len(normalized):
         raise CommandValidationError("VISTA zone list contains duplicates")
     return normalized
+
+
+def normalize_zone_list(value: Any) -> str:
+    """Normalize the documented #77 auto-bypass zone-list number (01..15)."""
+    if isinstance(value, bool):
+        raise CommandValidationError("VISTA zone list must be 01..15")
+    if isinstance(value, int):
+        number = value
+    elif isinstance(value, str) and re.fullmatch(r"[0-9]{2}", value):
+        number = int(value)
+    else:
+        raise CommandValidationError("VISTA zone list must be 01..15")
+    if not 1 <= number <= 15:
+        raise CommandValidationError("VISTA zone list must be 01..15")
+    return f"{number:02d}"
 
 
 def normalize_partitions(values: Any) -> tuple[int, ...]:
@@ -657,15 +678,19 @@ class KeypadParser:
             remainder = suffix[2:]
             specifier = ""
             complete = False
+            valid_specifier = False
             if remainder.startswith("*") and remainder.endswith("*1*1*"):
                 specifier = remainder[1:-5]
                 complete = bool(specifier)
+                valid_specifier = bool(
+                    complete and action and _specifier_is_valid(action_code, specifier)
+                )
             operands = {
                 "action_code": action_code,
                 "action": action,
                 "interactive": True,
             }
-            if complete:
+            if valid_specifier:
                 operands["action_specifier"] = specifier
                 field_name = _instant_specifier_field(action_code)
                 if field_name == "partitions":
@@ -674,7 +699,7 @@ class KeypadParser:
                     operands[field_name] = specifier
             return VistaCommand(
                 command_type="instant_activation",
-                confidence="high" if action and complete else ("medium" if action else "low"),
+                confidence="high" if action and valid_specifier else ("medium" if action else "low"),
                 operands=operands,
                 **common,
             )
@@ -722,6 +747,8 @@ def command_from_request(
         "keypad": "keypad_command", "raw_keypad": "keypad_command",
         "raw_logical_keypad": "keypad_command", "logical_keypad": "keypad_command",
         "interactive_keypad": "interactive_menu",
+        "unbypass_zones": "unbypass_zone_list",
+        "automatic_unbypass": "unbypass_zone_list",
     }
     action = aliases.get(action, action)
     partition = request.get("partition")
@@ -771,7 +798,7 @@ def command_from_request(
             operands["interactive"] = True
     required_code = {
         "disarm", "arm_away", "arm_home", "arm_night", "arm_instant", "arm_maximum",
-        "force_arm_away", "force_arm_home", "walk_test", "zone_bypass", "unbypass_zones",
+        "force_arm_away", "force_arm_home", "walk_test", "zone_bypass", "unbypass_zone_list",
         "bypass_zones", "quick_bypass",
         "group_bypass", "bypass_display", "user_management", "chime", "goto_partition",
         "user_capabilities", "access_relay", "system_command", "output_control", "instant_activation",
@@ -784,10 +811,13 @@ def command_from_request(
             )
     if action in required_code and not code:
         raise CommandValidationError("this VISTA command requires an exactly four-digit PIN")
-    if action in {"zone_bypass", "unbypass_zones", "bypass_zones"}:
+    if action in {"zone_bypass", "bypass_zones"}:
         values = request.get("zones", operands.get("zones", []))
         operands["zones"] = list(normalize_zones(values))
-        action = "zone_bypass" if action != "unbypass_zones" else "unbypass_zones"
+        action = "zone_bypass"
+    if action == "unbypass_zone_list":
+        zone_list = operands.get("zone_list", request.get("zone_list"))
+        operands["zone_list"] = normalize_zone_list(zone_list)
     if action == "group_bypass":
         group = operands.get("group", request.get("group"))
         try:
@@ -842,6 +872,10 @@ def command_from_request(
         namespace = operands.get("system_command", request.get("system_command", ""))
         if not isinstance(namespace, str) or re.fullmatch(r"#[0-9]{2}", namespace) is None:
             raise CommandValidationError("system command must use the #nn namespace")
+        if namespace not in DIRECT_SYSTEM_COMMAND_NAMESPACES:
+            raise CommandValidationError(
+                f"system command {namespace} requires a typed or explicit interactive command"
+            )
         operands["system_command"] = namespace
     _validate_operand_schema(action, operands)
     return VistaCommand(
@@ -870,11 +904,18 @@ def _validate_operand_schema(command_type: str, operands: Mapping[str, Any]) -> 
         "arm_maximum": {"partitions", "global_arming"},
         "force_arm_away": {"partitions", "global_arming"},
         "force_arm_home": {"partitions", "global_arming"},
+        "walk_test": set(),
         "zone_bypass": {"zones"},
-        "unbypass_zones": {"zones"},
         "bypass_zones": {"zones"},
+        "unbypass_zone_list": {"zone_list"},
+        "quick_bypass": set(),
         "group_bypass": {"group"},
+        "bypass_display": set(),
+        "user_management": set(),
+        "chime": set(),
         "goto_partition": {"target_partition"},
+        "user_capabilities": set(),
+        "access_relay": set(),
         "output_control": {"device", "state", "interactive"},
         "instant_activation": {
             "action_code", "action", "action_specifier", "interactive",
@@ -882,6 +923,10 @@ def _validate_operand_schema(command_type: str, operands: Mapping[str, Any]) -> 
             "access_point", "partition", "trigger",
         },
         "system_command": {"system_command"},
+        "keypad_command": set(),
+        "interactive_menu": set(),
+        "programming_session": set(),
+        "access_control": set(),
     }.get(command_type)
     if allowed is None:
         return
@@ -973,6 +1018,8 @@ def _normalize_instant_activation_operands(
             value = str(value)
         if not isinstance(value, str) or not re.fullmatch(r"[1-8]", value):
             raise CommandValidationError("#77 partition action requires partition 1..8")
+    elif field_name == "zone_list":
+        value = normalize_zone_list(value)
     else:
         if isinstance(value, int):
             value = f"{value:02d}"
@@ -1046,9 +1093,9 @@ def compile_keypad_sequence(command: VistaCommand) -> str:
     if command_type == "zone_bypass":
         zones = normalize_zones(operands.get("zones", []))
         return code + "6" + "".join(zones) + "**"
-    if command_type == "unbypass_zones":
-        zones = normalize_zones(operands.get("zones", []))
-        return code + "#7731" + "".join(zones) + "**"
+    if command_type == "unbypass_zone_list":
+        zone_list = normalize_zone_list(operands.get("zone_list"))
+        return code + "#7731*" + zone_list + "*1*1*"
     if command_type == "quick_bypass":
         return code + "6#"
     if command_type == "group_bypass":
@@ -1071,6 +1118,10 @@ def compile_keypad_sequence(command: VistaCommand) -> str:
         namespace = operands.get("system_command")
         if not isinstance(namespace, str) or re.fullmatch(r"#[0-9]{2}", namespace) is None:
             raise CommandValidationError("system command must use the #nn namespace")
+        if namespace not in DIRECT_SYSTEM_COMMAND_NAMESPACES:
+            raise CommandValidationError(
+                f"system command {namespace} requires a typed or explicit interactive command"
+            )
         return code + namespace
     if command_type in {"program_enter", "program_menu_enter", "program_exit", "program_exit_local", "program_field_change"}:
         raise CommandValidationError("programming commands require their exact keypad sequence")
@@ -1167,6 +1218,8 @@ def _specifier_is_valid(action_code: str, specifier: str) -> bool:
         return bool(re.fullmatch(r"0|[1-8]+", specifier)) and (
             specifier == "0" or len(set(specifier)) == len(specifier)
         )
+    if action_code in INSTANT_ZONE_LIST_ACTIONS:
+        return bool(re.fullmatch(r"(?:0[1-9]|1[0-5])", specifier))
     if action_code in INSTANT_ACCESS_PARTITION_ACTIONS:
         return bool(re.fullmatch(r"[1-8]", specifier))
     return bool(re.fullmatch(r"[0-9]{2}", specifier)) and specifier != "00"
