@@ -33,22 +33,52 @@ test("event log combines panel records and control audit without flattening reco
   await mount(page);
   const state = await page.evaluate(() => {
     const r = document.getElementById("app").shadowRoot;
-    return { rows: [...r.querySelectorAll("#rows tr")].map((row) => row.innerText), count: r.getElementById("count").innerText };
+    return {
+      rows: [...r.querySelectorAll("#rows tr")].map((row) => row.innerText),
+      count: r.getElementById("count").innerText,
+      tabs: [...r.querySelectorAll('[role="tab"]')].map((tab) => ({ label: tab.textContent.trim(), selected: tab.getAttribute("aria-selected") })),
+    };
   });
   expect(state.count).toBe("3 records");
   expect(state.rows.join("\n")).toContain("Panel");
   expect(state.rows.join("\n")).toContain("Audit");
   expect(state.rows.join("\n")).toContain("FRONT DOOR");
   expect(state.rows.join("\n")).toContain("Bryce");
+  expect(state.tabs).toEqual([
+    { label: "All", selected: "true" },
+    { label: "Panel events", selected: "false" },
+    { label: "Control audit", selected: "false" },
+  ]);
+});
+
+test("record tabs filter panel events and control audit without a redundant type dropdown", async ({ page }) => {
+  await mount(page);
+  const state = await page.evaluate(() => {
+    const app = document.getElementById("app");
+    const r = app.shadowRoot;
+    const typeSelectExists = Boolean(r.getElementById("type"));
+    r.querySelector('[data-record-type="panel"]').click();
+    const panelText = r.getElementById("rows").innerText;
+    const panelType = app.recordType;
+    r.querySelector('[data-record-type="audit"]').click();
+    const auditText = r.getElementById("rows").innerText;
+    const auditType = app.recordType;
+    return { typeSelectExists, panelText, panelType, auditText, auditType };
+  });
+  expect(state.typeSelectExists).toBe(false);
+  expect(state.panelType).toBe("panel");
+  expect(state.panelText).toContain("FRONT DOOR");
+  expect(state.panelText).not.toContain("Bryce");
+  expect(state.auditType).toBe("audit");
+  expect(state.auditText).toContain("Bryce");
+  expect(state.auditText).not.toContain("FRONT DOOR");
 });
 
 test("advanced actor and record-type filters work together", async ({ page }) => {
   await mount(page);
   await page.evaluate(() => {
     const r = document.getElementById("app").shadowRoot;
-    const type = r.getElementById("type");
-    type.value = "audit";
-    type.dispatchEvent(new Event("change"));
+    r.querySelector('[data-record-type="audit"]').click();
     const actor = r.getElementById("actor");
     actor.value = "bry";
     actor.dispatchEvent(new Event("input"));
@@ -81,7 +111,7 @@ test("elevated local fixture can reveal exact audit command details", async ({ p
   expect(text).toContain("2468");
 });
 
-test("remote provider receives debounced search, source filter, sort and pagination state", async ({ page }) => {
+test("remote provider receives debounced search, record tab, source filter, sort and pagination state", async ({ page }) => {
   await mount(page);
   await page.evaluate(() => {
     const app = document.getElementById("app");
@@ -94,6 +124,7 @@ test("remote provider receives debounced search, source filter, sort and paginat
   await page.waitForTimeout(20);
   await page.evaluate(() => {
     const r = document.getElementById("app").shadowRoot;
+    r.querySelector('[data-record-type="panel"]').click();
     const search = r.getElementById("search");
     search.value = "door";
     search.dispatchEvent(new Event("input"));
@@ -109,6 +140,7 @@ test("remote provider receives debounced search, source filter, sort and paginat
   const result = await page.evaluate(() => ({ calls: window.providerCalls, text: document.getElementById("app").shadowRoot.getElementById("rows").innerText, sort: document.getElementById("app").shadowRoot.querySelector('th[aria-sort]').getAttribute('aria-sort') }));
   const last = result.calls.at(-1);
   expect(last.q).toBe("door");
+  expect(last.type).toBe("panel");
   expect(last.source).toBe("live");
   expect(last.sort).toBe("event");
   expect(last.page_size).toBe(50);
