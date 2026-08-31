@@ -1,0 +1,202 @@
+name: Apply keypad typography patch
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.head_ref == 'frontend/keypad-typography-fidelity'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Apply focused typography changes
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("frontend/vista-keypad-card.js")
+          text = path.read_text(encoding="utf-8")
+
+          def replace_once(old: str, new: str) -> None:
+              global text
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"expected one match, found {count}: {old[:80]!r}")
+              text = text.replace(old, new, 1)
+
+          replace_once(
+              'const VISTA_KEYPAD_CARD_VERSION = "0.3.26";',
+              'const VISTA_KEYPAD_CARD_VERSION = "0.3.27";',
+          )
+
+          replace_once(
+              '''      :host {
+                display:block;
+                --led-flash-period:${flashPeriod}ms;
+              }''',
+              '''      :host {
+                display:block;
+                --led-flash-period:${flashPeriod}ms;
+                --vista-keypad-font:"Arial Narrow","Roboto Condensed","Liberation Sans Narrow","Nimbus Sans Narrow",Arial,sans-serif;
+              }''',
+          )
+
+          font_decl = 'font-family:"Arial Narrow","Roboto Condensed",Arial,sans-serif;'
+          font_matches = text.count(font_decl)
+          if font_matches != 6:
+              raise SystemExit(f"expected six keypad font declarations, found {font_matches}")
+          text = text.replace(font_decl, 'font-family:var(--vista-keypad-font);')
+
+          replace_once(
+              '''      .function-label {
+                font-size:clamp(5px,1.42cqw,16px);
+                line-height:1;
+                font-weight:800;
+                letter-spacing:-.02em;
+                white-space:nowrap;
+              }''',
+              '''      .function-label {
+                font-size:clamp(5px,1.42cqw,16px);
+                line-height:1;
+                font-weight:700;
+                letter-spacing:-.02em;
+                white-space:nowrap;
+              }''',
+          )
+
+          replace_once(
+              '''      .number-main {
+                font-family:var(--vista-keypad-font);
+                font-size:clamp(9px,3.05cqw,34px);
+                font-weight:400;
+                line-height:.9;
+                transform:scaleX(.76);
+                transform-origin:center;
+              }''',
+              '''      .number-main {
+                font-family:var(--vista-keypad-font);
+                font-size:clamp(9px,3.05cqw,34px);
+                font-weight:400;
+                line-height:.9;
+                transform:none;
+              }''',
+          )
+
+          replace_once(
+              '''      .number-legend {
+                font-family:var(--vista-keypad-font);
+                font-size:clamp(4px,1.22cqw,13px);
+                font-weight:700;
+                font-style:italic;
+                line-height:1;
+                white-space:nowrap;
+              }''',
+              '''      .number-legend {
+                font-family:var(--vista-keypad-font);
+                font-size:clamp(4px,1.22cqw,13px);
+                font-weight:600;
+                font-style:italic;
+                line-height:1;
+                white-space:nowrap;
+              }''',
+          )
+
+          replace_once(
+              '''      .led-row {
+                display:grid;
+                grid-template-columns:1fr var(--ann-led-width);
+                align-items:center;
+                column-gap:.38cqw;
+                min-height:4.18cqw;
+                font-size:clamp(6px,1.72cqw,18px);
+                font-weight:700;
+                line-height:1;
+              }''',
+              '''      .led-row {
+                display:grid;
+                grid-template-columns:1fr var(--ann-led-width);
+                align-items:center;
+                column-gap:.38cqw;
+                min-height:4.18cqw;
+                font-size:clamp(6px,1.72cqw,18px);
+                font-weight:600;
+                line-height:1;
+              }''',
+          )
+
+          replace_once(
+              'font:800 10px/1 "Arial Narrow","Roboto Condensed",Arial,sans-serif;',
+              'font:700 10px/1 var(--vista-keypad-font);',
+          )
+
+          replace_once(
+              '''    const charW = (w - marginX * 2) / 16;
+              const lineH = (h - marginY * 2) / 2;
+              const dot = Math.min(charW / 6.45, lineH / 8.05);
+              const gap = dot * .19;
+              const px = dot - gap;''',
+              '''    const charW = (w - marginX * 2) / 16;
+              const lineH = (h - marginY * 2) / 2;
+              // The physical alpha display is a 5x7 matrix in a 6x8 character
+              // cell. Preserve that pitch and snap to device pixels so small
+              // compact cards keep visible separation between LCD elements.
+              const dot = Math.min(charW / 6, lineH / 8);
+              const gap = dot * .34;
+              const px = dot - gap;
+              const snap = (value) => Math.round(value * scale) / scale;
+              const pixelSize = Math.max(1 / scale, snap(px));''',
+          )
+
+          replace_once(
+              '''              ctx.fillRect(
+                Math.round(baseX + gx * dot),
+                Math.round(baseY + gy * dot),
+                Math.max(1, Math.ceil(px)),
+                Math.max(1, Math.ceil(px))
+              );''',
+              '''              ctx.fillRect(
+                snap(baseX + gx * dot),
+                snap(baseY + gy * dot),
+                pixelSize,
+                pixelSize
+              );''',
+          )
+
+          path.write_text(text, encoding="utf-8")
+          Path(".github/workflows/keypad-typography-patch.yml").unlink()
+          PY
+
+      - name: Check JavaScript syntax
+        run: node --check frontend/vista-keypad-card.js
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Run frontend regression suite
+        working-directory: frontend
+        run: npm run test:render
+
+      - name: Commit finalized patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/vista-keypad-card.js frontend/tests/typography.spec.mjs .github/workflows/keypad-typography-patch.yml
+          git commit -m "feat: improve keypad typography fidelity"
+          git push origin HEAD:${{ github.head_ref }}
