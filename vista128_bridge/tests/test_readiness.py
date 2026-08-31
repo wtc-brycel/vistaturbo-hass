@@ -43,6 +43,11 @@ class ReadinessTests(unittest.TestCase):
                 "payload_available": "ON",
                 "payload_not_available": "OFF",
             },
+            {
+                "topic": "vista128/panel/state_fresh",
+                "payload_available": "ON",
+                "payload_not_available": "OFF",
+            },
         ]
         for config in (
             keypad_config(1, topic),
