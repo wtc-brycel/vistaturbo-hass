@@ -192,6 +192,9 @@ def device_info() -> dict:
 
 
 def panel_entity_availability(topic: TopicFn) -> dict:
+    # Live panel, partition, keypad, and zone entities remain usable whenever
+    # the bridge and panel TCP session are up. Alarm entities retain their own
+    # stricter knowledge-specific availability topics above.
     return {
         "availability": [
             {
@@ -201,11 +204,6 @@ def panel_entity_availability(topic: TopicFn) -> dict:
             },
             {
                 "topic": topic("panel/connected"),
-                "payload_available": "ON",
-                "payload_not_available": "OFF",
-            },
-            {
-                "topic": topic("panel/state_fresh"),
                 "payload_available": "ON",
                 "payload_not_available": "OFF",
             },
