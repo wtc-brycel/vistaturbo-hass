@@ -27,29 +27,7 @@ async function mount(page) {
           panic_audible_alarm_active: false,
           silent_alarm_active: false,
           duress_alarm_active: false,
-          keypad: {
-            state: "DISARMED | READY TO ARM",
-            attributes: {
-              line_1: "DISARMED        ",
-              line_2: "READY TO ARM    ",
-              ready: true,
-              armed: false,
-              power: true,
-              trouble: false,
-              fire_alarm: false,
-              supervisory: false,
-              burglary_alarm: false,
-              auxiliary_alarm: false,
-              panic_audible_alarm: false,
-              silenced: false,
-              sound_mode: "none",
-              backlight: true,
-              chime_zone: 2,
-              chime_descriptor: "BACK DOOR",
-              updated_at: "2026-08-31T03:00:00-04:00",
-              session_fresh: true,
-            },
-          },
+          keypad: { state: "DISARMED | READY TO ARM", attributes: { line_1: "DISARMED        ", line_2: "READY TO ARM    " } },
         },
         {
           partition: 2,
@@ -63,29 +41,7 @@ async function mount(page) {
           panic_audible_alarm_active: false,
           silent_alarm_active: false,
           duress_alarm_active: false,
-          keypad: {
-            state: "ARMED ***STAY***",
-            attributes: {
-              line_1: "ARMED ***STAY***",
-              line_2: "GARAGE          ",
-              ready: true,
-              armed: true,
-              power: true,
-              trouble: false,
-              fire_alarm: false,
-              supervisory: false,
-              burglary_alarm: false,
-              auxiliary_alarm: true,
-              panic_audible_alarm: false,
-              silenced: false,
-              sound_mode: "auxiliary",
-              backlight: false,
-              chime_zone: null,
-              chime_descriptor: "",
-              updated_at: "2026-08-31T03:01:00-04:00",
-              session_fresh: false,
-            },
-          },
+          keypad: { state: "ARMED ***STAY***", attributes: { line_1: "ARMED ***STAY***", line_2: "GARAGE          " } },
         },
       ] },
       zones: [
@@ -105,14 +61,17 @@ test("partition detail lists assigned zones and real conditions", async ({ page 
       heading: r.getElementById("partition-head").innerText,
       rows: [...r.querySelectorAll("#zones tr")].map((row) => row.innerText),
       status: r.getElementById("partition-status").innerText,
+      columns: [...r.querySelectorAll(".zones-table th")].map((th) => th.innerText.trim()),
     };
   });
   expect(state.heading).toContain("Partition 1 · Home");
   expect(state.rows).toHaveLength(2);
   expect(state.rows.join("\n")).toContain("FRONT DOOR");
   expect(state.rows.join("\n")).toContain("BACK DOOR");
+  expect(state.rows.join("\n")).toContain("Fault");
   expect(state.status).toContain("Faulted\n1");
   expect(state.status).toContain("Security\nNormal");
+  expect(state.columns).toEqual(["Zone", "Descriptor", "State", "Conditions"]);
 });
 
 test("partition security state keeps auxiliary distinct", async ({ page }) => {
@@ -127,17 +86,11 @@ test("incomplete snapshot is shown as unknown instead of known-normal", async ({
   await mount(page);
   await page.evaluate(() => {
     const app = document.getElementById("app");
-    app.data = {
-      ...app.data,
-      panel: { ...app.data.panel, authoritative: false },
-    };
+    app.data = { ...app.data, panel: { ...app.data.panel, authoritative: false } };
   });
   const state = await page.evaluate(() => {
     const r = document.getElementById("app").shadowRoot;
-    return {
-      heading: r.getElementById("partition-head").innerText,
-      status: r.getElementById("partition-status").innerText,
-    };
+    return { heading: r.getElementById("partition-head").innerText, status: r.getElementById("partition-status").innerText };
   });
   expect(state.heading).toContain("panel state not yet authoritative");
   expect(state.status).toContain("Arming\nUnknown");
@@ -145,7 +98,7 @@ test("incomplete snapshot is shown as unknown instead of known-normal", async ({
   expect(state.status).toContain("Security\nUnknown");
 });
 
-test("zone search and abnormal filtering are immediate", async ({ page }) => {
+test("zone search and abnormal filtering are immediate and clearable", async ({ page }) => {
   await mount(page);
   await page.evaluate(() => {
     const r = document.getElementById("app").shadowRoot;
@@ -153,22 +106,24 @@ test("zone search and abnormal filtering are immediate", async ({ page }) => {
     filter.value = "abnormal";
     filter.dispatchEvent(new Event("change"));
   });
-  let text = await page.evaluate(() => document.getElementById("app").shadowRoot.getElementById("zones").innerText);
-  expect(text).toContain("BACK DOOR");
-  expect(text).not.toContain("FRONT DOOR");
-
-  await page.evaluate(() => {
+  let state = await page.evaluate(() => {
     const r = document.getElementById("app").shadowRoot;
-    const filter = r.getElementById("zone-filter");
-    filter.value = "all";
-    filter.dispatchEvent(new Event("change"));
-    const search = r.getElementById("zone-search");
-    search.value = "front";
-    search.dispatchEvent(new Event("input"));
+    return { text: r.getElementById("zones").innerText, clearHidden: r.getElementById("clear-zone-filter").hidden, count: r.getElementById("zone-count").innerText };
   });
-  text = await page.evaluate(() => document.getElementById("app").shadowRoot.getElementById("zones").innerText);
-  expect(text).toContain("FRONT DOOR");
-  expect(text).not.toContain("BACK DOOR");
+  expect(state.text).toContain("BACK DOOR");
+  expect(state.text).not.toContain("FRONT DOOR");
+  expect(state.clearHidden).toBe(false);
+  expect(state.count).toBe("1 of 2");
+
+  await page.evaluate(() => document.getElementById("app").shadowRoot.getElementById("clear-zone-filter").click());
+  state = await page.evaluate(() => {
+    const r = document.getElementById("app").shadowRoot;
+    return { text: r.getElementById("zones").innerText, clearHidden: r.getElementById("clear-zone-filter").hidden, filter: r.getElementById("zone-filter").value };
+  });
+  expect(state.text).toContain("FRONT DOOR");
+  expect(state.text).toContain("BACK DOOR");
+  expect(state.clearHidden).toBe(true);
+  expect(state.filter).toBe("all");
 });
 
 test("selecting a different partition replaces only the partition detail", async ({ page }) => {
@@ -176,61 +131,48 @@ test("selecting a different partition replaces only the partition detail", async
   await page.evaluate(() => document.getElementById("app").shadowRoot.querySelector('[data-partition="2"]').click());
   const state = await page.evaluate(() => {
     const r = document.getElementById("app").shadowRoot;
-    return { heading: r.getElementById("partition-head").innerText, zones: r.getElementById("zones").innerText };
+    return { heading: r.getElementById("partition-head").innerText, zones: r.getElementById("zones").innerText, active: document.getElementById("app").activePartition };
   });
+  expect(state.active).toBe(2);
   expect(state.heading).toContain("Partition 2 · Garage");
   expect(state.zones).toContain("GARAGE MOTION");
   expect(state.zones).not.toContain("FRONT DOOR");
 });
 
-test("partition detail separates zones and real keypad state", async ({ page }) => {
+test("partition management never renders a second keypad or fake LCD", async ({ page }) => {
   await mount(page);
   const state = await page.evaluate(() => {
-    const app = document.getElementById("app");
-    const r = app.shadowRoot;
-    const tabs = [...r.querySelectorAll('[role="tab"]')].map((tab) => ({ label: tab.textContent.trim(), selected: tab.getAttribute("aria-selected") }));
-    r.querySelector('[data-view="keypad"]').click();
+    const r = document.getElementById("app").shadowRoot;
     return {
-      tabs,
-      activeView: app.activeView,
-      keypad: r.getElementById("keypad-detail").innerText,
-      zonesHidden: r.querySelector('[data-detail-view="zones"]').hidden,
-      keypadHidden: r.querySelector('[data-detail-view="keypad"]').hidden,
+      keypadCards: r.querySelectorAll("vista-keypad-card").length,
+      lcd: r.querySelectorAll(".lcd").length,
+      keypadDetail: Boolean(r.getElementById("keypad-detail")),
+      detailTabs: r.querySelectorAll('[role="tab"]').length,
+      text: r.innerText,
     };
   });
-  expect(state.tabs).toEqual([
-    { label: "Zones", selected: "true" },
-    { label: "Keypad", selected: "false" },
-  ]);
-  expect(state.activeView).toBe("keypad");
-  expect(state.zonesHidden).toBe(true);
-  expect(state.keypadHidden).toBe(false);
-  expect(state.keypad).toContain("DISARMED");
-  expect(state.keypad).toContain("READY TO ARM");
-  expect(state.keypad).toContain("Ready · On");
-  expect(state.keypad).toContain("Sound mode\nnone");
-  expect(state.keypad).toContain("002 · BACK DOOR");
-  expect(state.keypad).toContain("Fresh");
+  expect(state.keypadCards).toBe(0);
+  expect(state.lcd).toBe(0);
+  expect(state.keypadDetail).toBe(false);
+  expect(state.detailTabs).toBe(0);
+  expect(state.text).not.toContain("Sound mode");
 });
 
-test("keypad detail follows the selected partition without inventing state", async ({ page }) => {
+test("abnormal partition and zone states use compact visual indicators", async ({ page }) => {
   await mount(page);
   const state = await page.evaluate(() => {
-    const app = document.getElementById("app");
-    const r = app.shadowRoot;
-    r.querySelector('[data-view="keypad"]').click();
-    r.querySelector('[data-partition="2"]').click();
+    const r = document.getElementById("app").shadowRoot;
+    const p1 = r.querySelector('[data-partition="1"]');
+    const abnormalRow = [...r.querySelectorAll("#zones tr")].find((row) => row.innerText.includes("BACK DOOR"));
     return {
-      activePartition: app.activePartition,
-      activeView: app.activeView,
-      keypad: r.getElementById("keypad-detail").innerText,
+      badge: p1.querySelector(".abnormal-count")?.textContent,
+      selectedHasAccent: getComputedStyle(p1, "::before").backgroundColor !== "rgba(0, 0, 0, 0)",
+      conditions: abnormalRow?.querySelector("td:last-child")?.innerText,
+      state: abnormalRow?.querySelector(".state-pill")?.innerText,
     };
   });
-  expect(state.activePartition).toBe(2);
-  expect(state.activeView).toBe("keypad");
-  expect(state.keypad).toContain("ARMED ***STAY***");
-  expect(state.keypad).toContain("GARAGE");
-  expect(state.keypad).toContain("Auxiliary · On");
-  expect(state.keypad).toContain("Sound mode\nauxiliary");
-  expect(state.keypad).toContain("Stale / unknown");
+  expect(state.badge).toBe("1");
+  expect(state.selectedHasAccent).toBe(true);
+  expect(state.conditions).toContain("Fault");
+  expect(state.state).toBe("Fault");
 });
