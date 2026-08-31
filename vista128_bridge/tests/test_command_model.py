@@ -318,27 +318,31 @@ class CommandModelTests(unittest.TestCase):
                 "action": "system_command",
                 "partition": 1,
                 "code": "1234",
-                "system_command": "#60",
+                "system_command": "#41",
             }
         )
         system_plan = plan_command(
             system, native_available=False, keypad_available=True
         )
         self.assertEqual(system_plan.mechanism, "keypad")
-        self.assertEqual(system_plan.keypad_sequence, "1234#60")
+        self.assertEqual(system_plan.keypad_sequence, "1234#41")
 
-        for namespace in ("#70", "#77"):
-            with self.assertRaisesRegex(
-                CommandValidationError, "typed or explicit interactive"
-            ):
-                command_from_request(
-                    {
-                        "action": "system_command",
-                        "partition": 1,
-                        "code": "1234",
-                        "system_command": namespace,
-                    }
-                )
+        for namespace in (
+            "#60", "#61", "#62", "#63", "#70", "#74", "#75", "#77",
+            "#79", "#80", "#81", "#82", "#83",
+        ):
+            with self.subTest(namespace=namespace):
+                with self.assertRaisesRegex(
+                    CommandValidationError, "typed or explicit interactive"
+                ):
+                    command_from_request(
+                        {
+                            "action": "system_command",
+                            "partition": 1,
+                            "code": "1234",
+                            "system_command": namespace,
+                        }
+                    )
 
     def test_unbypass_zones_requires_documented_zone_list(self):
         with self.assertRaisesRegex(CommandValidationError, "zone list"):
