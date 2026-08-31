@@ -43,21 +43,21 @@ ARM_EVENT_MODES = {
 # 6160CR-2 supplemental annunciators are not present in the KD LED bitfield.
 # They are reconstructed from nq system events plus keypad-display reconciliation.
 FIRE_ALARM_RESTORE_TO_START = {
-    "02": "01",
-    "C2": "C1",
-    "D2": "D1",
+    "02": "01",  # fire alarm restore
+    "C2": "C1",  # smoke alarm restore
+    "D2": "D1",  # waterflow restore
 }
 FIRE_ALARM_START_CODES = set(FIRE_ALARM_RESTORE_TO_START.values())
 
 SUPERVISORY_RESTORE_TO_START = {
-    "44": "43",
-    "E2": "E1",
+    "44": "43",  # supervisory restore
+    "E2": "E1",  # fire supervisory restore
 }
 SUPERVISORY_START_CODES = set(SUPERVISORY_RESTORE_TO_START.values())
 
 AC_POWER_EVENT_STATES = {
-    "1B": False,
-    "1C": True,
+    "1B": False,  # AC loss
+    "1C": True,   # AC restore
 }
 
 FIRE_DISPLAY_TOKENS = ("FIRE ALARM", "SMOKE ALARM", "WATERFLOW ALARM")
@@ -345,6 +345,18 @@ class VistaState:
         return self.security_snapshot_complete
 
     @property
+    def alarm_keypad_partitions(self) -> tuple[int, ...]:
+        assigned = {
+            zone.partition
+            for zone in self.zones.values()
+            if zone.partition in self.keypads
+        }
+        if not assigned:
+            return tuple(self.keypads)
+        assigned.add(1)
+        return tuple(sorted(assigned))
+
+    @property
     def keypad_alarm_snapshot_complete(self) -> bool:
         return all(
             keypad.session_fresh
@@ -358,7 +370,10 @@ class VistaState:
                     "audible_panic_alarm",
                 )
             )
-            for keypad in self.keypads.values()
+            for keypad in (
+                self.keypads[partition]
+                for partition in self.alarm_keypad_partitions
+            )
         )
 
     def begin_query_snapshot(self, query_name: str) -> None:
@@ -394,6 +409,10 @@ class VistaState:
         self.system_battery_low = None
         self.active_global_trouble_tokens.clear()
         for partition in self.partitions.values():
+            # These are all session-derived annunciators. Configuration such as
+            # partition numbering and zone descriptors remains durable, while
+            # current alarm evidence is invalidated until the panel is queried
+            # again.
             partition.active_alarm_tokens.clear()
             partition.active_fire_tokens.clear()
             partition.active_supervisory_tokens.clear()
@@ -471,6 +490,8 @@ class VistaState:
 
         display = f"{report.line_1} {report.line_2}".upper()
 
+        # AC is panel-global. A displayed AC failure is definitive. Quiet KD
+        # pages are not positive AC evidence because the panel cycles status pages.
         if self._contains_any(display, AC_LOSS_DISPLAY_TOKENS):
             self._set_ac_power(False)
         keypad.power_led = self.ac_power
@@ -483,6 +504,8 @@ class VistaState:
         if partition_state.fire_alarm_active or explicit_fire:
             keypad.fire_alarm_led = True
         elif keypad.fire_alarm_led is True:
+            # With all initiating fire events restored, a later non-fire KD is reset/
+            # normalization evidence. Burglary READY is intentionally not required.
             keypad.fire_alarm_led = False
             partition_state.fire_silenced = False
         elif normal_ready:
@@ -668,6 +691,8 @@ class VistaState:
             if token in partition.active_fire_tokens:
                 partition.active_fire_tokens.remove(token)
                 changed_partitions.add(event.partition)
+            # Do not extinguish FIRE ALARM here. The CR-2 fire indication is
+            # intentionally latched until a subsequent normal/reset keypad display.
 
         if event.code in SUPERVISORY_START_CODES:
             token = token_prefix + event.code
