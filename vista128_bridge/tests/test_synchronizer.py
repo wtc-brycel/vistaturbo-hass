@@ -2,6 +2,7 @@ import asyncio
 import os
 import sys
 import unittest
+from unittest.mock import AsyncMock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "app"))
 
@@ -80,6 +81,23 @@ class SynchronizerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sync.failures_consecutive, 0)
         self.assertTrue(sync.last_success_at)
 
+    async def test_startup_never_runs_historical_dump(self):
+        sync = VistaSynchronizer(
+            sync_settings(),
+            keypad_settings(),
+            True,
+            True,
+            lambda: True,
+            lambda data, source, label: (True, "queued"),
+            lambda: None,
+        )
+        sync.run_sync = AsyncMock(return_value=True)
+        sync.run_event_log_dump = AsyncMock(return_value=True)
+
+        await sync.startup()
+
+        sync.run_event_log_dump.assert_not_awaited()
+
     async def test_keypad_refresh_uses_captured_query_and_requires_display(self):
         sent = []
         sync = None
@@ -109,6 +127,22 @@ class SynchronizerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sync.failures_consecutive, 0)
         self.assertEqual(sync.last_success_at, "")
         self.assertIsNone(sync.active_keypad_partition())
+
+    async def test_keypad_refresh_filters_unconfigured_partitions(self):
+        sync = VistaSynchronizer(
+            sync_settings(),
+            keypad_settings(),
+            False,
+            False,
+            lambda: True,
+            lambda data, source, label: (True, "queued"),
+            lambda: None,
+        )
+        sync.run_keypad_refresh = AsyncMock(return_value=True)
+
+        await sync._refresh_keypads(tuple(range(1, 9)))
+
+        sync.run_keypad_refresh.assert_awaited_once_with(1)
 
     async def test_unrelated_ready_cannot_complete_a_new_transaction(self):
         sync = VistaSynchronizer(
