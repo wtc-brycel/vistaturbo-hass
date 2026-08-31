@@ -70,11 +70,13 @@ INSTANT_ACCESS_POINT_ACTIONS = frozenset({"55", "56", "57", "58", "59", "60"})
 INSTANT_ACCESS_PARTITION_ACTIONS = frozenset({"67", "68", "69", "70", "71", "72"})
 INSTANT_TRIGGER_ACTIONS = frozenset({"73", "74"})
 
-# Generic semantic system commands are deliberately narrower than the parser's
-# documented #nn namespace.  Prompt/menu-driven namespaces must use their
-# typed semantic command or an explicit interactive keypad transaction so the
-# keypad owner cannot be released while the panel is still inside a menu.
-DIRECT_SYSTEM_COMMAND_NAMESPACES = frozenset({"#60", "#61", "#62"})
+# Only namespaces whose documented keypad command is complete at Code+#nn may
+# use the generic semantic system-command surface.  Event-log display/print/
+# clear (#60/#61/#62), clock editing (#63), relay/access/scheduling menus, and
+# other prompt-driven families must use a typed or explicit interactive flow.
+DIRECT_SYSTEM_COMMAND_NAMESPACES = frozenset(
+    {"#41", "#42", "#65", "#71", "#72", "#73"}
+)
 
 
 def _instant_specifier_field(action_code: str) -> str:
