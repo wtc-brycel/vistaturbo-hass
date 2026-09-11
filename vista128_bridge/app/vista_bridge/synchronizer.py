@@ -192,27 +192,32 @@ class VistaSynchronizer:
             return None
         if report is not None:
             line_1 = str(getattr(report, "line_1", ""))
-            # The KD response used by the bridge normally starts with the
-            # partition digit (the optional P prefix appears in some test and
-            # panel variants). An absent or different marker is ambiguous and
-            # must not be allowed to overwrite another partition.
+            # Explicit partition markers are authoritative and must agree with
+            # the serialized pending KD transaction. Some legitimate transient
+            # VISTA displays (for example "CANCEL SENT TO CENTRAL") omit the
+            # marker entirely; because keypad transactions are serialized, a
+            # markerless KD reply can be safely attributed to the sole pending
+            # keypad transaction instead of timing out and tainting the session.
+            response_partition = None
             if line_1[:1].upper() == "P" and line_1[1:2].isdigit():
                 response_partition = line_1[1]
             elif line_1[:1].isdigit():
                 response_partition = line_1[0]
-            else:
-                LOG.warning(
-                    "Ignoring keypad response without a partition marker while awaiting P%s",
-                    transaction.partition,
-                )
-                return None
-            if response_partition != str(transaction.partition):
+            if (
+                response_partition is not None
+                and response_partition != str(transaction.partition)
+            ):
                 LOG.warning(
                     "Ignoring keypad response for P%s while awaiting P%s",
                     response_partition,
                     transaction.partition,
                 )
                 return None
+            if response_partition is None:
+                LOG.debug(
+                    "Attributing markerless keypad response to pending P%s transaction",
+                    transaction.partition,
+                )
         transaction.response_seen = True
         transaction.response_event.set()
         self.keypad_response_event.set()
