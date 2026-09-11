@@ -66,6 +66,7 @@ class ProtocolMessageHandler:
 
     def _handle_communication_on(self, data: bytes, received_at: str) -> None:
         LOG.info("VISTA reported Communication On")
+        self.synchronizer.set_program_mode(False)
         self.mqtt.publish("panel/automation_available", "ON", retain=True, qos=1)
         self.mqtt.publish("panel/automation_availability_source", "explicit", retain=True, qos=1)
         if self.control is not None:
@@ -74,6 +75,16 @@ class ProtocolMessageHandler:
 
     def _handle_communication_off(self, data: bytes, received_at: str) -> None:
         LOG.info("VISTA reported Communication Off")
+        # VISTA-128BPT disables the Turbo automation interface while installer
+        # programming is active. Treat XF as a deliberate protocol-quiesce
+        # transition rather than a broken TCP session. If the XF was caused by
+        # the keypad stroke currently in flight, it is also a terminal response
+        # for that serialized control transaction; otherwise wait_ready() would
+        # time out, taint the healthy session, and reconnect into a panel that
+        # cannot answer startup queries until programming exits.
+        self.synchronizer.set_program_mode(True)
+        if self.synchronizer.pending_transaction_kind() == "control":
+            self.synchronizer.mark_ready()
         self.mqtt.publish("panel/automation_available", "OFF", retain=True, qos=1)
         self.mqtt.publish("panel/automation_availability_source", "communication_off", retain=True, qos=1)
         if self.control is not None:
