@@ -43,6 +43,7 @@ class ProtocolMessageHandler:
         self._history_dump_seen = 0
         self._history_dump_inserted = 0
         self._history_occurrences: dict[str, int] = {}
+        self._programming_active = False
         self.last_panel_clock_offset_seconds: int | None = None
         self.last_event_received_at = ""
         self._handlers = {
@@ -66,29 +67,52 @@ class ProtocolMessageHandler:
 
     def _handle_communication_on(self, data: bytes, received_at: str) -> None:
         LOG.info("VISTA reported Communication On")
+        # XN means the Home/Facility Automation interface is usable again.
+        # Programming cannot still be active once that interface resumes.
+        self._programming_active = False
         self.synchronizer.set_program_mode(False)
         self.mqtt.publish("panel/automation_available", "ON", retain=True, qos=1)
         self.mqtt.publish("panel/automation_availability_source", "explicit", retain=True, qos=1)
+        # The snapshot observed before XF is no longer authoritative. Keep the
+        # entities unavailable until the requested full reconciliation completes.
+        self._mark_automation_snapshot_stale()
         if self.control is not None:
             self.control.set_automation_available(True, source="explicit")
         self.synchronizer.request_full_resync("communication_on")
 
     def _handle_communication_off(self, data: bytes, received_at: str) -> None:
         LOG.info("VISTA reported Communication Off")
-        # VISTA-128BPT disables the Turbo automation interface while installer
-        # programming is active. Treat XF as a deliberate protocol-quiesce
-        # transition rather than a broken TCP session. If the XF was caused by
-        # the keypad stroke currently in flight, it is also a terminal response
-        # for that serialized control transaction; otherwise wait_ready() would
-        # time out, taint the healthy session, and reconnect into a panel that
-        # cannot answer startup queries until programming exits.
+        # XF is a deliberate Home/Facility Automation suspension, not a broken
+        # TCP session. Honeywell documents XF for both keypad programming and
+        # telephone/central-station activity, so do not infer programming from
+        # XF alone. The synchronizer's legacy program-mode gate is currently the
+        # common quiesce mechanism for periodic/KD traffic while automation is
+        # unavailable.
         self.synchronizer.set_program_mode(True)
         if self.synchronizer.pending_transaction_kind() == "control":
+            # XF can be the terminal panel response to the keypad operation that
+            # caused the suspension. Completing the serialized transaction here
+            # prevents a manufactured acknowledgement timeout/reconnect loop.
             self.synchronizer.mark_ready()
+        self._mark_automation_snapshot_stale()
         self.mqtt.publish("panel/automation_available", "OFF", retain=True, qos=1)
-        self.mqtt.publish("panel/automation_availability_source", "communication_off", retain=True, qos=1)
+        self.mqtt.publish(
+            "panel/automation_availability_source",
+            "programming" if self._programming_active else "communication_off",
+            retain=True,
+            qos=1,
+        )
         if self.control is not None:
             self.control.set_automation_available(False)
+
+    def _mark_automation_snapshot_stale(self) -> None:
+        # No Home/Facility Automation traffic is trustworthy while XF is active.
+        # Preserve last-known values for diagnostics/history, but make HA state
+        # unavailable until a complete post-XN reconciliation succeeds.
+        for query_name in ("arming_status", "zone_status", "zone_partition"):
+            self.state.begin_query_snapshot(query_name)
+        self.mqtt.publish("panel/state_fresh", "OFF", retain=True, qos=1)
+        self.mqtt.publish_alarm_states(self.state)
 
     def _handle_display_changed(self, data: bytes, received_at: str) -> None:
         # Some Turbo integrations document DC display-change notifications, but
@@ -356,8 +380,16 @@ class ProtocolMessageHandler:
 
     def _handle_system_event_side_effects(self, code: str) -> None:
         if code == "AD":
+            self._programming_active = True
             self.synchronizer.set_program_mode(True)
+            self.mqtt.publish(
+                "panel/automation_availability_source",
+                "programming",
+                retain=True,
+                qos=1,
+            )
         elif code == "BD":
+            self._programming_active = False
             self.synchronizer.set_program_mode(False)
             self.synchronizer.request_full_resync("program mode exit")
         elif code in {"0E", "3E"}:
