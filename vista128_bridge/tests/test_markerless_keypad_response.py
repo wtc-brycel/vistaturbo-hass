@@ -20,8 +20,8 @@ class MarkerlessKeypadResponseTests(unittest.IsolatedAsyncioTestCase):
     async def test_observed_cancel_display_completes_pending_p1_transaction(self):
         report = parse_keypad_display(CANCEL_SENT_FRAME)
         self.assertIsNotNone(report)
-        self.assertEqual(report.line_1, "CANCEL SENT TO C")
-        self.assertEqual(report.line_2, "ENTRAL  STATION")
+        self.assertEqual(report.line_1, " CANCEL SENT TO ")
+        self.assertEqual(report.line_2, "CENTRAL  STATION")
 
         sync = None
         reconnects = []
