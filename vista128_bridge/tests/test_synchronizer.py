@@ -176,7 +176,7 @@ class SynchronizerTests(unittest.IsolatedAsyncioTestCase):
         sync.mark_ready()
         sync._finish_transaction(transaction)
 
-    async def test_keypad_response_without_a_partition_marker_is_rejected(self):
+    async def test_markerless_keypad_response_is_attributed_to_pending_partition(self):
         sync = VistaSynchronizer(
             sync_settings(), keypad_settings(), False, False, lambda: True,
             lambda data, source, label: (True, "queued"), lambda: None,
@@ -184,8 +184,11 @@ class SynchronizerTests(unittest.IsolatedAsyncioTestCase):
         transaction = sync._begin_transaction(
             "keypad", partition=1, expected_message="keypad_display"
         )
-        self.assertIsNone(sync.accept_keypad_response(keypad_report("READY           ")))
-        self.assertFalse(transaction.response_event.is_set())
+        report = keypad_report("CANCEL SENT TO C")
+        self.assertEqual(sync.accept_keypad_response(report), 1)
+        self.assertTrue(transaction.response_event.is_set())
+        self.assertTrue(sync.mark_ready())
+        self.assertTrue(transaction.ready_event.is_set())
         sync._finish_transaction(transaction)
 
     async def test_simultaneous_keypad_refreshes_are_serialized(self):
