@@ -17,6 +17,7 @@ from .printer import TransPortEventPrinter
 from .protocol import identify_message, validate_packet
 from .state import VistaState
 from .synchronizer import VistaSynchronizer
+from .telnet_transport import TelnetSerialFilter
 
 LOG = logging.getLogger(__name__)
 
@@ -33,6 +34,7 @@ class VistaBridge:
         self.settings = settings
         self.state = VistaState()
         self.framer = VistaStreamFramer()
+        self._telnet = TelnetSerialFilter()
         self.printer = TransPortEventPrinter(settings)
         self.event_store = (
             EventStore(
@@ -182,7 +184,12 @@ class VistaBridge:
                 self._start_session(writer)
                 delay = self.settings.panel.reconnect_min_seconds
 
-                tasks.add(asyncio.create_task(self._read_loop(reader), name="panel-read"))
+                tasks.add(
+                    asyncio.create_task(
+                        self._read_loop(reader, writer),
+                        name="panel-read",
+                    )
+                )
                 tasks.add(asyncio.create_task(self._write_loop(writer), name="panel-write"))
                 tasks.add(asyncio.create_task(self.synchronizer.resync_loop(), name="resync"))
                 if self.settings.sync.startup_enabled:
@@ -251,6 +258,7 @@ class VistaBridge:
     def _start_session(self, writer: asyncio.StreamWriter) -> None:
         self._writer = writer
         self.framer = VistaStreamFramer()
+        self._telnet = TelnetSerialFilter()
         self.synchronizer.reset_connection_state()
         self.control.reset_session()
         self.state.reset_connection_derived_annunciators()
@@ -343,7 +351,11 @@ class VistaBridge:
                     break
         return discarded
 
-    async def _read_loop(self, reader: asyncio.StreamReader) -> None:
+    async def _read_loop(
+        self,
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+    ) -> None:
         idle_seconds = self.settings.panel.frame_idle_ms / 1000
         while True:
             try:
@@ -356,8 +368,20 @@ class VistaBridge:
                 self._flush_idle_frame()
                 raise ConnectionError("serial server closed TCP connection")
 
-            self.rx_bytes += len(chunk)
-            for frame in self.framer.feed(chunk):
+            telnet_was_active = self._telnet.active
+            serial_chunk, telnet_replies = self._telnet.feed(chunk)
+            if self._telnet.active and not telnet_was_active:
+                LOG.info(
+                    "Telnet-mode serial server detected; enabling compatibility filter"
+                )
+            if telnet_replies:
+                writer.write(telnet_replies)
+                await writer.drain()
+            if not serial_chunk:
+                continue
+
+            self.rx_bytes += len(serial_chunk)
+            for frame in self.framer.feed(serial_chunk):
                 self._handle_frame(frame)
 
     def _flush_idle_frame(self) -> None:
@@ -378,7 +402,7 @@ class VistaBridge:
                 await asyncio.sleep(0.05)
                 continue
 
-            writer.write(item.data)
+            writer.write(self._telnet.encode(item.data))
             await writer.drain()
             self.tx_frames += 1
             self.tx_bytes += len(item.data)
