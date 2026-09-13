@@ -115,7 +115,13 @@ class BridgeTelnetTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ConnectionError):
             await bridge._read_loop(reader, writer)
 
-        self.assertEqual(writer.writes, [LANTRONIX_STARTUP_REPLY, RFC2217_CONFIG])
+        # TCP read boundaries may cause the same logical negotiation bytes to
+        # be drained in more than one socket write. Only the byte stream/order
+        # matters.
+        self.assertEqual(
+            b"".join(writer.writes),
+            LANTRONIX_STARTUP_REPLY + RFC2217_CONFIG,
+        )
         self.assertEqual(len(frames), 1)
         self.assertEqual(frames[0].data, b"08OK009E")
 
