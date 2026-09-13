@@ -332,11 +332,21 @@ class VistaBridge:
             return False, "invalid_raw_tx"
         if source == "debug" and self.synchronizer.is_active():
             return False, "panel synchronization is in progress"
+
+        installer_guard = getattr(self, "_installer_guard", None)
+        if installer_guard is None:
+            installer_guard = InstallerProgrammingGuard()
+            self._installer_guard = installer_guard
+        tx_safety_lock = getattr(self, "_tx_safety_lock", None)
+        if tx_safety_lock is None:
+            tx_safety_lock = threading.Lock()
+            self._tx_safety_lock = tx_safety_lock
+
         item = TxItem(source=source, label=label, data=data)
         raw_queue = getattr(self, "_raw_tx_queue", self._tx_queue)
         target = raw_queue if source == "debug" else self._tx_queue
-        with self._tx_safety_lock:
-            guard_update = self._installer_guard.inspect_frame(data)
+        with tx_safety_lock:
+            guard_update = installer_guard.inspect_frame(data)
             if guard_update is not None and guard_update.blocked:
                 LOG.warning(
                     "Blocked installer-programming keypad sequence on partition %d",
@@ -349,7 +359,7 @@ class VistaBridge:
                 reason = "raw_tx_queue_full" if source == "debug" else "tx_queue_full"
                 LOG.warning("Rejected %s because its bounded TX queue is full", source)
                 return False, reason
-            self._installer_guard.commit(guard_update)
+            installer_guard.commit(guard_update)
         return True, "queued for immediate transmit"
 
     def _discard_pending_tx(self) -> int:
