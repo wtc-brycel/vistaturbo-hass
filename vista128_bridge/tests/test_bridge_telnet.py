@@ -58,7 +58,7 @@ class BridgeTelnetTests(unittest.IsolatedAsyncioTestCase):
             await bridge._read_loop(reader, writer)
 
         self.assertTrue(bridge._telnet.active)
-        self.assertEqual(writer.writes, [bytes.fromhex("ff fe 01 ff fd 03")])
+        self.assertEqual(writer.writes, [bytes.fromhex("ff fd 01 ff fd 03")])
         self.assertEqual(writer.drain_count, 1)
         self.assertEqual(bridge.rx_bytes, len(b"08OK009E\r\n"))
         self.assertEqual(len(frames), 1)
@@ -89,7 +89,7 @@ class BridgeTelnetTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             b"".join(writer.writes),
-            bytes.fromhex("ff fe 01 ff fd 03"),
+            bytes.fromhex("ff fd 01 ff fd 03"),
         )
         self.assertEqual(len(frames), 1)
         self.assertEqual(frames[0].data, b"08OK009E")

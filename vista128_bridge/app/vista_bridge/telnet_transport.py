@@ -8,10 +8,11 @@ WILL = 0xFB
 SB = 0xFA
 SE = 0xF0
 
-# We only need one Telnet option for the Lantronix serial-server behavior
-# observed in production. The server may offer ECHO and SUPPRESS-GO-AHEAD;
-# refuse ECHO and accept SUPPRESS-GO-AHEAD so the TCP stream remains a simple
-# full-duplex carrier for the VISTA serial bytes.
+# Lantronix Telnet-mode serial servers advertise ECHO and
+# SUPPRESS-GO-AHEAD when the TCP client connects. Accept both server-side
+# options so the session completes the normal character-at-a-time Telnet
+# negotiation used by legacy clients such as terminal programs/redirectors.
+# Telnet control traffic is still consumed here and never reaches VISTA.
 OPT_ECHO = 0x01
 OPT_SUPPRESS_GO_AHEAD = 0x03
 
@@ -108,12 +109,21 @@ class TelnetSerialFilter:
     @staticmethod
     def _reply_to_negotiation(command: int | None, option: int) -> bytes:
         if command == WILL:
-            response = DO if option == OPT_SUPPRESS_GO_AHEAD else DONT
+            # Accept the two options used by the observed Lantronix Telnet
+            # listener. In particular, WILL ECHO must be answered with DO ECHO;
+            # refusing it leaves some legacy servers outside their expected
+            # character-at-a-time Telnet state even though the TCP socket stays
+            # open. Unknown server options remain refused.
+            response = (
+                DO
+                if option in (OPT_ECHO, OPT_SUPPRESS_GO_AHEAD)
+                else DONT
+            )
             return bytes((IAC, response, option))
         if command == DO:
-            # Vista Turbo does not provide Telnet-side options. Refuse requests
-            # for the client to enable one rather than allowing negotiation to
-            # leak into the serial stream.
-            return bytes((IAC, WONT, option))
+            # The bridge can safely agree that it will suppress Telnet Go Ahead
+            # markers, but it must not claim that it will echo server data.
+            response = WILL if option == OPT_SUPPRESS_GO_AHEAD else WONT
+            return bytes((IAC, response, option))
         # WONT and DONT are acknowledgements/refusals and need no reply.
         return b""
