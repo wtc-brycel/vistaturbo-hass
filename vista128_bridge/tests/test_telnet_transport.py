@@ -8,6 +8,7 @@ from vista_bridge.telnet_transport import (  # noqa: E402
     DO,
     DONT,
     IAC,
+    OPT_BINARY,
     OPT_COM_PORT,
     OPT_ECHO,
     OPT_SUPPRESS_GO_AHEAD,
@@ -42,6 +43,8 @@ LANTRONIX_STARTUP = b"".join(
         option(WONT, OPT_ECHO),
         option(DONT, OPT_ECHO),
         option(WILL, OPT_SUPPRESS_GO_AHEAD),
+        option(WILL, OPT_BINARY),
+        option(DO, OPT_BINARY),
         option(DO, OPT_COM_PORT),
     )
 )
@@ -69,11 +72,13 @@ class TelnetSerialFilterTests(unittest.TestCase):
         self.assertEqual(serial, payload)
         self.assertEqual(replies, b"")
         self.assertFalse(transport.active)
+        self.assertFalse(transport.tx_binary_active)
+        self.assertFalse(transport.rx_binary_active)
         self.assertFalse(transport.rfc2217_active)
         self.assertFalse(transport.rfc2217_configured)
         self.assertIs(transport.encode(payload), payload)
 
-    def test_lantronix_telnet_detection_starts_truport_negotiation(self):
+    def test_lantronix_telnet_detection_requests_binary_both_directions(self):
         transport = TelnetSerialFilter()
 
         serial, replies = transport.feed(
@@ -86,7 +91,39 @@ class TelnetSerialFilterTests(unittest.TestCase):
             LANTRONIX_STARTUP + option(DO, OPT_SUPPRESS_GO_AHEAD),
         )
         self.assertTrue(transport.active)
+        self.assertFalse(transport.tx_binary_active)
+        self.assertFalse(transport.rx_binary_active)
         self.assertFalse(transport.rfc2217_active)
+
+    def test_binary_acceptance_is_tracked_for_each_direction(self):
+        transport = TelnetSerialFilter()
+        transport.feed(bytes((IAC, WILL, OPT_ECHO)))
+
+        serial, replies = transport.feed(
+            bytes((IAC, WILL, OPT_BINARY, IAC, DO, OPT_BINARY))
+        )
+
+        self.assertEqual(serial, b"")
+        self.assertEqual(replies, b"")
+        self.assertTrue(transport.rx_binary_active)
+        self.assertTrue(transport.tx_binary_active)
+        self.assertFalse(transport.rx_binary_refused)
+        self.assertFalse(transport.tx_binary_refused)
+
+    def test_binary_refusal_is_tracked_for_each_direction(self):
+        transport = TelnetSerialFilter()
+        transport.feed(bytes((IAC, WILL, OPT_ECHO)))
+
+        serial, replies = transport.feed(
+            bytes((IAC, WONT, OPT_BINARY, IAC, DONT, OPT_BINARY))
+        )
+
+        self.assertEqual(serial, b"")
+        self.assertEqual(replies, b"")
+        self.assertFalse(transport.rx_binary_active)
+        self.assertFalse(transport.tx_binary_active)
+        self.assertTrue(transport.rx_binary_refused)
+        self.assertTrue(transport.tx_binary_refused)
 
     def test_lantronix_rfc2217_acceptance_sends_9600_8n1_no_flow(self):
         transport = TelnetSerialFilter()
@@ -105,6 +142,12 @@ class TelnetSerialFilterTests(unittest.TestCase):
                     OPT_SUPPRESS_GO_AHEAD,
                     IAC,
                     WILL,
+                    OPT_BINARY,
+                    IAC,
+                    DO,
+                    OPT_BINARY,
+                    IAC,
+                    WILL,
                     OPT_COM_PORT,
                 )
             )
@@ -112,8 +155,23 @@ class TelnetSerialFilterTests(unittest.TestCase):
 
         self.assertEqual(serial, b"")
         self.assertEqual(replies, RFC2217_CONFIG)
+        self.assertTrue(transport.rx_binary_active)
+        self.assertTrue(transport.tx_binary_active)
         self.assertTrue(transport.rfc2217_active)
         self.assertTrue(transport.rfc2217_configured)
+        self.assertFalse(transport.rfc2217_refused)
+
+    def test_rfc2217_refusal_falls_back_to_preconfigured_serial_settings(self):
+        transport = TelnetSerialFilter()
+        transport.feed(bytes((IAC, WILL, OPT_ECHO)))
+
+        serial, replies = transport.feed(bytes((IAC, WONT, OPT_COM_PORT)))
+
+        self.assertEqual(serial, b"")
+        self.assertEqual(replies, b"")
+        self.assertFalse(transport.rfc2217_active)
+        self.assertFalse(transport.rfc2217_configured)
+        self.assertTrue(transport.rfc2217_refused)
 
     def test_fragmented_negotiation_survives_tcp_read_boundaries(self):
         transport = TelnetSerialFilter()
@@ -124,8 +182,9 @@ class TelnetSerialFilterTests(unittest.TestCase):
             bytes((IAC,)),
             bytes((WILL, OPT_ECHO, IAC)),
             bytes((WILL,)),
-            bytes((OPT_SUPPRESS_GO_AHEAD,)),
-            bytes((IAC, WILL)),
+            bytes((OPT_SUPPRESS_GO_AHEAD, IAC, WILL)),
+            bytes((OPT_BINARY, IAC, DO)),
+            bytes((OPT_BINARY, IAC, WILL)),
             bytes((OPT_COM_PORT,)),
             b"08OK009E\r\n",
         ):
@@ -140,6 +199,8 @@ class TelnetSerialFilterTests(unittest.TestCase):
             + option(DO, OPT_SUPPRESS_GO_AHEAD)
             + RFC2217_CONFIG,
         )
+        self.assertTrue(transport.rx_binary_active)
+        self.assertTrue(transport.tx_binary_active)
         self.assertTrue(transport.rfc2217_active)
 
     def test_standard_server_do_com_port_variant_is_supported(self):

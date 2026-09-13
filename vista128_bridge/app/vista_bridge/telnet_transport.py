@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 IAC = 0xFF
 DONT = 0xFE
 DO = 0xFD
@@ -33,16 +35,33 @@ RFC2217_PARITY_NONE = 0x01
 RFC2217_STOPBITS_ONE = 0x01
 RFC2217_FLOWCONTROL_NONE = 0x01
 
+LOG = logging.getLogger(__name__)
+
+_COMMAND_NAMES = {
+    WILL: "WILL",
+    WONT: "WONT",
+    DO: "DO",
+    DONT: "DONT",
+}
+
+_OPTION_NAMES = {
+    OPT_BINARY: "BINARY",
+    OPT_ECHO: "ECHO",
+    OPT_SUPPRESS_GO_AHEAD: "SUPPRESS-GO-AHEAD",
+    OPT_COM_PORT: "COM-PORT-OPTION",
+}
+
 
 class TelnetSerialFilter:
     """Telnet/RFC2217 compatibility layer for serial-over-TCP servers.
 
     Transparent raw TCP payloads pass through unchanged. If Telnet IAC traffic
     is observed, the filter consumes Telnet control traffic so it never reaches
-    the VISTA frame parser. For Lantronix CoBos/TruPort sessions it also
-    negotiates RFC2217 COM-PORT-OPTION and requests the same serial parameters
-    used by the working panel connection: 9600 baud, 8 data bits, no parity,
-    one stop bit, and no flow control.
+    the VISTA frame parser. Telnet BINARY is requested in both directions so
+    serial data is not subject to NVT CR/LF processing. If the peer supports
+    RFC2217 COM-PORT-OPTION, the filter also requests the known-good VISTA
+    serial parameters: 9600 baud, 8 data bits, no parity, one stop bit, and no
+    flow control.
     """
 
     _DATA = 0
@@ -56,8 +75,13 @@ class TelnetSerialFilter:
         self._command: int | None = None
         self._active = False
         self._startup_sent = False
+        self._tx_binary_active = False
+        self._rx_binary_active = False
+        self._tx_binary_refused = False
+        self._rx_binary_refused = False
         self._rfc2217_active = False
         self._rfc2217_configured = False
+        self._rfc2217_refused = False
         self._subnegotiation = bytearray()
 
     @property
@@ -65,6 +89,26 @@ class TelnetSerialFilter:
         """Whether Telnet control traffic has been observed this session."""
 
         return self._active
+
+    @property
+    def tx_binary_active(self) -> bool:
+        """Whether the peer agreed that Vista Turbo may transmit binary data."""
+
+        return self._tx_binary_active
+
+    @property
+    def rx_binary_active(self) -> bool:
+        """Whether the peer agreed to transmit binary data to Vista Turbo."""
+
+        return self._rx_binary_active
+
+    @property
+    def tx_binary_refused(self) -> bool:
+        return self._tx_binary_refused
+
+    @property
+    def rx_binary_refused(self) -> bool:
+        return self._rx_binary_refused
 
     @property
     def rfc2217_active(self) -> bool:
@@ -77,6 +121,12 @@ class TelnetSerialFilter:
         """Whether Vista Turbo has sent its RFC2217 serial configuration."""
 
         return self._rfc2217_configured
+
+    @property
+    def rfc2217_refused(self) -> bool:
+        """Whether the peer explicitly refused RFC2217 COM-PORT-OPTION."""
+
+        return self._rfc2217_refused
 
     def feed(self, chunk: bytes) -> tuple[bytes, bytes]:
         """Return ``(serial_data, telnet_replies)`` for one TCP read."""
@@ -95,6 +145,9 @@ class TelnetSerialFilter:
             if self._state == self._IAC:
                 if not self._active:
                     self._active = True
+                    LOG.info(
+                        "Telnet control detected; requesting transparent binary serial mode"
+                    )
                     replies.extend(self._startup_negotiation())
 
                 if value == IAC:
@@ -110,6 +163,7 @@ class TelnetSerialFilter:
                 else:
                     # One-byte Telnet command (NOP, GA, AYT, etc.). It has no
                     # meaning to the serial protocol and is consumed here.
+                    LOG.info("Telnet RX command 0x%02X", value)
                     self._state = self._DATA
                 continue
 
@@ -117,6 +171,7 @@ class TelnetSerialFilter:
                 command = self._command
                 self._command = None
                 self._state = self._DATA
+                self._log_negotiation(command, value)
                 replies.extend(self._reply_to_negotiation(command, value))
                 continue
 
@@ -141,6 +196,7 @@ class TelnetSerialFilter:
                 else:
                     # Invalid/unsupported command inside subnegotiation. Consume
                     # it rather than exposing control bytes as serial payload.
+                    LOG.info("Telnet subnegotiation command 0x%02X consumed", value)
                     self._state = self._SUBNEGOTIATION
 
         return bytes(serial), bytes(replies)
@@ -153,16 +209,22 @@ class TelnetSerialFilter:
         return data.replace(bytes((IAC,)), bytes((IAC, IAC)))
 
     def _startup_negotiation(self) -> bytes:
-        """Send the Lantronix-documented Telnet/RFC2217 client preamble."""
+        """Request a transparent Telnet data path and probe RFC2217 support."""
 
         if self._startup_sent:
             return b""
         self._startup_sent = True
+        LOG.info(
+            "Telnet TX options: WONT ECHO, DONT ECHO, WILL SGA, WILL BINARY, "
+            "DO BINARY, DO COM-PORT-OPTION"
+        )
         return b"".join(
             (
                 self._option(WONT, OPT_ECHO),
                 self._option(DONT, OPT_ECHO),
                 self._option(WILL, OPT_SUPPRESS_GO_AHEAD),
+                self._option(WILL, OPT_BINARY),
+                self._option(DO, OPT_BINARY),
                 self._option(DO, OPT_COM_PORT),
             )
         )
@@ -170,33 +232,70 @@ class TelnetSerialFilter:
     def _reply_to_negotiation(self, command: int | None, option: int) -> bytes:
         if command == WILL:
             if option == OPT_ECHO:
-                # Already requested by the startup preamble. Do not accept
-                # server-side echo on a binary serial transport.
+                # The startup preamble already sent DONT ECHO.
                 return b""
             if option == OPT_SUPPRESS_GO_AHEAD:
                 return self._option(DO, option)
             if option == OPT_COM_PORT:
-                # This is the expected Lantronix response to our DO 0x2C.
+                # Lantronix CoBos commonly responds to DO 0x2C with WILL 0x2C.
+                self._rfc2217_refused = False
+                LOG.info("RFC2217 COM-PORT-OPTION accepted by serial server")
                 return self._activate_rfc2217()
             if option == OPT_BINARY:
-                return self._option(DO, option)
+                # Acknowledges our DO BINARY request: peer -> bridge is binary.
+                if not self._rx_binary_active:
+                    LOG.info("Telnet binary mode accepted for panel-to-bridge data")
+                self._rx_binary_active = True
+                self._rx_binary_refused = False
+                return b""
             return self._option(DONT, option)
 
         if command == DO:
             if option == OPT_SUPPRESS_GO_AHEAD:
-                # We already advertised WILL SGA in the startup preamble.
+                # Acknowledges WILL SGA from the startup preamble.
                 return b""
             if option == OPT_COM_PORT:
-                # Some RFC2217 servers use the RFC's client-WILL/server-DO
-                # direction. Support that variant too.
+                # Support the RFC's usual client-WILL/server-DO direction too.
+                self._rfc2217_refused = False
+                LOG.info("RFC2217 COM-PORT-OPTION requested by serial server")
                 return self._option(WILL, option) + self._activate_rfc2217()
             if option == OPT_BINARY:
-                return self._option(WILL, option)
+                # Acknowledges our WILL BINARY request: bridge -> peer is binary.
+                if not self._tx_binary_active:
+                    LOG.info("Telnet binary mode accepted for bridge-to-panel data")
+                self._tx_binary_active = True
+                self._tx_binary_refused = False
+                return b""
             if option == OPT_ECHO:
                 return self._option(WONT, option)
             return self._option(WONT, option)
 
-        # WONT and DONT are acknowledgements/refusals and need no reply.
+        if command == WONT:
+            if option == OPT_BINARY:
+                self._rx_binary_active = False
+                self._rx_binary_refused = True
+                LOG.warning("Serial server refused panel-to-bridge Telnet BINARY mode")
+            elif option == OPT_COM_PORT:
+                self._rfc2217_active = False
+                self._rfc2217_refused = True
+                LOG.info(
+                    "Serial server refused RFC2217 COM-PORT-OPTION; using configured serial settings"
+                )
+            return b""
+
+        if command == DONT:
+            if option == OPT_BINARY:
+                self._tx_binary_active = False
+                self._tx_binary_refused = True
+                LOG.warning("Serial server refused bridge-to-panel Telnet BINARY mode")
+            elif option == OPT_COM_PORT:
+                self._rfc2217_active = False
+                self._rfc2217_refused = True
+                LOG.info(
+                    "Serial server refused RFC2217 COM-PORT-OPTION; using configured serial settings"
+                )
+            return b""
+
         return b""
 
     def _activate_rfc2217(self) -> bytes:
@@ -204,22 +303,33 @@ class TelnetSerialFilter:
         if self._rfc2217_configured:
             return b""
         self._rfc2217_configured = True
+        LOG.info("RFC2217 TX serial configuration: 9600 baud, 8N1, no flow control")
         return self._rfc2217_configuration()
 
     def _process_subnegotiation(self, payload: bytes) -> bytes:
         # RFC2217 acknowledgements, modem/line-state notifications, and flow
-        # notifications are transport metadata. Vista Turbo currently does not
-        # need to expose them; consume them completely so they never reach the
-        # VISTA protocol parser.
+        # notifications are transport metadata. Consume them completely so they
+        # never reach the VISTA protocol parser.
         if payload[:1] == bytes((OPT_COM_PORT,)):
             self._rfc2217_active = True
+            command = payload[1] if len(payload) > 1 else None
+            if command is None:
+                LOG.info("RFC2217 RX empty COM-PORT subnegotiation")
+            else:
+                LOG.info("RFC2217 RX COM-PORT subnegotiation command=%d", command)
+        else:
+            option = payload[0] if payload else None
+            if option is not None:
+                LOG.info("Telnet RX subnegotiation option=0x%02X", option)
         return b""
+
+    def _log_negotiation(self, command: int | None, option: int) -> None:
+        command_name = _COMMAND_NAMES.get(command, f"0x{command:02X}" if command is not None else "?")
+        option_name = _OPTION_NAMES.get(option, f"option-0x{option:02X}")
+        LOG.info("Telnet RX: %s %s", command_name, option_name)
 
     @classmethod
     def _rfc2217_configuration(cls) -> bytes:
-        # Lantronix's documented sequence requests masks before setting port
-        # parameters. 0xFF values are doubled by _subnegotiation() as required
-        # by Telnet escaping rules.
         return b"".join(
             (
                 cls._subnegotiation(

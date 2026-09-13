@@ -19,6 +19,8 @@ LANTRONIX_STARTUP_REPLY = bytes.fromhex(
     "ff fc 01 "
     "ff fe 01 "
     "ff fb 03 "
+    "ff fb 00 "
+    "ff fd 00 "
     "ff fd 2c "
     "ff fd 03"
 )
@@ -68,8 +70,10 @@ class BridgeTelnetTests(unittest.IsolatedAsyncioTestCase):
             [
                 # Real Lantronix opening observed on hardware.
                 bytes.fromhex("ff fb 01 ff fb 03"),
-                # CoBos-style response after the client requests RFC2217.
-                bytes.fromhex("ff fc 01 ff fd 03 ff fb 2c"),
+                # Telnet BINARY and CoBos-style RFC2217 acceptance.
+                bytes.fromhex(
+                    "ff fc 01 ff fd 03 ff fb 00 ff fd 00 ff fb 2c"
+                ),
                 # RFC2217 SET-BAUDRATE acknowledgement followed by serial data.
                 bytes.fromhex("ff fa 2c 65 00 00 25 80 ff f0")
                 + b"08OK009E\r\n",
@@ -82,6 +86,8 @@ class BridgeTelnetTests(unittest.IsolatedAsyncioTestCase):
             await bridge._read_loop(reader, writer)
 
         self.assertTrue(bridge._telnet.active)
+        self.assertTrue(bridge._telnet.tx_binary_active)
+        self.assertTrue(bridge._telnet.rx_binary_active)
         self.assertTrue(bridge._telnet.rfc2217_active)
         self.assertTrue(bridge._telnet.rfc2217_configured)
         self.assertEqual(writer.writes, [LANTRONIX_STARTUP_REPLY, RFC2217_CONFIG])
@@ -104,7 +110,8 @@ class BridgeTelnetTests(unittest.IsolatedAsyncioTestCase):
                 bytes.fromhex("ff"),
                 bytes.fromhex("fb 01 ff fb"),
                 bytes.fromhex("03 ff fc 01 ff"),
-                bytes.fromhex("fd 03 ff fb"),
+                bytes.fromhex("fd 03 ff fb 00 ff"),
+                bytes.fromhex("fd 00 ff fb"),
                 bytes.fromhex("2c") + b"08OK",
                 b"009E\r\n",
                 b"",
@@ -122,6 +129,8 @@ class BridgeTelnetTests(unittest.IsolatedAsyncioTestCase):
             b"".join(writer.writes),
             LANTRONIX_STARTUP_REPLY + RFC2217_CONFIG,
         )
+        self.assertTrue(bridge._telnet.tx_binary_active)
+        self.assertTrue(bridge._telnet.rx_binary_active)
         self.assertEqual(len(frames), 1)
         self.assertEqual(frames[0].data, b"08OK009E")
 
