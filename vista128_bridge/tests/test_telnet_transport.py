@@ -30,7 +30,7 @@ class TelnetSerialFilterTests(unittest.TestCase):
         self.assertFalse(transport.active)
         self.assertIs(transport.encode(payload), payload)
 
-    def test_lantronix_echo_and_sga_negotiation_is_consumed(self):
+    def test_lantronix_echo_and_sga_negotiation_is_consumed_and_accepted(self):
         transport = TelnetSerialFilter()
 
         serial, replies = transport.feed(
@@ -43,7 +43,7 @@ class TelnetSerialFilterTests(unittest.TestCase):
             bytes(
                 (
                     IAC,
-                    DONT,
+                    DO,
                     OPT_ECHO,
                     IAC,
                     DO,
@@ -75,7 +75,7 @@ class TelnetSerialFilterTests(unittest.TestCase):
             bytes(
                 (
                     IAC,
-                    DONT,
+                    DO,
                     OPT_ECHO,
                     IAC,
                     DO,
@@ -92,7 +92,23 @@ class TelnetSerialFilterTests(unittest.TestCase):
         self.assertEqual(serial, b"")
         self.assertEqual(replies, bytes((IAC, DONT, 42)))
 
-    def test_client_option_request_is_refused(self):
+    def test_client_sga_request_is_accepted(self):
+        transport = TelnetSerialFilter()
+
+        serial, replies = transport.feed(bytes((IAC, DO, OPT_SUPPRESS_GO_AHEAD)))
+
+        self.assertEqual(serial, b"")
+        self.assertEqual(replies, bytes((IAC, WILL, OPT_SUPPRESS_GO_AHEAD)))
+
+    def test_client_echo_request_is_refused(self):
+        transport = TelnetSerialFilter()
+
+        serial, replies = transport.feed(bytes((IAC, DO, OPT_ECHO)))
+
+        self.assertEqual(serial, b"")
+        self.assertEqual(replies, bytes((IAC, WONT, OPT_ECHO)))
+
+    def test_unknown_client_option_is_refused(self):
         transport = TelnetSerialFilter()
 
         serial, replies = transport.feed(bytes((IAC, DO, 42)))
