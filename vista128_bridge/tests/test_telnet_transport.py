@@ -8,13 +8,54 @@ from vista_bridge.telnet_transport import (  # noqa: E402
     DO,
     DONT,
     IAC,
+    OPT_COM_PORT,
     OPT_ECHO,
     OPT_SUPPRESS_GO_AHEAD,
+    RFC2217_FLOWCONTROL_NONE,
+    RFC2217_SET_BAUDRATE,
+    RFC2217_SET_CONTROL,
+    RFC2217_SET_DATASIZE,
+    RFC2217_SET_LINESTATE_MASK,
+    RFC2217_SET_MODEMSTATE_MASK,
+    RFC2217_SET_PARITY,
+    RFC2217_SET_STOPSIZE,
     SB,
     SE,
     WILL,
     WONT,
     TelnetSerialFilter,
+)
+
+
+def option(command, value):
+    return bytes((IAC, command, value))
+
+
+def subnegotiation(command, payload=b""):
+    body = bytes((OPT_COM_PORT, command)) + payload
+    body = body.replace(bytes((IAC,)), bytes((IAC, IAC)))
+    return bytes((IAC, SB)) + body + bytes((IAC, SE))
+
+
+LANTRONIX_STARTUP = b"".join(
+    (
+        option(WONT, OPT_ECHO),
+        option(DONT, OPT_ECHO),
+        option(WILL, OPT_SUPPRESS_GO_AHEAD),
+        option(DO, OPT_COM_PORT),
+    )
+)
+
+RFC2217_CONFIG = b"".join(
+    (
+        subnegotiation(RFC2217_SET_LINESTATE_MASK, bytes((0xFF,))),
+        subnegotiation(RFC2217_SET_MODEMSTATE_MASK, bytes((0xFF,))),
+        subnegotiation(RFC2217_SET_BAUDRATE, (9600).to_bytes(4, "big")),
+        subnegotiation(RFC2217_SET_DATASIZE, bytes((8,))),
+        subnegotiation(RFC2217_SET_PARITY, bytes((1,))),
+        subnegotiation(RFC2217_SET_STOPSIZE, bytes((1,))),
+        subnegotiation(RFC2217_SET_CONTROL, bytes((RFC2217_FLOWCONTROL_NONE,))),
+    )
 )
 
 
@@ -28,9 +69,11 @@ class TelnetSerialFilterTests(unittest.TestCase):
         self.assertEqual(serial, payload)
         self.assertEqual(replies, b"")
         self.assertFalse(transport.active)
+        self.assertFalse(transport.rfc2217_active)
+        self.assertFalse(transport.rfc2217_configured)
         self.assertIs(transport.encode(payload), payload)
 
-    def test_lantronix_echo_and_sga_negotiation_is_consumed_and_accepted(self):
+    def test_lantronix_telnet_detection_starts_truport_negotiation(self):
         transport = TelnetSerialFilter()
 
         serial, replies = transport.feed(
@@ -40,20 +83,39 @@ class TelnetSerialFilterTests(unittest.TestCase):
         self.assertEqual(serial, b"")
         self.assertEqual(
             replies,
+            LANTRONIX_STARTUP + option(DO, OPT_SUPPRESS_GO_AHEAD),
+        )
+        self.assertTrue(transport.active)
+        self.assertFalse(transport.rfc2217_active)
+
+    def test_lantronix_rfc2217_acceptance_sends_9600_8n1_no_flow(self):
+        transport = TelnetSerialFilter()
+        transport.feed(
+            bytes((IAC, WILL, OPT_ECHO, IAC, WILL, OPT_SUPPRESS_GO_AHEAD))
+        )
+
+        serial, replies = transport.feed(
             bytes(
                 (
                     IAC,
-                    DO,
+                    WONT,
                     OPT_ECHO,
                     IAC,
                     DO,
                     OPT_SUPPRESS_GO_AHEAD,
+                    IAC,
+                    WILL,
+                    OPT_COM_PORT,
                 )
-            ),
+            )
         )
-        self.assertTrue(transport.active)
 
-    def test_fragmented_telnet_negotiation_survives_tcp_read_boundaries(self):
+        self.assertEqual(serial, b"")
+        self.assertEqual(replies, RFC2217_CONFIG)
+        self.assertTrue(transport.rfc2217_active)
+        self.assertTrue(transport.rfc2217_configured)
+
+    def test_fragmented_negotiation_survives_tcp_read_boundaries(self):
         transport = TelnetSerialFilter()
         serial = bytearray()
         replies = bytearray()
@@ -63,6 +125,8 @@ class TelnetSerialFilterTests(unittest.TestCase):
             bytes((WILL, OPT_ECHO, IAC)),
             bytes((WILL,)),
             bytes((OPT_SUPPRESS_GO_AHEAD,)),
+            bytes((IAC, WILL)),
+            bytes((OPT_COM_PORT,)),
             b"08OK009E\r\n",
         ):
             filtered, response = transport.feed(chunk)
@@ -72,73 +136,61 @@ class TelnetSerialFilterTests(unittest.TestCase):
         self.assertEqual(serial, b"08OK009E\r\n")
         self.assertEqual(
             replies,
-            bytes(
-                (
-                    IAC,
-                    DO,
-                    OPT_ECHO,
-                    IAC,
-                    DO,
-                    OPT_SUPPRESS_GO_AHEAD,
-                )
-            ),
+            LANTRONIX_STARTUP
+            + option(DO, OPT_SUPPRESS_GO_AHEAD)
+            + RFC2217_CONFIG,
         )
+        self.assertTrue(transport.rfc2217_active)
 
-    def test_unknown_server_option_is_refused(self):
+    def test_standard_server_do_com_port_variant_is_supported(self):
+        transport = TelnetSerialFilter()
+
+        serial, replies = transport.feed(bytes((IAC, DO, OPT_COM_PORT)))
+
+        self.assertEqual(serial, b"")
+        self.assertEqual(
+            replies,
+            LANTRONIX_STARTUP + option(WILL, OPT_COM_PORT) + RFC2217_CONFIG,
+        )
+        self.assertTrue(transport.rfc2217_active)
+
+    def test_unknown_server_option_is_refused_after_startup(self):
         transport = TelnetSerialFilter()
 
         serial, replies = transport.feed(bytes((IAC, WILL, 42)))
 
         self.assertEqual(serial, b"")
-        self.assertEqual(replies, bytes((IAC, DONT, 42)))
+        self.assertEqual(replies, LANTRONIX_STARTUP + option(DONT, 42))
 
-    def test_client_sga_request_is_accepted(self):
-        transport = TelnetSerialFilter()
-
-        serial, replies = transport.feed(bytes((IAC, DO, OPT_SUPPRESS_GO_AHEAD)))
-
-        self.assertEqual(serial, b"")
-        self.assertEqual(replies, bytes((IAC, WILL, OPT_SUPPRESS_GO_AHEAD)))
-
-    def test_client_echo_request_is_refused(self):
-        transport = TelnetSerialFilter()
-
-        serial, replies = transport.feed(bytes((IAC, DO, OPT_ECHO)))
-
-        self.assertEqual(serial, b"")
-        self.assertEqual(replies, bytes((IAC, WONT, OPT_ECHO)))
-
-    def test_unknown_client_option_is_refused(self):
+    def test_unknown_client_option_is_refused_after_startup(self):
         transport = TelnetSerialFilter()
 
         serial, replies = transport.feed(bytes((IAC, DO, 42)))
 
         self.assertEqual(serial, b"")
-        self.assertEqual(replies, bytes((IAC, WONT, 42)))
+        self.assertEqual(replies, LANTRONIX_STARTUP + option(WONT, 42))
 
-    def test_wont_and_dont_are_consumed_without_reply(self):
+    def test_rfc2217_ack_subnegotiation_is_consumed(self):
         transport = TelnetSerialFilter()
+        transport.feed(bytes((IAC, WILL, OPT_COM_PORT)))
 
+        # Server acknowledgment of SET-BAUDRATE 9600 uses command 101.
         serial, replies = transport.feed(
-            bytes((IAC, WONT, OPT_ECHO, IAC, DONT, OPT_SUPPRESS_GO_AHEAD))
+            bytes((IAC, SB, OPT_COM_PORT, 101, 0, 0, 0x25, 0x80, IAC, SE))
+            + b"08OK009E\r\n"
         )
 
-        self.assertEqual(serial, b"")
+        self.assertEqual(serial, b"08OK009E\r\n")
         self.assertEqual(replies, b"")
-        self.assertTrue(transport.active)
 
-    def test_subnegotiation_is_consumed_and_following_serial_data_preserved(self):
+    def test_subnegotiation_escaped_iac_is_consumed(self):
         transport = TelnetSerialFilter()
-        serial = bytearray()
-        replies = bytearray()
+        transport.feed(bytes((IAC, WILL, OPT_COM_PORT)))
 
-        for chunk in (
-            bytes((IAC, SB, 44, 1, 2, IAC)),
-            bytes((SE,)) + b"08OK009E\r\n",
-        ):
-            filtered, response = transport.feed(chunk)
-            serial.extend(filtered)
-            replies.extend(response)
+        serial, replies = transport.feed(
+            bytes((IAC, SB, OPT_COM_PORT, 110, IAC, IAC, IAC, SE))
+            + b"08OK009E\r\n"
+        )
 
         self.assertEqual(serial, b"08OK009E\r\n")
         self.assertEqual(replies, b"")

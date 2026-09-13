@@ -15,6 +15,25 @@ from vista_bridge.framing import VistaStreamFramer  # noqa: E402
 from vista_bridge.telnet_transport import TelnetSerialFilter  # noqa: E402
 
 
+LANTRONIX_STARTUP_REPLY = bytes.fromhex(
+    "ff fc 01 "
+    "ff fe 01 "
+    "ff fb 03 "
+    "ff fd 2c "
+    "ff fd 03"
+)
+
+RFC2217_CONFIG = bytes.fromhex(
+    "ff fa 2c 0a ff ff ff f0 "
+    "ff fa 2c 0b ff ff ff f0 "
+    "ff fa 2c 01 00 00 25 80 ff f0 "
+    "ff fa 2c 02 08 ff f0 "
+    "ff fa 2c 03 01 ff f0 "
+    "ff fa 2c 04 01 ff f0 "
+    "ff fa 2c 05 01 ff f0"
+)
+
+
 class FakeReader:
     def __init__(self, chunks):
         self._chunks = iter(chunks)
@@ -36,7 +55,7 @@ class FakeWriter:
 
 
 class BridgeTelnetTests(unittest.IsolatedAsyncioTestCase):
-    async def test_lantronix_negotiation_never_reaches_vista_framer(self):
+    async def test_lantronix_rfc2217_control_never_reaches_vista_framer(self):
         bridge = VistaBridge.__new__(VistaBridge)
         bridge.settings = SimpleNamespace(panel=SimpleNamespace(frame_idle_ms=1000))
         bridge.framer = VistaStreamFramer()
@@ -47,8 +66,13 @@ class BridgeTelnetTests(unittest.IsolatedAsyncioTestCase):
 
         reader = FakeReader(
             [
+                # Real Lantronix opening observed on hardware.
                 bytes.fromhex("ff fb 01 ff fb 03"),
-                b"08OK009E\r\n",
+                # CoBos-style response after the client requests RFC2217.
+                bytes.fromhex("ff fc 01 ff fd 03 ff fb 2c"),
+                # RFC2217 SET-BAUDRATE acknowledgement followed by serial data.
+                bytes.fromhex("ff fa 2c 65 00 00 25 80 ff f0")
+                + b"08OK009E\r\n",
                 b"",
             ]
         )
@@ -58,13 +82,15 @@ class BridgeTelnetTests(unittest.IsolatedAsyncioTestCase):
             await bridge._read_loop(reader, writer)
 
         self.assertTrue(bridge._telnet.active)
-        self.assertEqual(writer.writes, [bytes.fromhex("ff fd 01 ff fd 03")])
-        self.assertEqual(writer.drain_count, 1)
+        self.assertTrue(bridge._telnet.rfc2217_active)
+        self.assertTrue(bridge._telnet.rfc2217_configured)
+        self.assertEqual(writer.writes, [LANTRONIX_STARTUP_REPLY, RFC2217_CONFIG])
+        self.assertEqual(writer.drain_count, 2)
         self.assertEqual(bridge.rx_bytes, len(b"08OK009E\r\n"))
         self.assertEqual(len(frames), 1)
         self.assertEqual(frames[0].data, b"08OK009E")
 
-    async def test_fragmented_negotiation_and_vista_payload_can_share_reads(self):
+    async def test_fragmented_rfc2217_negotiation_and_vista_payload(self):
         bridge = VistaBridge.__new__(VistaBridge)
         bridge.settings = SimpleNamespace(panel=SimpleNamespace(frame_idle_ms=1000))
         bridge.framer = VistaStreamFramer()
@@ -77,7 +103,9 @@ class BridgeTelnetTests(unittest.IsolatedAsyncioTestCase):
             [
                 bytes.fromhex("ff"),
                 bytes.fromhex("fb 01 ff fb"),
-                bytes.fromhex("03") + b"08OK",
+                bytes.fromhex("03 ff fc 01 ff"),
+                bytes.fromhex("fd 03 ff fb"),
+                bytes.fromhex("2c") + b"08OK",
                 b"009E\r\n",
                 b"",
             ]
@@ -87,9 +115,12 @@ class BridgeTelnetTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ConnectionError):
             await bridge._read_loop(reader, writer)
 
+        # TCP read boundaries may cause the same logical negotiation bytes to
+        # be drained in more than one socket write. Only the byte stream/order
+        # matters.
         self.assertEqual(
             b"".join(writer.writes),
-            bytes.fromhex("ff fd 01 ff fd 03"),
+            LANTRONIX_STARTUP_REPLY + RFC2217_CONFIG,
         )
         self.assertEqual(len(frames), 1)
         self.assertEqual(frames[0].data, b"08OK009E")
