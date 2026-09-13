@@ -14,6 +14,7 @@ from .framing import RawFrame, VistaStreamFramer
 from .message_handler import ProtocolMessageHandler
 from .mqtt_client import MqttPublisher
 from .printer import TransPortEventPrinter
+from .programming_guard import InstallerProgrammingGuard
 from .protocol import identify_message, validate_packet
 from .state import VistaState
 from .synchronizer import VistaSynchronizer
@@ -35,6 +36,8 @@ class VistaBridge:
         self.state = VistaState()
         self.framer = VistaStreamFramer()
         self._telnet = TelnetSerialFilter()
+        self._installer_guard = InstallerProgrammingGuard()
+        self._tx_safety_lock = threading.Lock()
         self.printer = TransPortEventPrinter(settings)
         self.event_store = (
             EventStore(
@@ -259,6 +262,7 @@ class VistaBridge:
         self._writer = writer
         self.framer = VistaStreamFramer()
         self._telnet = TelnetSerialFilter()
+        self._installer_guard.reset()
         self.synchronizer.reset_connection_state()
         self.control.reset_session()
         self.state.reset_connection_derived_annunciators()
@@ -331,12 +335,21 @@ class VistaBridge:
         item = TxItem(source=source, label=label, data=data)
         raw_queue = getattr(self, "_raw_tx_queue", self._tx_queue)
         target = raw_queue if source == "debug" else self._tx_queue
-        try:
-            target.put_nowait(item)
-        except queue.Full:
-            reason = "raw_tx_queue_full" if source == "debug" else "tx_queue_full"
-            LOG.warning("Rejected %s because its bounded TX queue is full", source)
-            return False, reason
+        with self._tx_safety_lock:
+            guard_update = self._installer_guard.inspect_frame(data)
+            if guard_update is not None and guard_update.blocked:
+                LOG.warning(
+                    "Blocked installer-programming keypad sequence on partition %d",
+                    guard_update.partition,
+                )
+                return False, "installer_programming_blocked"
+            try:
+                target.put_nowait(item)
+            except queue.Full:
+                reason = "raw_tx_queue_full" if source == "debug" else "tx_queue_full"
+                LOG.warning("Rejected %s because its bounded TX queue is full", source)
+                return False, reason
+            self._installer_guard.commit(guard_update)
         return True, "queued for immediate transmit"
 
     def _discard_pending_tx(self) -> int:
