@@ -1,155 +1,196 @@
 # Changelog
 
+Detailed release-candidate notes are kept in [`../release/`](../release/). This file summarizes the user-visible and architectural changes for each published version.
+
+## 0.2.6-rc.27
+
+- Complete the real-hardware Lantronix transport fix by negotiating Telnet BINARY mode in both directions.
+- Preserve RFC2217 `COM-PORT-OPTION` negotiation and 9600/8N1/no-flow serial configuration when supported.
+- Add safe Telnet/RFC2217 negotiation diagnostics without logging VISTA payloads, keypad codes, alarm codes, or credentials.
+- Confirm successful VISTA startup synchronization, keypad polling, and periodic reconciliation through the Lantronix path.
+- Retain transparent raw-TCP compatibility and the installer-programming safety interlock.
+
+## 0.2.6-rc.26
+
+- Add Lantronix RFC2217 / TruPort negotiation on top of the Telnet compatibility layer.
+- Request the known-good VISTA serial settings: 9600 baud, 8 data bits, no parity, 1 stop bit, and no flow control.
+- Consume RFC2217 control and acknowledgement traffic before it reaches the VISTA frame parser.
+- Preserve raw-TCP operation for serial servers that do not use Telnet control traffic.
+
+## 0.2.6-rc.25
+
+- Refine Lantronix Telnet option negotiation during hardware bring-up.
+- Keep Telnet control traffic isolated from VISTA framing and preserve fragmented-IAC handling.
+- This negotiation model was superseded by the bidirectional BINARY plus RFC2217 transport finalized in RC27.
+
+## 0.2.6-rc.24
+
+- Add a non-configurable installer-programming safety interlock.
+- Block any four numeric keypad digits followed by `800` before the triggering frame reaches the panel.
+- Cover individual keypresses, multi-key requests, semantic keypad fallback, and privileged raw `KS` transmission.
+- Never log or persist the preceding four-digit code as part of the safety decision.
+- Keep installer programming available from a physical keypad only.
+
+## 0.2.6-rc.23
+
+- Add automatic Telnet-mode serial-server detection while preserving raw TCP when no Telnet control traffic is present.
+- Consume Telnet negotiation and subnegotiation before bytes reach the VISTA frame parser.
+- Add stateful handling for fragmented IAC sequences and literal `0xFF` escaping.
+- Begin real-hardware Lantronix compatibility work that was completed in RC27.
+
+## 0.2.6-rc.22
+
+- Treat `08XF` as generic Home/Facility Automation Communication Off rather than assuming installer programming.
+- Quiesce automation traffic and mark panel state stale while communication is suspended.
+- Use explicit `AD` / `BD` events as programming evidence when available.
+- Require a full state resynchronization after `08XN` Communication On.
+
+## 0.2.6-rc.21
+
+- Stop reconnect loops when the panel deliberately disables the automation interface.
+- Treat `08XF` as a terminal result for an in-flight control transaction rather than manufacturing an ACK timeout.
+- Keep virtual keypad control unavailable while communication is suspended and resynchronize when it returns.
+
+## 0.2.6-rc.20
+
+- Accept legitimate markerless keypad-display replies when one serialized keypad transaction uniquely identifies the partition.
+- Continue rejecting keypad replies that explicitly identify a different partition.
+- Fix reconnect loops triggered by transient displays such as `CANCEL SENT TO CENTRAL / STATION`.
+
+## 0.2.6-rc.19
+
+- Queue rapid normal keypad presses in arrival order instead of rejecting presses while the previous key is awaiting the panel.
+- Preserve exclusive keypad ownership for multi-step interactions.
+
+## 0.2.6-rc.18
+
+- Infer automation-interface availability from successful structured VISTA read transactions.
+- Keep explicit Communication Off authoritative until communication is restored.
+- Fix control remaining unavailable while normal AS/ZS/ZP/ZD/KD traffic is functioning.
+
+## 0.2.6-rc.17
+
+- Remove historical event-log import from normal startup so it cannot monopolize the serial session.
+- Restrict keypad polling to configured partitions instead of probing all eight.
+- Allow normal partition, zone, and keypad state to become available as soon as the live snapshot is valid.
+- Base no-alarm completeness on partitions actually mapped by the panel.
+
+## 0.2.6-rc.16
+
+- Correct semantic command-model and audit integrity issues found during final review.
+- Normalize automatic unbypass through the documented `#77` zone-list flow.
+- Restrict generic system commands to documented one-shot namespaces and reject unused operands.
+- Treat `acknowledged_unverified` as a terminal audit result.
+
+## 0.2.6-rc.15
+
+- Fix MQTT bootstrap queue exhaustion that could leave Home Assistant showing the bridge offline while panel communication was healthy.
+- Increase the internal bounded Paho outbound queue while keeping the tuning surface private.
+- Preserve RC14 keypad behavior and the streamlined App options surface.
+
 ## 0.2.6-rc.14
 
-- Remove the synthetic keypad SEND/finish-command workflow and restore immediate physical-keypad semantics for `0-9`, `*`, and `#`.
-- Publish each press as an ordered one-key QoS 1 non-retained request with `complete: true`; panel delivery never waits for inactivity.
-- Keep control transaction IDs atomic while grouping rapid entry under a separate bounded audit interaction ID so individual PIN digits are not stored as separate audit rows.
-- Add browser regressions for immediate rapid/slow entry, literal `*`/`#`, absence of SEND UI, actor attribution, and redacted DOM events.
-- Bump the App to RC14 and the keypad card to `0.3.26`.
+- Remove the synthetic keypad SEND workflow and restore immediate physical-keypad semantics for `0-9`, `*`, and `#`.
+- Publish each press as an ordered one-key non-retained request with explicit completion.
+- Keep control transaction IDs atomic while grouping rapid entry under a separate bounded audit interaction.
+- Add browser regression coverage for rapid and slow entry, literal `*`/`#`, actor attribution, and redacted DOM events.
+- Update the keypad card to `0.3.26`.
+
+## 0.2.6-rc.13
+
+- Correct alarm taxonomy so auxiliary, burglary families, and audible panic remain distinct.
+- Preserve fail-safe alarm behavior across restore, disarm, reconnect, stale state, and incomplete snapshots.
+- Accept ADR 0001 for the Home Assistant-native suite architecture.
+- Keep the App as the sole VISTA protocol engine and define the future native integration and ingress management surfaces.
 
 ## 0.2.6-rc.12
 
-- Add a canonical `VistaCommand` model, deterministic keypad parser, bounded compiler, and native-preferred execution planner for semantic Home Assistant/MQTT control.
-- Add `control/execute` structured MQTT commands while preserving legacy partition and logical keypad topics.
-- Keep exact logical keypad sequences and four-digit PINs in the bounded local administrator audit, with normalized command type, operands, mechanism, confidence, and verification fields; never expose them in normal telemetry or logs.
-- Preserve keypad ownership across every explicit `complete:false` segment and serialize fallback segments through the existing panel transaction coordinator.
-- Reject raw sequence overrides on ordinary semantic actions, require complete `#70`/`#77` menu flows, and use native execution only when it preserves all command operands.
-- Model `#77` action-specific operands through confirmation and quit-menu, compile semantic `system_command` namespaces, reject unused action operands, and support `GOTO 0`.
-- Verify keypad fallback arming across every requested partition; subtype-bearing results are acknowledged as unverified when panel telemetry cannot prove the subtype.
-- Bump the bridge to RC12 and the card to `0.3.25`.
+- Add the canonical `VistaCommand` semantic command model, parser, compiler, and native-preferred execution planner.
+- Add structured semantic control while preserving legacy partition and keypad topics.
+- Preserve exact logical keypad sequences in bounded local administrator audit without exposing credentials in normal telemetry or logs.
+- Serialize multi-step keypad interactions and require complete explicit prompt/menu flows.
+- Verify keypad fallback arming across every requested partition.
 
 ## 0.2.6-rc.11
 
-- Coordinate the #16, #17, and #18 security hardening pass across alarm state, synchronization, MQTT, persistence, and the keypad card; #19 is intentionally separate.
-- Add fail-safe panel alarm aggregation for fire, burglary, auxiliary, silent, duress, supervisory, and untyped alarm evidence. Alarm OFF remains unavailable until the complete session snapshot is fresh.
-- Invalidate connection-derived security state on reconnect while preserving configuration and event history. Do not republish stale READY, DISARMED, keypad, or alarm state as current.
-- Correlate protocol acknowledgements and keypad responses with their pending transactions and serialize logical keypad sequences.
-- Add bounded normal/raw TX queues, strict privileged raw-TX validation on `admin/raw_tx`, MQTT publish diagnostics, and opt-in raw frame diagnostics.
-- Add MQTT TLS verification with no plaintext fallback, bounded event-history retention, retained-topic/discovery cleanup, and trusted-network transport documentation.
-- Update the card to version `0.3.24` with explicit unavailable rendering, disabled controls, narrow CSS color validation, bounded searchable entity selection, and explicit logical keypad completion for serialized QoS 1 commands.
+- Harden alarm state, synchronization, MQTT, persistence, and frontend behavior.
+- Add fail-safe panel alarm aggregation and reconnect invalidation of connection-derived state.
+- Add bounded normal/raw TX queues, strict privileged raw-TX validation, MQTT TLS verification, and retained-topic cleanup.
+- Add explicit unavailable rendering and disabled controls to the keypad card.
+
+## 0.2.6-rc.10
+
+- Add first-class per-partition and panel-wide Fire, Burglary, Auxiliary, and Alarm Active binary sensors.
+- Keep alarm OFF unavailable until the required authoritative state is complete after reconnect.
+- Add active partitions and alarm classes to aggregate entity attributes.
+- Continue asynchronous keypad-display refresh after control and live panel events.
+
+## 0.2.6-rc.9
+
+- Fix Home Assistant visual editors losing focus during repeated `hass` state refreshes.
+- Avoid unnecessary editor Shadow DOM rebuilds after `config-changed` and echoed `setConfig()` updates.
+- Apply the same lifecycle correction to the event-journal card editor.
+- Update the keypad card to `0.3.22` without changing panel protocol behavior.
 
 ## 0.2.6-rc.8
 
 - Infer Automation Interface Available after a successful structured VISTA transaction when the panel does not emit `08XN` during ordinary operation.
-- Preserve `08XF` Communication Off as an explicit same-session control block that ordinary `08OK` replies cannot override.
-- Add the **Automation Availability Source** diagnostic with `unknown`, `inferred`, `explicit`, `communication_off`, and `offline` states.
-- Stop treating a quiet KD page or a false raw TROUBLE lamp bit as evidence that AC power is present. POWER remains unknown after reconnect until explicit AC evidence is observed.
-- Split semantic keypad `trouble` from `trouble_led_raw`; semantic TROUBLE remains active across the VISTA's rotating display pages while known trouble conditions remain active.
-- Track validated trouble families, system battery, RF low battery, and sensor tamper with reconnect-invalidated trouble state.
-- Treat both `D` and `N` arming snapshots as authoritative disarmed states when clearing stale alarm tokens.
-- Publish individual virtual-keypad presses at MQTT QoS 0 with retain disabled to avoid at-least-once duplicate digits.
-- Remove entered keypad digits from the frontend `vista-keypad-key` DOM event detail.
-- Report the partition `control_enabled` attribute from actual bridge configuration instead of a hard-coded false value.
-- Close every SQLite event-journal connection deterministically and add regression coverage for connection closure.
-- Add card `0.3.21`; keypad function keys A-D remain intentionally unmapped pending explicit action and hold semantics.
+- Preserve `08XF` Communication Off as an explicit same-session control block.
+- Add the Automation Availability Source diagnostic.
+- Separate semantic Trouble from the raw keypad Trouble LED and improve validated trouble-family tracking.
+- Keep Power unknown after reconnect until explicit AC evidence is observed.
+- Remove keypad digits from frontend DOM event details and report actual control enablement.
 
 ## 0.2.6-rc.7
 
-- Add the first opt-in VISTA panel write path while keeping all control disabled by default.
-- Add a serialized `VistaControlCoordinator` sharing the existing protocol transaction lock with synchronization and keypad polling.
-- Add typed VISTA `KS` keypad commands for `0-9`, `*`, and `#`, with exact frame/checksum regression tests.
-- Add typed native VISTA arm/disarm commands for Away, Home/Stay, Instant/Night, Maximum, Force Away, Force Home, and Disarm.
-- Enable standard Home Assistant Away, Home, Night, and Disarm through MQTT remote-code validation when native alarm control is explicitly enabled.
-- Require `08XN` Automation Interface Available before any control request can be queued and stop/discard requests on `08XF`.
-- Treat `08OK` only as protocol flow-control acknowledgement and verify native alarm results with a fresh arming-status query.
-- Never replay queued commands across a panel TCP reconnect; queued requests are tied to one connection generation and expire quickly.
-- Reject retained MQTT control messages so broker reconnects cannot replay old keypad or alarm commands.
-- Redact all control TX payloads from bridge logs and never echo alarm PINs or keypad digits in control result telemetry.
-- Keep keypad code entry responsive by waiting for `08OK` per stroke and requesting a coalesced keypad refresh instead of blocking every digit on a KD transaction.
-- Keep the A-D visual function keys and panic encodings unavailable through the normal RC7 keypad control path pending explicit action and hold-to-activate semantics.
-- Add card `0.3.20` with an opt-in visual-editor keypad-input toggle and direct non-retained Home Assistant MQTT publishing.
-- Preserve the RC6 SQLite event journal, historical event-log import, event-journal card, audio, chime, and First Alert keypad features.
+- Add the first opt-in VISTA panel write path while keeping control disabled by default.
+- Add serialized keypad and native alarm control through the shared panel transaction coordinator.
+- Add native Away, Home/Stay, Instant/Night, Maximum, Force Away, Force Home, and Disarm commands.
+- Reject retained MQTT control messages and never replay queued control across reconnects.
+- Redact control payloads and credentials from normal logs and telemetry.
 
 ## 0.2.6-rc.6
 
-- Add a persistent SQLite VISTA event journal at `/data/vista128_events.sqlite3`.
-- Journal live `nq` system events with event code, panel time, partition, zone, user, descriptor, and source metadata.
-- Add optional startup import of the documented VISTA historical event log using `08LD00A8`, `ld` entries, and the `08lc0069` completion packet.
-- Leave historical startup import disabled by default pending physical VISTA-128BPT validation; live SQLite journaling is enabled by default.
-- Keep imported historical events isolated from live state changes, chimes, sounds, keypad refreshes, and printer receipts.
-- Deduplicate repeated historical imports while preserving multiple identical events that genuinely occur within the same panel minute.
-- Backfill programmed zone descriptors into existing journal rows when descriptors become available.
-- Add the Home Assistant **Event Journal** sensor with a configurable 1-100 row recent window instead of copying the full database into HA state.
-- Keep the Event Journal available while the panel TCP link is down as long as the bridge remains online.
-- Add card `0.3.19` with `custom:vista-event-log-card`, responsive recent-event rows, partition filtering, live/history/both source labels, and a visual editor.
-- Recognize `08XF` Communication Off and expose an **Automation Interface Available** diagnostic.
-- Recognize `10DC` Display Changed passively without assuming refresh behavior until observed on the test panel.
-- Add C7 Fail To Arm and C8 Fail To Disarm event descriptions.
-- Keep all alarm and keypad control read-only.
+- Add the persistent SQLite event journal at `/data/vista128_events.sqlite3`.
+- Journal live `nq` events and add optional documented historical-log import support.
+- Publish only a bounded recent event window to Home Assistant.
+- Add `custom:vista-event-log-card` and event-history filtering.
+- Recognize `08XF` Communication Off and expose automation availability diagnostics.
 
 ## 0.2.6-rc.5
 
-- Add card `0.3.18` with a Home Assistant visual editor exposed through the custom-card `getConfigElement()` contract.
-- Configure keypad entity, model, layout, title, card background, case color, and day/night case overrides without hand-editing YAML.
-- Configure sound enablement, key chirp, panel-state sounds, chime/trouble/supervisory toggles, key/alarm volume, and optional burglary/AUX entity overrides in the editor.
-- Configure best-effort haptic enablement and keypress duration in the editor.
-- Configure A/B/C/D function-key labels while preserving model defaults when fields are blank.
-- Preserve advanced indicator/flashing maps and per-function-key colors as YAML-only options.
-- Keep the visual editor read-only with no panel-control toggle.
-- Preserve compatibility with `sound: true` and `haptic: true` shorthand configurations.
-- Add Chromium regression coverage for editor discovery, rendered values, nested `config-changed` events, and shorthand compatibility.
-- Keep the bridge protocol/state behavior unchanged from RC4.
+- Add the Home Assistant visual editor for keypad entity, model, layout, appearance, sound, haptics, and function-key labels.
+- Preserve advanced YAML-only options and shorthand compatibility.
+- Add Chromium regression coverage for editor behavior.
 
 ## 0.2.6-rc.4
 
-- Add card `0.3.17` with optional low-latency synthesized Web Audio keypad feedback and best-effort browser haptics.
-- Add immediate keypress chirps plus chime, trouble, supervisory, fire, burglary, and auxiliary sound profiles.
-- Add page-level audio unlocking and a small `AUDIO` flag while browser playback remains blocked.
-- Add the First Alert-inspired keypad model with horizontal wide and portrait compact compositions.
-- Add centralized App-level `chime_zones` configuration with zone/range syntax.
-- Generate chimes only for new configured-zone fault transitions while the resolved partition is known to be disarmed; suppress duplicate and armed-state chimes.
-- Add native `burglary_alarm`, `auxiliary_alarm`, and normalized `sound_mode` keypad attributes from validated event families.
-- Keep silent alarm and duress events out of the audible burglary classifier.
-- Invalidate native audible state across panel TCP gaps and stop continuous frontend audio while the keypad entity is unavailable.
-- Make chime counters restart-safe so a bridge sequence reset does not replay a stale chime.
-- Add checked-in browser audio tests and expand Chromium coverage to all three keypad styles.
-- Add an interactive keypad simulator and attach it to release-candidate releases.
-- Ignore generated Node and Playwright test artifacts while retaining a deterministic frontend package lock.
-- Keep all alarm and keypad control read-only.
+- Add optional synthesized keypad audio and browser haptics.
+- Add the First Alert-inspired keypad model.
+- Add centralized `chime_zones` configuration and one-shot disarmed-zone chimes.
+- Add burglary, auxiliary, and normalized sound-mode semantics.
+- Add the interactive keypad simulator and expanded browser tests.
 
 ## 0.2.6-rc.3
 
-- Add card `0.3.15` with a model-agnostic adaptive Lovelace layout system.
-- Make `layout: auto` the default, preserving the physical keypad facsimile above 520 px card-container width and switching to a touchscreen-first compact layout at 520 px and below.
-- Add `layout: physical` and `layout: compact` overrides.
-- Give compact layouts a large LCD, condensed annunciator strip, and 4 x 4 keypad grid with approximately 50 px minimum key height.
-- Hide secondary numeric legends below 320 px before allowing primary key labels or touch targets to become too small.
-- Apply the same adaptive renderer to both 6160CR-2 and 6160 models.
-- Add `MODEL_PROFILES` so future keypad models can declare compact annunciators and function-key labels without implementing a separate mobile UI.
-- Reduce the Home Assistant grid minimum from six columns to four columns because compact mode remains usable at that width.
-- Add real Chromium browser regression tests for wide/compact switching, 390 px and 320 px touch-target dimensions, both model profiles, forced layout modes, AUTO case colors, and Lovelace grid sizing.
-- Keep all alarm and keypad control read-only.
+- Add adaptive Lovelace layouts with `auto`, `physical`, and `compact` modes.
+- Switch to a touchscreen-first compact layout at narrow card widths.
+- Apply the renderer to 6160CR-2, 6160, and future model profiles.
+- Add real Chromium layout and touch-target regression tests.
 
 ## 0.2.6-rc.2
 
-- Harden the 6160/6160CR-2 card for Home Assistant mobile and narrow dashboard layouts.
-- Add ResizeObserver-driven LCD redraws so orientation and Lovelace column changes do not stretch the canvas bitmap.
-- Handle pointer cancellation so touch scrolling cannot leave a keypad key visually pressed.
-- Avoid rebuilding the keypad Shadow DOM for unrelated Home Assistant state changes.
-- Observe browser light/dark theme changes when Home Assistant does not expose an explicit dark-mode value.
-- Add Home Assistant grid sizing hints with a six-column minimum.
-- Require both the bridge MQTT availability topic and the panel TCP connection topic for panel entity availability.
-- Invalidate event-derived Power, Fire Alarm, Silenced, and Supervisory state after a TCP communication gap so stale CR-2 state cannot survive a missed restore event.
-- Stop treating generic panel power-up events as authoritative evidence that AC power is present.
-- Allow a restored fire latch to clear on a later non-fire keypad display even if an unrelated burglary zone keeps READY off.
-- Add focused regression coverage for availability, reconnect state invalidation, AC semantics, and fire-latch clearing.
-- Keep all alarm and keypad control read-only.
+- Harden the keypad cards for mobile and narrow dashboards.
+- Add ResizeObserver-driven LCD redraws, pointer-cancel handling, and theme-aware case updates.
+- Require both bridge and panel availability for panel entities.
+- Invalidate event-derived annunciators after TCP gaps instead of publishing stale state.
 
 ## 0.2.6-rc.1
 
 - Add production 6160CR-2 and 6160 Home Assistant keypad cards.
-- Add CR-2 Power, Fire Alarm, Silenced, Supervisory, and Trouble annunciator state to the keypad entity.
-- Keep Fire Alarm latched across detector restore until keypad reset/normalization clears the condition.
-- Reconstruct Power from AC loss/restore events and Supervisory from supervisory start/restore events.
-- Republish initialized keypad entities immediately after relevant real-time panel events.
-- Add red, white, and dark enclosure colors to both keypad models.
-- Make `case_color: auto` the default for both keypad models and follow Home Assistant light/dark mode.
-- Add optional `day_case_color` and `night_case_color` overrides for AUTO mode.
-- Use model defaults of red/dark for 6160CR-2 and white/dark for 6160.
-- Remove forced keypad minimum heights so Lovelace cards preserve physical aspect ratio in narrow columns.
-- Add narrow-container control scaling for key padding, legends, and function-key positioning.
-- Keep all keypad controls read-only.
+- Add Power, Fire Alarm, Silenced, Supervisory, and Trouble annunciator state.
+- Add red, white, dark, and automatic light/dark enclosure handling.
+- Keep keypad controls read-only in this release.
 
 ## 0.2.5
 
@@ -269,7 +310,7 @@
 ## 0.1.2
 
 - Add a configurable TCP connection timeout (default 5 seconds).
-- Log explicit TCP timeout failures instead of hanging indefinitely in connect().
+- Log explicit TCP timeout failures instead of hanging indefinitely in `connect()`.
 - Include exception class names for non-timeout panel connection failures.
 
 ## 0.1.1
