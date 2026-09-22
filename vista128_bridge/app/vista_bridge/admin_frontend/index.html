@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <title>Vista Turbo</title>
+  <link rel="stylesheet" href="./admin.css">
+  <script defer src="./vista-keypad-card.js"></script>
+  <script defer src="./admin.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <div class="product">Vista Turbo</div>
+      <div id="panel-summary" class="subtle">Loading panel status...</div>
+    </div>
+    <div class="topbar-right">
+      <span id="live-state" class="status-pill unknown">Connecting</span>
+      <span id="user-name" class="user-name"></span>
+    </div>
+  </header>
+
+  <nav class="tabs" aria-label="Vista Turbo management">
+    <button type="button" class="tab active" data-view="overview">Overview</button>
+    <button type="button" class="tab" data-view="keypad">Keypad</button>
+    <button type="button" class="tab" data-view="events">Events</button>
+    <button type="button" class="tab" data-view="diagnostics">Diagnostics</button>
+  </nav>
+
+  <main>
+    <section id="view-overview" class="view active">
+      <div class="section-heading">
+        <div>
+          <h1>System overview</h1>
+          <p>Current authoritative panel and partition state.</p>
+        </div>
+      </div>
+      <div id="overview-summary" class="summary-grid"></div>
+
+      <div class="section-heading compact">
+        <h2>Partitions</h2>
+      </div>
+      <div id="partition-grid" class="partition-grid"></div>
+
+      <div class="section-heading compact">
+        <h2>Latest event</h2>
+      </div>
+      <div id="latest-event" class="surface empty-state">No event received.</div>
+    </section>
+
+    <section id="view-keypad" class="view">
+      <div class="section-heading">
+        <div>
+          <h1>Keypad</h1>
+          <p>Live VISTA keypad display and administrator input.</p>
+        </div>
+        <label class="inline-field">
+          <span>Partition</span>
+          <select id="keypad-partition"></select>
+        </label>
+      </div>
+      <div id="keypad-warning" class="notice" hidden></div>
+      <div class="keypad-shell">
+        <vista-keypad-card id="ingress-keypad"></vista-keypad-card>
+      </div>
+    </section>
+
+    <section id="view-events" class="view">
+      <div class="section-heading">
+        <div>
+          <h1>Event journal</h1>
+          <p>Persistent panel history stored by Vista Turbo.</p>
+        </div>
+        <button id="events-refresh" type="button" class="secondary-button">Refresh</button>
+      </div>
+
+      <form id="event-filters" class="filter-bar">
+        <label>
+          <span>Search</span>
+          <input id="event-search" type="search" maxlength="80" placeholder="Description, descriptor, or code">
+        </label>
+        <label>
+          <span>Partition</span>
+          <select id="event-partition">
+            <option value="0">All</option>
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4">4</option>
+            <option value="5">5</option>
+            <option value="6">6</option>
+            <option value="7">7</option>
+            <option value="8">8</option>
+          </select>
+        </label>
+        <label>
+          <span>Source</span>
+          <select id="event-source">
+            <option value="">All</option>
+            <option value="live">Live only</option>
+            <option value="history">History only</option>
+            <option value="both">Live + history</option>
+          </select>
+        </label>
+        <button type="submit" class="primary-button">Apply</button>
+      </form>
+
+      <div class="surface event-surface">
+        <div id="event-summary" class="event-summary"></div>
+        <div id="event-list" class="event-list"></div>
+        <div class="load-more-row">
+          <button id="event-more" type="button" class="secondary-button" hidden>Load more</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="view-diagnostics" class="view">
+      <div class="section-heading">
+        <div>
+          <h1>Diagnostics</h1>
+          <p>Runtime and interface health. Credentials and raw commands are excluded.</p>
+        </div>
+      </div>
+      <div id="diagnostics-grid" class="diagnostics-grid"></div>
+    </section>
+  </main>
+</body>
+</html>

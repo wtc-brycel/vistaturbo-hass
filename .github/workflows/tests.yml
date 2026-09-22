@@ -23,11 +23,13 @@ jobs:
         with:
           python-version: "3.13"
       - run: python -m unittest discover -s tests -v
+      - run: python -m py_compile app/vista_bridge/admin_server.py app/vista_bridge/admin_snapshot.py
       - run: bash -n run.sh
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "22"
       - run: node --check ../frontend/vista-keypad-card.js
+      - run: node --check app/vista_bridge/admin_frontend/admin.js
 
   frontend-render:
     permissions:
