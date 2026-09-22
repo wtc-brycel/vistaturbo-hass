@@ -10,120 +10,256 @@
   <script defer src="./admin.js"></script>
 </head>
 <body>
-  <header class="topbar">
-    <div>
-      <div class="product">Vista Turbo</div>
-      <div id="panel-summary" class="subtle">Loading panel status...</div>
+  <svg class="svg-sprite" aria-hidden="true">
+    <symbol id="i-overview" viewBox="0 0 24 24">
+      <path d="M12 3 20 6v5c0 5.2-3.2 8.4-8 10-4.8-1.6-8-4.8-8-10V6l8-3Z"/>
+      <path d="m8.5 12 2.2 2.2 4.8-5"/>
+    </symbol>
+    <symbol id="i-keypad" viewBox="0 0 24 24">
+      <rect x="4" y="3" width="16" height="18" rx="2"/>
+      <rect x="7" y="6" width="10" height="4" rx="1"/>
+      <circle cx="8" cy="14" r="1"/><circle cx="12" cy="14" r="1"/><circle cx="16" cy="14" r="1"/>
+      <circle cx="8" cy="18" r="1"/><circle cx="12" cy="18" r="1"/><circle cx="16" cy="18" r="1"/>
+    </symbol>
+    <symbol id="i-history" viewBox="0 0 24 24">
+      <path d="M4 12a8 8 0 1 0 2.3-5.7L4 8.6"/>
+      <path d="M4 4v4.6h4.6M12 7v5l3.5 2"/>
+    </symbol>
+    <symbol id="i-diagnostics" viewBox="0 0 24 24">
+      <path d="M14.7 6.3a4 4 0 0 0-5 5L4 17l3 3 5.7-5.7a4 4 0 0 0 5-5l-2.4 2.4-3-3 2.4-2.4Z"/>
+    </symbol>
+    <symbol id="i-check" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="9"/><path d="m8 12 2.7 2.7L16.5 9"/>
+    </symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24">
+      <path d="M12 3 22 20H2L12 3Z"/><path d="M12 9v5M12 17h.01"/>
+    </symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24">
+      <path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.2 8.2A7 7 0 0 1 18.5 9M17.8 15.8A7 7 0 0 1 5.5 15"/>
+    </symbol>
+  </svg>
+
+  <header class="app-header">
+    <div class="brand-block">
+      <div class="brand-mark" aria-hidden="true">VT</div>
+      <div>
+        <div class="product">VISTA TURBO</div>
+        <div class="product-subtitle">VISTA-128BPT MANAGEMENT</div>
+      </div>
     </div>
-    <div class="topbar-right">
-      <span id="live-state" class="status-pill unknown">Connecting</span>
+    <div class="header-right">
+      <span id="socket-state" class="socket-state"><span class="socket-dot"></span>Ingress</span>
       <span id="user-name" class="user-name"></span>
     </div>
   </header>
 
-  <nav class="tabs" aria-label="Vista Turbo management">
-    <button type="button" class="tab active" data-view="overview">Overview</button>
-    <button type="button" class="tab" data-view="keypad">Keypad</button>
-    <button type="button" class="tab" data-view="events">Events</button>
-    <button type="button" class="tab" data-view="diagnostics">Diagnostics</button>
-  </nav>
+  <section id="system-banner" class="system-banner state-unknown">
+    <div class="system-banner-main">
+      <svg class="system-icon"><use id="system-icon-use" href="#i-alert"></use></svg>
+      <div>
+        <div class="system-kicker">SYSTEM STATUS</div>
+        <div id="system-state-title" class="system-state-title">CONNECTING</div>
+        <div id="system-state-detail" class="system-state-detail">Waiting for panel state</div>
+      </div>
+    </div>
+    <div class="system-context">
+      <div class="context-block">
+        <span>PANEL</span>
+        <strong id="context-panel">UNKNOWN</strong>
+      </div>
+      <div class="context-block">
+        <span>AUTOMATION</span>
+        <strong id="context-automation">UNKNOWN</strong>
+      </div>
+      <div class="context-block">
+        <span>AC POWER</span>
+        <strong id="context-power">UNKNOWN</strong>
+      </div>
+      <div class="context-block">
+        <span>STATE</span>
+        <strong id="context-freshness">UNKNOWN</strong>
+      </div>
+    </div>
+  </section>
 
-  <main>
-    <section id="view-overview" class="view active">
-      <div class="section-heading">
-        <div>
-          <h1>System overview</h1>
-          <p>Current authoritative panel and partition state.</p>
+  <div class="admin-shell">
+    <nav class="side-nav" aria-label="Vista Turbo management">
+      <button type="button" class="nav-button active" data-view="overview">
+        <svg class="nav-icon"><use href="#i-overview"></use></svg>
+        <span>Overview</span>
+      </button>
+      <button type="button" class="nav-button" data-view="keypad">
+        <svg class="nav-icon"><use href="#i-keypad"></use></svg>
+        <span>Keypad</span>
+      </button>
+      <button type="button" class="nav-button" data-view="events">
+        <svg class="nav-icon"><use href="#i-history"></use></svg>
+        <span>Event Journal</span>
+      </button>
+      <button type="button" class="nav-button" data-view="diagnostics">
+        <svg class="nav-icon"><use href="#i-diagnostics"></use></svg>
+        <span>Diagnostics</span>
+      </button>
+    </nav>
+
+    <main class="workspace">
+      <section id="view-overview" class="view active">
+        <div class="screen-header">
+          <div>
+            <div class="eyebrow">OPERATIONS</div>
+            <h1>Overview</h1>
+          </div>
+          <div id="overview-sync" class="screen-meta">No synchronization recorded</div>
         </div>
-      </div>
-      <div id="overview-summary" class="summary-grid"></div>
 
-      <div class="section-heading compact">
-        <h2>Partitions</h2>
-      </div>
-      <div id="partition-grid" class="partition-grid"></div>
+        <div class="overview-layout">
+          <section class="surface conditions-surface">
+            <div class="section-bar">
+              <h2>Current conditions</h2>
+              <span id="condition-summary" class="section-state">UNKNOWN</span>
+            </div>
+            <div class="indicator-strip">
+              <div class="indicator-item">
+                <span id="indicator-power" class="indicator-lamp unknown"></span>
+                <span>POWER</span>
+                <strong id="indicator-power-text">Unknown</strong>
+              </div>
+              <div class="indicator-item">
+                <span id="indicator-battery" class="indicator-lamp unknown"></span>
+                <span>BATTERY</span>
+                <strong id="indicator-battery-text">Unknown</strong>
+              </div>
+              <div class="indicator-item">
+                <span id="indicator-automation" class="indicator-lamp unknown"></span>
+                <span>AUTOMATION</span>
+                <strong id="indicator-automation-text">Unknown</strong>
+              </div>
+              <div class="indicator-item">
+                <span id="indicator-snapshot" class="indicator-lamp unknown"></span>
+                <span>SNAPSHOT</span>
+                <strong id="indicator-snapshot-text">Unknown</strong>
+              </div>
+            </div>
+            <div id="active-conditions" class="condition-list"></div>
+          </section>
 
-      <div class="section-heading compact">
-        <h2>Latest event</h2>
-      </div>
-      <div id="latest-event" class="surface empty-state">No event received.</div>
-    </section>
-
-    <section id="view-keypad" class="view">
-      <div class="section-heading">
-        <div>
-          <h1>Keypad</h1>
-          <p>Live VISTA keypad display and administrator input.</p>
+          <section class="surface latest-surface">
+            <div class="section-bar">
+              <h2>Latest event</h2>
+              <span id="latest-event-code" class="event-code-badge">--</span>
+            </div>
+            <div id="latest-event" class="latest-event empty-state">No event received.</div>
+          </section>
         </div>
-        <label class="inline-field">
-          <span>Partition</span>
-          <select id="keypad-partition"></select>
-        </label>
-      </div>
-      <div id="keypad-warning" class="notice" hidden></div>
-      <div class="keypad-shell">
-        <vista-keypad-card id="ingress-keypad"></vista-keypad-card>
-      </div>
-    </section>
 
-    <section id="view-events" class="view">
-      <div class="section-heading">
-        <div>
-          <h1>Event journal</h1>
-          <p>Persistent panel history stored by Vista Turbo.</p>
+        <section class="surface partition-surface">
+          <div class="section-bar">
+            <h2>Partitions</h2>
+            <span>Panel-reported state</span>
+          </div>
+          <div class="data-table partition-table" role="table" aria-label="Partitions">
+            <div class="table-head" role="row">
+              <div>PARTITION</div>
+              <div>MODE</div>
+              <div>READY</div>
+              <div>CONDITION</div>
+            </div>
+            <div id="partition-grid" class="table-body"></div>
+          </div>
+        </section>
+      </section>
+
+      <section id="view-keypad" class="view">
+        <div class="screen-header">
+          <div>
+            <div class="eyebrow">OPERATOR INTERFACE</div>
+            <h1>Keypad</h1>
+          </div>
+          <label class="compact-field">
+            <span>PARTITION</span>
+            <select id="keypad-partition"></select>
+          </label>
         </div>
-        <button id="events-refresh" type="button" class="secondary-button">Refresh</button>
-      </div>
 
-      <form id="event-filters" class="filter-bar">
-        <label>
-          <span>Search</span>
-          <input id="event-search" type="search" maxlength="80" placeholder="Description, descriptor, or code">
-        </label>
-        <label>
-          <span>Partition</span>
-          <select id="event-partition">
-            <option value="0">All</option>
-            <option value="1">1</option>
-            <option value="2">2</option>
-            <option value="3">3</option>
-            <option value="4">4</option>
-            <option value="5">5</option>
-            <option value="6">6</option>
-            <option value="7">7</option>
-            <option value="8">8</option>
-          </select>
-        </label>
-        <label>
-          <span>Source</span>
-          <select id="event-source">
-            <option value="">All</option>
-            <option value="live">Live only</option>
-            <option value="history">History only</option>
-            <option value="both">Live + history</option>
-          </select>
-        </label>
-        <button type="submit" class="primary-button">Apply</button>
-      </form>
+        <div id="keypad-warning" class="notice" hidden></div>
 
-      <div class="surface event-surface">
-        <div id="event-summary" class="event-summary"></div>
-        <div id="event-list" class="event-list"></div>
-        <div class="load-more-row">
-          <button id="event-more" type="button" class="secondary-button" hidden>Load more</button>
+        <section class="surface keypad-surface">
+          <vista-keypad-card id="ingress-keypad"></vista-keypad-card>
+        </section>
+      </section>
+
+      <section id="view-events" class="view">
+        <div class="screen-header">
+          <div>
+            <div class="eyebrow">PANEL HISTORY</div>
+            <h1>Event Journal</h1>
+          </div>
+          <div id="journal-header-meta" class="screen-meta">Loading journal state</div>
         </div>
-      </div>
-    </section>
 
-    <section id="view-diagnostics" class="view">
-      <div class="section-heading">
-        <div>
-          <h1>Diagnostics</h1>
-          <p>Runtime and interface health. Credentials and raw commands are excluded.</p>
+        <form id="event-filters" class="table-toolbar">
+          <div class="toolbar-search">
+            <input id="event-search" type="search" maxlength="80" placeholder="Search journal">
+          </div>
+          <label class="compact-field">
+            <span>WHERE</span>
+            <select id="event-partition">
+              <option value="0">All partitions</option>
+              <option value="1">Partition 1</option>
+              <option value="2">Partition 2</option>
+              <option value="3">Partition 3</option>
+              <option value="4">Partition 4</option>
+              <option value="5">Partition 5</option>
+              <option value="6">Partition 6</option>
+              <option value="7">Partition 7</option>
+              <option value="8">Partition 8</option>
+            </select>
+          </label>
+          <label class="compact-field">
+            <span>SOURCE</span>
+            <select id="event-source">
+              <option value="">All sources</option>
+              <option value="live">Live only</option>
+              <option value="history">Panel history only</option>
+              <option value="both">Seen live + history</option>
+            </select>
+          </label>
+          <button type="submit" class="primary-button">Apply</button>
+          <button id="events-refresh" type="button" class="icon-button" aria-label="Refresh event journal">
+            <svg><use href="#i-refresh"></use></svg>
+          </button>
+        </form>
+
+        <section class="surface journal-surface">
+          <div id="event-summary" class="journal-summary"></div>
+          <div class="data-table event-table" role="table" aria-label="Event journal">
+            <div class="table-head event-head" role="row">
+              <div>TIME</div>
+              <div>CODE</div>
+              <div>EVENT</div>
+              <div>SOURCE</div>
+            </div>
+            <div id="event-list" class="table-body event-list"></div>
+          </div>
+          <div class="load-more-row">
+            <button id="event-more" type="button" class="secondary-button" hidden>Load more</button>
+          </div>
+        </section>
+      </section>
+
+      <section id="view-diagnostics" class="view">
+        <div class="screen-header">
+          <div>
+            <div class="eyebrow">ADMINISTRATION</div>
+            <h1>System Information</h1>
+          </div>
+          <div id="diagnostic-version" class="screen-meta"></div>
         </div>
-      </div>
-      <div id="diagnostics-grid" class="diagnostics-grid"></div>
-    </section>
-  </main>
+        <section class="surface diagnostic-sheet">
+          <div id="diagnostics-grid" class="diagnostics-grid"></div>
+        </section>
+      </section>
+    </main>
+  </div>
 </body>
 </html>

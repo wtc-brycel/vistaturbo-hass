@@ -65,78 +65,233 @@ function summaryCard(label, value, detail = "") {
   return card;
 }
 
+
+function systemCondition(snapshot) {
+  if (!snapshot.panel.connected) {
+    return { kind: "offline", title: "PANEL OFFLINE", detail: "Panel TCP connection unavailable", icon: "#i-alert" };
+  }
+
+  const partitions = Object.values(snapshot.partitions || {});
+  if (partitions.some((partition) => partition.fire_alarm_active)) {
+    return { kind: "fire", title: "FIRE ALARM", detail: "One or more partitions report an active fire alarm", icon: "#i-alert" };
+  }
+  if (partitions.some((partition) =>
+    partition.burglary_alarm_active ||
+    partition.auxiliary_alarm_active ||
+    partition.panic_audible_alarm_active ||
+    partition.silent_alarm_active ||
+    partition.duress_alarm_active
+  )) {
+    return { kind: "security", title: "SECURITY ALARM", detail: "One or more partitions report an active security alarm", icon: "#i-alert" };
+  }
+  if (partitions.some((partition) => partition.supervisory_active)) {
+    return { kind: "supervisory", title: "SUPERVISORY", detail: "A supervisory condition is active", icon: "#i-alert" };
+  }
+  if (
+    Number(snapshot.system.active_global_trouble_count || 0) > 0 ||
+    snapshot.system.ac_power === false ||
+    snapshot.system.battery_low === true
+  ) {
+    return { kind: "trouble", title: "SYSTEM TROUBLE", detail: "A system trouble condition is active", icon: "#i-alert" };
+  }
+  if (!snapshot.panel.state_fresh) {
+    return { kind: "syncing", title: "SYNCHRONIZING", detail: "Panel connected; waiting for an authoritative state snapshot", icon: "#i-alert" };
+  }
+  return { kind: "normal", title: "SYSTEM NORMAL", detail: "No active alarm, supervisory, or trouble conditions", icon: "#i-check" };
+}
+
+function renderSystemBanner(snapshot) {
+  const condition = systemCondition(snapshot);
+  const banner = byId("system-banner");
+  banner.className = "system-banner state-" + condition.kind;
+  byId("system-state-title").textContent = condition.title;
+  byId("system-state-detail").textContent = condition.detail;
+  byId("system-icon-use").setAttribute("href", condition.icon);
+
+  byId("context-panel").textContent = snapshot.panel.connected ? "ONLINE" : "OFFLINE";
+  byId("context-automation").textContent = snapshot.panel.automation_available ? "AVAILABLE" : "UNAVAILABLE";
+  byId("context-power").textContent =
+    snapshot.system.ac_power === true ? "NORMAL" :
+    snapshot.system.ac_power === false ? "LOSS" :
+    "UNKNOWN";
+  byId("context-freshness").textContent =
+    !snapshot.panel.connected ? "UNAVAILABLE" :
+    snapshot.panel.state_fresh ? "CURRENT" :
+    "SYNCING";
+}
+
+function setIndicator(name, className, label) {
+  byId("indicator-" + name).className = "indicator-lamp " + className;
+  byId("indicator-" + name + "-text").textContent = label;
+}
+
+function conditionRow(kind, title, detail, state) {
+  const row = node("div", "condition-row " + kind);
+  const copy = node("div", "condition-copy");
+  copy.append(
+    node("div", "condition-title", title),
+    node("div", "condition-detail", detail),
+  );
+  row.append(
+    node("span", "condition-accent"),
+    copy,
+    node("div", "condition-state", state || "ACTIVE"),
+  );
+  return row;
+}
+
+function partitionCondition(partition) {
+  if (partition.fire_alarm_active) return { kind: "fire", text: "FIRE ALARM" };
+  if (partition.supervisory_active) return { kind: "supervisory", text: "SUPERVISORY" };
+  if (
+    partition.burglary_alarm_active ||
+    partition.auxiliary_alarm_active ||
+    partition.panic_audible_alarm_active ||
+    partition.silent_alarm_active ||
+    partition.duress_alarm_active
+  ) {
+    return { kind: "security", text: "ALARM" };
+  }
+  return { kind: "normal", text: "NORMAL" };
+}
+
+function eventKind(event) {
+  const description = String(event?.description || "").toLowerCase();
+  if (/(restore|restoral|normal|cleared)/.test(description)) return "restore";
+  if (/(fire|smoke|waterflow|heat alarm)/.test(description)) return "fire";
+  if (/(supervis)/.test(description)) return "supervisory";
+  if (/(burgl|duress|panic|hold.?up|silent alarm|auxiliary alarm)/.test(description)) return "security";
+  if (/(trouble|fail|loss|low bat|battery|tamper|check)/.test(description)) return "trouble";
+  return "neutral";
+}
+
 function renderOverview(snapshot) {
-  const summary = byId("overview-summary");
-  clear(summary);
-  summary.append(
-    summaryCard(
-      "Panel",
-      snapshot.panel.connected ? "Online" : "Offline",
-      snapshot.panel.state_fresh ? "State snapshot current" : "State snapshot incomplete",
-    ),
-    summaryCard(
-      "Automation",
-      snapshot.panel.automation_available ? "Available" : "Unavailable",
-      text(snapshot.panel.automation_availability_source, "Unknown source"),
-    ),
-    summaryCard(
-      "Journal",
-      snapshot.journal.enabled ? number(snapshot.journal.count) : "Disabled",
-      snapshot.journal.last_dump_at
-        ? `Last panel dump ${dateTime(snapshot.journal.last_dump_at)}`
-        : "No panel history dump recorded",
-    ),
-    summaryCard(
-      "System",
-      snapshot.system.active_global_alarm_count ? "Alarm" : "Normal",
-      `AC: ${yesNo(snapshot.system.ac_power)} | Battery low: ${yesNo(snapshot.system.battery_low)}`,
-    ),
+  byId("overview-sync").textContent = snapshot.synchronizer.last_success_at
+    ? "Last reconciliation " + dateTime(snapshot.synchronizer.last_success_at)
+    : "No reconciliation recorded";
+
+  setIndicator(
+    "power",
+    snapshot.system.ac_power === true ? "ok" : snapshot.system.ac_power === false ? "warning" : "unknown",
+    snapshot.system.ac_power === true ? "Normal" : snapshot.system.ac_power === false ? "AC loss" : "Unknown",
+  );
+  setIndicator(
+    "battery",
+    snapshot.system.battery_low === false ? "ok" : snapshot.system.battery_low === true ? "warning" : "unknown",
+    snapshot.system.battery_low === false ? "Normal" : snapshot.system.battery_low === true ? "Low" : "Unknown",
+  );
+  setIndicator(
+    "automation",
+    snapshot.panel.automation_available ? "ok" : "off",
+    snapshot.panel.automation_available ? "Available" : "Unavailable",
+  );
+  setIndicator(
+    "snapshot",
+    snapshot.panel.state_fresh ? "ok" : "warning",
+    snapshot.panel.state_fresh ? "Current" : "Synchronizing",
   );
 
-  const grid = byId("partition-grid");
-  clear(grid);
+  const conditions = byId("active-conditions");
+  clear(conditions);
+  let activeCount = 0;
+
+  if (snapshot.system.ac_power === false) {
+    conditions.append(conditionRow("trouble", "AC POWER LOSS", "Panel AC power is not present"));
+    activeCount += 1;
+  }
+  if (snapshot.system.battery_low === true) {
+    conditions.append(conditionRow("trouble", "SYSTEM BATTERY LOW", "Panel battery condition is active"));
+    activeCount += 1;
+  }
+  if (Number(snapshot.system.active_global_trouble_count || 0) > 0) {
+    const count = Number(snapshot.system.active_global_trouble_count || 0);
+    conditions.append(conditionRow("trouble", "SYSTEM TROUBLE", count + " active trouble condition" + (count === 1 ? "" : "s")));
+    activeCount += 1;
+  }
+
   Object.entries(snapshot.partitions || {}).forEach(([partitionNumber, partition]) => {
-    const card = node("div", "partition-card");
-    const top = node("div", "partition-top");
-    top.append(
-      node("div", "partition-name", `Partition ${partitionNumber}`),
-      node("div", "partition-mode", text(partition.vista_mode)),
-    );
-    const flags = node("div", "partition-flags");
-    const ready = node("span", `flag ${partition.ready ? "ready" : ""}`, partition.ready ? "READY" : "NOT READY");
-    flags.append(ready);
-    if (partition.fire_alarm_active) flags.append(node("span", "flag alarm", "FIRE"));
-    if (partition.supervisory_active) flags.append(node("span", "flag alarm", "SUPERVISORY"));
-    if (partition.burglary_alarm_active) flags.append(node("span", "flag alarm", "BURGLARY"));
-    if (partition.auxiliary_alarm_active) flags.append(node("span", "flag alarm", "AUX"));
-    if (!partition.has_active_alarm) flags.append(node("span", "flag", "NO ACTIVE ALARM"));
-    card.append(top, flags);
-    grid.append(card);
+    const detail = "Partition " + partitionNumber;
+    if (partition.fire_alarm_active) {
+      conditions.append(conditionRow("fire", "FIRE ALARM", detail));
+      activeCount += 1;
+    }
+    if (partition.supervisory_active) {
+      conditions.append(conditionRow("supervisory", "SUPERVISORY", detail));
+      activeCount += 1;
+    }
+    if (partition.burglary_alarm_active) {
+      conditions.append(conditionRow("security", "BURGLARY ALARM", detail));
+      activeCount += 1;
+    }
+    if (partition.auxiliary_alarm_active) {
+      conditions.append(conditionRow("security", "AUXILIARY ALARM", detail));
+      activeCount += 1;
+    }
+    if (partition.panic_audible_alarm_active) {
+      conditions.append(conditionRow("security", "AUDIBLE PANIC", detail));
+      activeCount += 1;
+    }
+    if (partition.silent_alarm_active) {
+      conditions.append(conditionRow("security", "SILENT ALARM", detail));
+      activeCount += 1;
+    }
+    if (partition.duress_alarm_active) {
+      conditions.append(conditionRow("security", "DURESS", detail));
+      activeCount += 1;
+    }
   });
+
+  if (!activeCount) {
+    const current = snapshot.panel.state_fresh;
+    conditions.append(
+      conditionRow(
+        current ? "normal" : "trouble",
+        current ? "SYSTEM NORMAL" : "STATE NOT CURRENT",
+        current ? "No active conditions" : "Authoritative panel snapshot is not complete",
+        current ? "NORMAL" : "PENDING",
+      ),
+    );
+  }
+  byId("condition-summary").textContent = activeCount ? activeCount + " ACTIVE" : "NORMAL";
 
   const latest = byId("latest-event");
   clear(latest);
   const event = snapshot.last_event;
   if (!event) {
-    latest.className = "surface empty-state";
+    latest.className = "latest-event empty-state";
     latest.textContent = "No event received.";
+    byId("latest-event-code").textContent = "--";
   } else {
-    latest.className = "surface";
-    const descriptor = event.descriptor ? ` - ${event.descriptor}` : "";
-    latest.append(
-      node("div", "latest-title", `${event.description} [${event.event_code}]${descriptor}`),
-      node(
-        "div",
-        "latest-meta",
-        [
-          event.panel_timestamp ? panelDateTime(event.panel_timestamp) : null,
-          event.partition ? `Partition ${event.partition}` : null,
-          event.zone ? `Zone ${String(event.zone).padStart(3, "0")}` : null,
-          event.user ? `User ${String(event.user).padStart(3, "0")}` : null,
-        ].filter(Boolean).join(" | "),
-      ),
-    );
+    latest.className = "latest-event " + eventKind(event);
+    byId("latest-event-code").textContent = text(event.event_code, "--");
+    latest.append(node("div", "latest-event-title", text(event.description, "Unknown event")));
+    if (event.descriptor) latest.append(node("div", "latest-event-descriptor", event.descriptor));
+
+    const meta = [
+      event.panel_timestamp ? panelDateTime(event.panel_timestamp) : null,
+      event.partition ? "PARTITION " + event.partition : null,
+      event.zone ? "ZONE " + String(event.zone).padStart(3, "0") : null,
+      event.user ? "USER " + String(event.user).padStart(3, "0") : null,
+    ].filter(Boolean).join("  ·  ");
+    latest.append(node("div", "latest-event-meta", meta));
   }
+
+  const partitions = byId("partition-grid");
+  clear(partitions);
+  Object.entries(snapshot.partitions || {}).forEach(([partitionNumber, partition]) => {
+    const condition = snapshot.panel.state_fresh
+      ? partitionCondition(partition)
+      : { kind: "unknown", text: "STATE STALE" };
+
+    const row = node("div", "table-row");
+    row.append(
+      node("div", "partition-number", "Partition " + partitionNumber),
+      node("div", "partition-mode", text(partition.vista_mode).replaceAll("_", " ")),
+      node("div", "", partition.ready ? "YES" : "NO"),
+      node("div", "state-label " + condition.kind, condition.text),
+    );
+    partitions.append(row);
+  });
 }
 
 function diagnosticCard(title, entries) {
@@ -322,29 +477,34 @@ function renderKeypad(snapshot) {
   card.hass = buildIngressHass(snapshot, appState.keypadPartition);
 }
 
+
 function renderHeader(snapshot) {
-  const summary = snapshot.panel.connected
-    ? `${snapshot.panel.host}:${snapshot.panel.port} | ${snapshot.panel.state_fresh ? "state current" : "state synchronizing"}`
-    : `${snapshot.panel.host}:${snapshot.panel.port} | disconnected`;
-  byId("panel-summary").textContent = summary;
   byId("user-name").textContent =
     snapshot.user?.display_name || snapshot.user?.name || snapshot.user?.id || "";
+}
 
-  if (!snapshot.panel.connected) {
-    setStatusPill(byId("live-state"), "Offline", "offline");
-  } else if (!snapshot.panel.state_fresh) {
-    setStatusPill(byId("live-state"), "Synchronizing", "warning");
-  } else {
-    setStatusPill(byId("live-state"), "Online", "online");
-  }
+function journalHeader(snapshot) {
+  if (!snapshot.journal.enabled) return "Journal disabled";
+  const dump = snapshot.journal.last_dump_at
+    ? " · Last panel dump " + dateTime(snapshot.journal.last_dump_at)
+    : "";
+  return number(snapshot.journal.count) + " rows retained" + dump;
 }
 
 function applySnapshot(snapshot) {
   appState.snapshot = snapshot;
   renderHeader(snapshot);
+  renderSystemBanner(snapshot);
   renderOverview(snapshot);
   renderDiagnostics(snapshot);
   renderKeypad(snapshot);
+  byId("journal-header-meta").textContent = journalHeader(snapshot);
+  if (byId("diagnostic-version")) {
+    byId("diagnostic-version").textContent = "Vista Turbo " + snapshot.app.version;
+  }
+  if (document.querySelector(".nav-button.active")?.dataset.view === "events") {
+    renderEvents();
+  }
 }
 
 async function loadInitialSnapshot() {
@@ -355,9 +515,9 @@ async function loadInitialSnapshot() {
 
 function switchView(view) {
   document.querySelectorAll(".view").forEach((element) => {
-    element.classList.toggle("active", element.id === `view-${view}`);
+    element.classList.toggle("active", element.id === "view-" + view);
   });
-  document.querySelectorAll(".tab").forEach((element) => {
+  document.querySelectorAll(".nav-button").forEach((element) => {
     element.classList.toggle("active", element.dataset.view === view);
   });
   if (view === "events" && !appState.eventRows.length) {
@@ -380,7 +540,7 @@ function renderEvents() {
     list.append(node("div", "event-empty", "No events match the current filters."));
   } else {
     appState.eventRows.forEach((event) => {
-      const row = node("div", "event-row");
+      const row = node("div", "event-row " + eventKind(event));
       const timeNode = node("div", "event-time", event.panel_timestamp ? panelDateTime(event.panel_timestamp) : dateTime(event.received_at));
       const codeNode = node("div", "event-code", text(event.event_code, "??"));
       const detail = node("div", "");
@@ -432,6 +592,15 @@ function showEventError(error) {
   byId("event-summary").textContent = error?.message || "Could not load event journal.";
 }
 
+
+function setSocketState(state, label) {
+  const element = byId("socket-state");
+  element.className = "socket-state " + state;
+  const textNode = Array.from(element.childNodes).find((item) => item.nodeType === Node.TEXT_NODE);
+  if (textNode) textNode.nodeValue = label;
+  else element.append(document.createTextNode(label));
+}
+
 function connectSocket() {
   const url = endpoint("ws");
   url.protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -439,7 +608,7 @@ function connectSocket() {
   appState.socket = socket;
 
   socket.addEventListener("open", () => {
-    if (!appState.snapshot) setStatusPill(byId("live-state"), "Connected", "unknown");
+    setSocketState("online", "Ingress live");
   });
 
   socket.addEventListener("message", (event) => {
@@ -453,12 +622,16 @@ function connectSocket() {
 
   socket.addEventListener("close", () => {
     if (appState.socket === socket) appState.socket = null;
-    setStatusPill(byId("live-state"), "Reconnecting", "warning");
+    setSocketState("warning", "Reconnecting");
     window.setTimeout(connectSocket, 3000);
+  });
+
+  socket.addEventListener("error", () => {
+    setSocketState("offline", "Ingress unavailable");
   });
 }
 
-document.querySelectorAll(".tab").forEach((button) => {
+document.querySelectorAll(".nav-button").forEach((button) => {
   button.addEventListener("click", () => switchView(button.dataset.view));
 });
 
@@ -472,9 +645,20 @@ byId("event-filters").addEventListener("submit", (event) => {
   event.preventDefault();
   loadEvents(true).catch(showEventError);
 });
-byId("events-refresh").addEventListener("click", () => loadEvents(true).catch(showEventError));
-byId("event-more").addEventListener("click", () => loadEvents(false).catch(showEventError));
+
+byId("events-refresh").addEventListener("click", () => {
+  loadEvents(true).catch(showEventError);
+});
+
+byId("event-more").addEventListener("click", () => {
+  loadEvents(false).catch(showEventError);
+});
 
 loadInitialSnapshot()
-  .catch(() => setStatusPill(byId("live-state"), "Unavailable", "offline"))
+  .catch(() => {
+    setSocketState("offline", "Ingress unavailable");
+    byId("system-banner").className = "system-banner state-offline";
+    byId("system-state-title").textContent = "STATUS UNAVAILABLE";
+    byId("system-state-detail").textContent = "Could not load Vista Turbo runtime state";
+  })
   .finally(connectSocket);
