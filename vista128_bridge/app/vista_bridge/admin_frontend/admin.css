@@ -41,85 +41,6 @@ button { color: inherit; }
   overflow: hidden;
 }
 
-.app-header {
-  min-height: 64px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 18px;
-  padding: 9px 22px;
-  background: var(--shell-dark);
-  color: #f5f7f8;
-  border-bottom: 1px solid #162028;
-}
-
-.brand-block {
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  min-width: 0;
-}
-
-.brand-mark {
-  width: 39px;
-  height: 39px;
-  display: grid;
-  place-items: center;
-  border: 1px solid #70808a;
-  background: #172229;
-  font-size: 13px;
-  font-weight: 800;
-  letter-spacing: .08em;
-}
-
-.product {
-  font-size: 19px;
-  line-height: 1;
-  font-weight: 750;
-  letter-spacing: .02em;
-}
-
-.product-subtitle {
-  margin-top: 5px;
-  color: #b7c2c9;
-  font-size: 9px;
-  line-height: 1;
-  font-weight: 700;
-  letter-spacing: .13em;
-}
-
-.header-right {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  color: #c8d0d5;
-  font-size: 12px;
-}
-
-.socket-state {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.socket-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #7b8790;
-}
-
-.socket-state.online .socket-dot { background: #61b978; }
-.socket-state.warning .socket-dot { background: #e4a340; }
-.socket-state.offline .socket-dot { background: #e06868; }
-
-.user-name {
-  max-width: 180px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .system-banner {
   min-height: 78px;
   display: grid;
@@ -129,7 +50,7 @@ button { color: inherit; }
 }
 
 .system-banner.state-normal { background: var(--success-color); }
-.system-banner.state-fire { background: var(--error-color); }
+.system-banner.state-fire, .system-banner.state-alarm { background: var(--error-color); }
 .system-banner.state-security { background: var(--security-color); }
 .system-banner.state-supervisory { background: var(--supervisory-color); color: #161616; }
 .system-banner.state-trouble { background: var(--warning-color); }
@@ -156,11 +77,6 @@ button { color: inherit; }
   stroke-linejoin: round;
 }
 
-.system-kicker {
-  font-size: 9px;
-  font-weight: 800;
-  letter-spacing: .14em;
-}
 
 .system-state-title {
   margin-top: 2px;
@@ -211,7 +127,7 @@ button { color: inherit; }
 }
 
 .admin-shell {
-  min-height: calc(100vh - 142px);
+  min-height: calc(100vh - 78px);
   display: grid;
   grid-template-columns: 176px minmax(0, 1fr);
 }
@@ -279,12 +195,6 @@ button { color: inherit; }
   margin-bottom: 14px;
 }
 
-.eyebrow {
-  color: var(--secondary-text-color);
-  font-size: 9px;
-  font-weight: 800;
-  letter-spacing: .14em;
-}
 
 h1 {
   margin: 4px 0 0;
@@ -937,8 +847,6 @@ button:focus-visible {
 }
 
 @media (max-width: 520px) {
-  .app-header { padding: 9px 13px; }
-  .user-name { display: none; }
 
   .system-banner-main { padding: 11px 13px; }
 
@@ -1125,3 +1033,34 @@ button:focus-visible {
     display: none;
   }
 }
+
+/* Operational refinements: no secondary branding header. */
+[hidden] { display: none !important; }
+.system-banner.state-fire-silenced { background: var(--muted-alarm); }
+.system-banner.state-bypass { background: var(--disabled-color); }
+.system-banner.state-fault { background: #59666f; }
+.condition-row.alarm .condition-accent { background: var(--error-color); }
+.condition-row.bypass .condition-accent { background: var(--disabled-color); }
+.condition-row.fault .condition-accent { background: var(--warning-color); }
+.state-label.alarm::before { background: var(--error-color); }
+.state-label.bypass::before { background: var(--disabled-color); }
+.state-label.fault::before { background: var(--warning-color); }
+.system-state-detail:empty, .condition-detail:empty { display: none; }
+.screen-header { min-height: 36px; }
+.table-head { position: sticky; top: 0; z-index: 1; }
+.event-list { max-height: 65vh; overflow-y: auto; }
+button:disabled { cursor: default; opacity: .55; }
+.notice.success { background: var(--surface-alt); color: var(--primary-text-color); border-color: var(--divider-color); }
+@media (max-width: 760px) {
+  .nav-button { flex-direction: column; gap: 4px; }
+  .nav-button span { display: block; font-size: 10px; }
+}
+@media (min-width: 521px) and (max-width: 760px) {
+  .event-head, .event-list .event-row { grid-template-columns: 104px 44px minmax(0, 1fr) 72px !important; }
+}
+@media (max-width: 520px) {
+  .partition-table .table-head, .partition-table .table-row { grid-template-columns: 75px minmax(72px, 1fr) minmax(88px, 1fr); }
+  .table-row { font-size: 11px; gap: 5px; }
+}
+
+.load-more-row { gap: 8px; }

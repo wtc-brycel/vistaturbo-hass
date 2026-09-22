@@ -39,27 +39,12 @@
     </symbol>
   </svg>
 
-  <header class="app-header">
-    <div class="brand-block">
-      <div class="brand-mark" aria-hidden="true">VT</div>
-      <div>
-        <div class="product">VISTA TURBO</div>
-        <div class="product-subtitle">VISTA-128BPT MANAGEMENT</div>
-      </div>
-    </div>
-    <div class="header-right">
-      <span id="socket-state" class="socket-state"><span class="socket-dot"></span>Ingress</span>
-      <span id="user-name" class="user-name"></span>
-    </div>
-  </header>
-
   <section id="system-banner" class="system-banner state-unknown">
     <div class="system-banner-main">
       <svg class="system-icon"><use id="system-icon-use" href="#i-alert"></use></svg>
       <div>
-        <div class="system-kicker">SYSTEM STATUS</div>
-        <div id="system-state-title" class="system-state-title">CONNECTING</div>
-        <div id="system-state-detail" class="system-state-detail">Waiting for panel state</div>
+        <div id="system-state-title" class="system-state-title" role="status">CONNECTING</div>
+        <div id="system-state-detail" class="system-state-detail"></div>
       </div>
     </div>
     <div class="system-context">
@@ -84,19 +69,19 @@
 
   <div class="admin-shell">
     <nav class="side-nav" aria-label="Vista Turbo management">
-      <button type="button" class="nav-button active" data-view="overview">
+      <button type="button" class="nav-button active" data-view="overview" aria-label="Overview">
         <svg class="nav-icon"><use href="#i-overview"></use></svg>
         <span>Overview</span>
       </button>
-      <button type="button" class="nav-button" data-view="keypad">
+      <button type="button" class="nav-button" data-view="keypad" aria-label="Keypad">
         <svg class="nav-icon"><use href="#i-keypad"></use></svg>
         <span>Keypad</span>
       </button>
-      <button type="button" class="nav-button" data-view="events">
+      <button type="button" class="nav-button" data-view="events" aria-label="Event Journal">
         <svg class="nav-icon"><use href="#i-history"></use></svg>
         <span>Event Journal</span>
       </button>
-      <button type="button" class="nav-button" data-view="diagnostics">
+      <button type="button" class="nav-button" data-view="diagnostics" aria-label="Diagnostics">
         <svg class="nav-icon"><use href="#i-diagnostics"></use></svg>
         <span>Diagnostics</span>
       </button>
@@ -106,10 +91,9 @@
       <section id="view-overview" class="view active">
         <div class="screen-header">
           <div>
-            <div class="eyebrow">OPERATIONS</div>
             <h1>Overview</h1>
           </div>
-          <div id="overview-sync" class="screen-meta">No synchronization recorded</div>
+          <div id="overview-sync" class="screen-meta"></div>
         </div>
 
         <div class="overview-layout">
@@ -136,7 +120,7 @@
               </div>
               <div class="indicator-item">
                 <span id="indicator-snapshot" class="indicator-lamp unknown"></span>
-                <span>SNAPSHOT</span>
+                <span>ALARM STATE</span>
                 <strong id="indicator-snapshot-text">Unknown</strong>
               </div>
             </div>
@@ -145,24 +129,24 @@
 
           <section class="surface latest-surface">
             <div class="section-bar">
-              <h2>Latest event</h2>
+              <h2>Last received event</h2>
               <span id="latest-event-code" class="event-code-badge">--</span>
             </div>
-            <div id="latest-event" class="latest-event empty-state">No event received.</div>
+            <div id="latest-event" class="latest-event empty-state">No events received.</div>
           </section>
         </div>
 
         <section class="surface partition-surface">
           <div class="section-bar">
             <h2>Partitions</h2>
-            <span>Panel-reported state</span>
+            
           </div>
           <div class="data-table partition-table" role="table" aria-label="Partitions">
             <div class="table-head" role="row">
-              <div>PARTITION</div>
-              <div>MODE</div>
-              <div>READY</div>
-              <div>CONDITION</div>
+              <div role="columnheader">PARTITION</div>
+              <div role="columnheader">MODE</div>
+              <div role="columnheader">READY</div>
+              <div role="columnheader">CONDITION</div>
             </div>
             <div id="partition-grid" class="table-body"></div>
           </div>
@@ -172,7 +156,6 @@
       <section id="view-keypad" class="view">
         <div class="screen-header">
           <div>
-            <div class="eyebrow">OPERATOR INTERFACE</div>
             <h1>Keypad</h1>
           </div>
           <label class="compact-field">
@@ -181,8 +164,9 @@
           </label>
         </div>
 
-        <div id="keypad-warning" class="notice" hidden></div>
+        <div id="keypad-warning" class="notice" role="status" hidden></div>
 
+        <div id="keypad-result" class="notice" role="status" hidden></div>
         <section class="surface keypad-surface">
           <vista-keypad-card id="ingress-keypad"></vista-keypad-card>
         </section>
@@ -191,20 +175,20 @@
       <section id="view-events" class="view">
         <div class="screen-header">
           <div>
-            <div class="eyebrow">PANEL HISTORY</div>
             <h1>Event Journal</h1>
           </div>
-          <div id="journal-header-meta" class="screen-meta">Loading journal state</div>
+          <div id="journal-header-meta" class="screen-meta"></div>
         </div>
 
         <form id="event-filters" class="table-toolbar">
           <div class="toolbar-search">
-            <input id="event-search" type="search" maxlength="80" placeholder="Search journal">
+            <input id="event-search" aria-label="Search journal" type="search" maxlength="80" placeholder="Search journal">
           </div>
           <label class="compact-field">
             <span>WHERE</span>
             <select id="event-partition">
               <option value="0">All partitions</option>
+              <option value="system">System</option>
               <option value="1">Partition 1</option>
               <option value="2">Partition 2</option>
               <option value="3">Partition 3</option>
@@ -231,18 +215,19 @@
         </form>
 
         <section class="surface journal-surface">
-          <div id="event-summary" class="journal-summary"></div>
+          <div id="event-summary" class="journal-summary" role="status"></div>
           <div class="data-table event-table" role="table" aria-label="Event journal">
             <div class="table-head event-head" role="row">
-              <div>TIME</div>
-              <div>CODE</div>
-              <div>EVENT</div>
-              <div>SOURCE</div>
+              <div role="columnheader">TIME</div>
+              <div role="columnheader">CODE</div>
+              <div role="columnheader">EVENT</div>
+              <div role="columnheader">SOURCE</div>
             </div>
             <div id="event-list" class="table-body event-list"></div>
           </div>
           <div class="load-more-row">
-            <button id="event-more" type="button" class="secondary-button" hidden>Load more</button>
+            <button id="event-newer" type="button" class="secondary-button" hidden>Newer</button>
+            <button id="event-more" type="button" class="secondary-button" hidden>Older</button>
           </div>
         </section>
       </section>
@@ -250,8 +235,7 @@
       <section id="view-diagnostics" class="view">
         <div class="screen-header">
           <div>
-            <div class="eyebrow">ADMINISTRATION</div>
-            <h1>System Information</h1>
+            <h1>Diagnostics</h1>
           </div>
           <div id="diagnostic-version" class="screen-meta"></div>
         </div>

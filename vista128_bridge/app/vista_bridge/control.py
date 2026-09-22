@@ -150,8 +150,8 @@ class VistaControlCoordinator:
             generation = self._generation
         with self._automation_state_lock:
             self._automation_available.clear()
-            self._automation_blocked = False
             self._automation_source = "unknown"
+            self._automation_blocked = False
         self.discard_pending("panel_session_reset")
         with self._keypad_reservation_lock:
             self._keypad_owner = ""
@@ -780,6 +780,7 @@ class VistaControlCoordinator:
         verification = str(extra.get("verification", ""))
         payload = {
             "request_id": request.request_id,
+            "interaction_id": request.interaction_id,
             "ok": bool(ok),
             "kind": request.kind,
             "partition": request.partition,

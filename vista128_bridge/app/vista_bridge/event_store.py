@@ -654,6 +654,7 @@ class EventStore:
         *,
         limit: int = 50,
         partition: int = 0,
+        system_only: bool = False,
         zone: int = 0,
         user: int = 0,
         event_code: str = "",
@@ -673,7 +674,9 @@ class EventStore:
         clauses: list[str] = []
         parameters: list[Any] = []
 
-        if partition:
+        if system_only:
+            clauses.append("partition_number = 0")
+        elif partition:
             clauses.append("partition_number = ?")
             parameters.append(partition)
         if zone:
@@ -694,11 +697,12 @@ class EventStore:
         elif source:
             raise ValueError("event source must be live, history, both, or empty")
         if search:
-            like = f"%{search}%"
+            escaped = search.replace("!", "!!").replace("%", "!%").replace("_", "!_")
+            like = f"%{escaped}%"
             clauses.append(
-                "(description LIKE ? COLLATE NOCASE "
-                "OR descriptor LIKE ? COLLATE NOCASE "
-                "OR event_code LIKE ? COLLATE NOCASE)"
+                "(description LIKE ? ESCAPE '!' COLLATE NOCASE "
+                "OR descriptor LIKE ? ESCAPE '!' COLLATE NOCASE "
+                "OR event_code LIKE ? ESCAPE '!' COLLATE NOCASE)"
             )
             parameters.extend((like, like, like))
 

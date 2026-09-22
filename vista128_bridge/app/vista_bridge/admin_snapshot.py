@@ -5,6 +5,7 @@ import time
 from typing import Any
 
 from .version import VERSION
+from .admin_status import event_presentation, operational_status
 
 
 class AdminSnapshotBuilder:
@@ -15,21 +16,23 @@ class AdminSnapshotBuilder:
         self.started_at = datetime.now(timezone.utc).isoformat()
         self._started_monotonic = time.monotonic()
 
-    def build(self, user: dict[str, str] | None = None) -> dict[str, Any]:
+    def build(self, user: dict[str, str] | None = None, *, journal_stats=None) -> dict[str, Any]:
         bridge = self.bridge
         state = bridge.state
+        status = operational_status(bridge)
         connected = bool(bridge._is_connected())
         automation_available = bool(bridge.control.automation_available())
         keypad_control_available = bool(
             connected
             and automation_available
+            and status["state_fresh"]
             and bridge.settings.control.enabled
             and bridge.settings.control.keypad_enabled
         )
 
         event_stats = None
-        if bridge.event_store is not None:
-            stats = bridge.event_store.stats()
+        if bridge.event_store is not None and getattr(bridge.settings.event_history, "enabled", True):
+            stats = journal_stats if journal_stats is not None else bridge.event_store.stats()
             event_stats = {
                 "enabled": True,
                 "count": stats.count,
@@ -50,15 +53,7 @@ class AdminSnapshotBuilder:
                 "max_rows": bridge.settings.event_history.max_rows,
             }
 
-        partitions = {}
-        for number, partition in state.partitions.items():
-            attributes = partition.attributes()
-            partitions[str(number)] = {
-                **attributes,
-                "state": partition.ha_state,
-                "active_alarm_types": sorted(partition.alarm_types()),
-                "has_active_alarm": partition.has_active_alarm,
-            }
+        partitions = status["partitions"]
 
         keypads = {}
         for number in bridge.settings.keypad.partitions:
@@ -68,9 +63,9 @@ class AdminSnapshotBuilder:
                 "state": keypad.ha_state,
                 "initialized": keypad.initialized,
                 "available": bool(
-                    connected and keypad.initialized and keypad.session_fresh
+                    status["state_fresh"] and keypad.initialized and keypad.session_fresh
                 ),
-                "control_enabled": keypad_control_available,
+                "control_enabled": bool(keypad_control_available and keypad.initialized and keypad.session_fresh),
                 # The existing keypad component uses the topic shape to infer
                 # the partition. In ingress this is only an adapter identifier;
                 # browser keypresses never traverse MQTT.
@@ -92,6 +87,10 @@ class AdminSnapshotBuilder:
                 "panel_timestamp": event.panel_timestamp,
                 "descriptor": descriptor,
             }
+
+        if last_event is not None:
+            last_event["received_at"] = getattr(getattr(bridge, "handler", None), "last_event_received_at", "")
+            last_event = event_presentation(last_event)
 
         printer_metrics = bridge.printer.metrics
         mqtt_connected = False
@@ -119,13 +118,17 @@ class AdminSnapshotBuilder:
                 "automation_availability_source": (
                     bridge.control.automation_availability_source()
                 ),
-                "state_fresh": bool(connected and state.live_snapshot_complete),
+                "state_fresh": status["state_fresh"],
                 "alarm_knowledge_complete": bool(
                     connected and state.alarm_knowledge_complete
                 ),
                 "session_generation": state.session_generation,
             },
             "system": {
+                "condition": status["condition"],
+                "conditions": status["conditions"],
+                "complete": status["complete"],
+                "alarm_states": status["alarm_states"],
                 "ac_power": state.ac_power,
                 "battery_low": state.system_battery_low,
                 "active_global_alarm_count": len(

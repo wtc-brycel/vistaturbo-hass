@@ -33,6 +33,7 @@ class TxItem:
 class VistaBridge:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
+        self._control_result_listeners = set()
         self.state = VistaState()
         self.framer = VistaStreamFramer()
         self._telnet = TelnetSerialFilter()
@@ -98,7 +99,16 @@ class VistaBridge:
             self.control,
         )
 
+    def subscribe_control_results(self, listener):
+        self._control_result_listeners.add(listener)
+        return lambda: self._control_result_listeners.discard(listener)
+
     def _publish_control_result(self, payload: dict) -> None:
+        for listener in tuple(getattr(self, "_control_result_listeners", ())):
+            try:
+                listener(dict(payload))
+            except Exception:
+                LOG.warning("Control-result subscriber failed")
         self.mqtt.publish_json("control/result", payload, qos=1)
 
     def _record_control_audit(self, payload: dict) -> None:
