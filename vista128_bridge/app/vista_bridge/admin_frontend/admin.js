@@ -29,6 +29,12 @@ function dateTime(value) {
   return String(value).replace("T", " ");
 }
 
+function panelDateTime(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(String(value || ""));
+  if (!match) return text(value, "Unknown");
+  return `${match[2]}/${match[3]}/${match[1]} ${match[4]}:${match[5]}`;
+}
+
 function number(value) {
   return new Intl.NumberFormat().format(Number(value || 0));
 }
@@ -123,7 +129,7 @@ function renderOverview(snapshot) {
         "div",
         "latest-meta",
         [
-          event.panel_timestamp ? dateTime(event.panel_timestamp) : null,
+          event.panel_timestamp ? panelDateTime(event.panel_timestamp) : null,
           event.partition ? `Partition ${event.partition}` : null,
           event.zone ? `Zone ${String(event.zone).padStart(3, "0")}` : null,
           event.user ? `User ${String(event.user).padStart(3, "0")}` : null,
@@ -375,7 +381,7 @@ function renderEvents() {
   } else {
     appState.eventRows.forEach((event) => {
       const row = node("div", "event-row");
-      const timeNode = node("div", "event-time", dateTime(event.panel_timestamp || event.received_at));
+      const timeNode = node("div", "event-time", event.panel_timestamp ? panelDateTime(event.panel_timestamp) : dateTime(event.received_at));
       const codeNode = node("div", "event-code", text(event.event_code, "??"));
       const detail = node("div", "");
       const description = node("div", "event-description", text(event.description, "Unknown event"));
