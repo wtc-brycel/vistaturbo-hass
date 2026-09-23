@@ -5,6 +5,7 @@ import tempfile
 import threading
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "app"))
 sys.path.insert(0, os.path.dirname(__file__))
@@ -116,6 +117,26 @@ class BridgeFrameTests(unittest.TestCase):
             (("panel/state_fresh", "OFF"), {"retain": True, "qos": 1}),
             bridge.mqtt.published,
         )
+
+    def test_invalid_frame_diagnostics_are_coalesced_during_corruption_burst(self):
+        bridge = self.make_bridge()
+        events = []
+        bridge._diagnostic_record = lambda event_type, **kwargs: events.append(
+            (event_type, kwargs)
+        )
+
+        with patch("vista_bridge.bridge.time.monotonic", side_effect=[100.0, 110.0]):
+            bridge._handle_frame(RawFrame.create(b"08OK009F", "crlf"))
+            bridge._handle_frame(RawFrame.create(b"08OK009F", "crlf"))
+
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0][0], DE.INVALID_FRAME)
+        self.assertEqual(
+            events[0][1]["details"]["occurrences_since_last_report"],
+            1,
+        )
+        self.assertEqual(bridge.invalid_frames, 2)
+        self.assertEqual(bridge._invalid_frames_since_report, 1)
 
     def test_valid_ready_packet_completes_sync_without_recovery(self):
         bridge = self.make_bridge()
