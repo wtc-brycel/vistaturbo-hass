@@ -19,6 +19,7 @@ from vista_bridge.admin_auth import AdminAuthorizationUnavailable, HomeAssistant
 from vista_bridge.admin_server import AdminServer
 from vista_bridge.admin_snapshot import AdminSnapshotBuilder
 from vista_bridge.admin_status import event_presentation
+from vista_bridge.diagnostics import DiagnosticEvents as DE, DiagnosticJournal
 from vista_bridge.event_store import EventStore
 from vista_bridge.protocol import SystemEvent
 from admin_fixture import Authorizer, Bridge
@@ -131,7 +132,12 @@ class AdminApiWorkflowTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.store = EventStore(str(Path(self.directory.name) / "journal.db"))
-        self.bridge = Bridge(self.store)
+        self.diagnostics = DiagnosticJournal(
+            str(Path(self.directory.name) / "diagnostics.db"),
+            max_age_days=30,
+            max_rows=25000,
+        )
+        self.bridge = Bridge(self.store, self.diagnostics)
         self.authorizer = Authorizer()
         self.server = AdminServer(self.bridge, trusted_proxy_ips={"127.0.0.1"}, authorizer=self.authorizer)
         self.client = TestClient(TestServer(self.server.app))
@@ -144,6 +150,7 @@ class AdminApiWorkflowTests(unittest.IsolatedAsyncioTestCase):
 
     async def asyncTearDown(self):
         await self.client.close()
+        self.diagnostics.close(timeout=2.0)
         self.directory.cleanup()
 
     async def post(self, payload=None, headers=None):
@@ -241,6 +248,113 @@ class AdminApiWorkflowTests(unittest.IsolatedAsyncioTestCase):
         page = await (await self.client.get("/api/events?limit=1", headers=self.headers)).json()
         following = await (await self.client.get("/api/events?limit=1&cursor=" + page["next_cursor"], headers=self.headers)).json()
         self.assertNotEqual(page["events"][0]["id"], following["events"][0]["id"])
+
+    async def test_diagnostics_api_filters_pages_and_groups_incidents(self):
+        correlation = self.diagnostics.new_id("ha")
+        self.diagnostics.record(
+            DE.HA_WATCHDOG_TRIGGERED,
+            severity="error",
+            component="mqtt",
+            message="Heartbeat acknowledgement timed out",
+            correlation_id=correlation,
+            occurred_at="2026-09-23T10:00:00+00:00",
+        )
+        self.diagnostics.record(
+            DE.HA_RECOVERY_STARTED,
+            severity="warning",
+            component="mqtt",
+            correlation_id=correlation,
+            occurred_at="2026-09-23T10:00:01+00:00",
+        )
+        self.diagnostics.record(
+            DE.STATE_REPLAY_COMPLETED,
+            component="mqtt",
+            correlation_id=correlation,
+            occurred_at="2026-09-23T10:00:02+00:00",
+        )
+        self.diagnostics.record(
+            DE.INVALID_FRAME,
+            severity="warning",
+            component="vista-rs232",
+            occurred_at="2026-09-23T10:01:00+00:00",
+        )
+
+        first = await (
+            await self.client.get(
+                "/api/diagnostics?limit=1&category=ha_transport",
+                headers=self.headers,
+            )
+        ).json()
+        self.assertTrue(first["enabled"])
+        self.assertEqual(len(first["records"]), 1)
+        self.assertTrue(first["next_cursor"])
+        self.assertEqual(first["records"][0]["category"], "ha_transport")
+        self.assertEqual(first["incidents"][0]["correlation_id"], correlation)
+
+        second = await (
+            await self.client.get(
+                "/api/diagnostics?limit=1&category=ha_transport&cursor="
+                + first["next_cursor"],
+                headers=self.headers,
+            )
+        ).json()
+        self.assertNotEqual(first["records"][0]["id"], second["records"][0]["id"])
+
+        incident = await (
+            await self.client.get(
+                "/api/diagnostics?correlation_id=" + correlation,
+                headers=self.headers,
+            )
+        ).json()
+        self.assertEqual(len(incident["records"]), 3)
+        self.assertEqual(
+            {record["correlation_id"] for record in incident["records"]},
+            {correlation},
+        )
+
+    async def test_diagnostics_api_never_exposes_sensitive_detail_values(self):
+        secret = "never-export-this-diagnostic-secret"
+        self.diagnostics.record(
+            DE.QUEUE_SATURATED,
+            severity="warning",
+            component="runtime",
+            details={"password": secret, "payload": secret, "queue": "tx"},
+        )
+        response = await self.client.get("/api/diagnostics", headers=self.headers)
+        body = await response.text()
+        self.assertEqual(response.status, 200)
+        self.assertNotIn(secret, body)
+        result = json.loads(body)
+        self.assertEqual(result["records"][0]["details"]["password"], "[redacted]")
+        self.assertEqual(result["records"][0]["details"]["payload"], "[redacted]")
+
+    async def test_invalid_diagnostic_queries_are_rejected(self):
+        for query in (
+            "limit=101",
+            "severity=fatal",
+            "category=unknown",
+            "event_type=ha_transport.nope",
+            "component=bad%20component",
+            "correlation_id=bad%20incident",
+            "cursor=!!",
+        ):
+            with self.subTest(query=query):
+                response = await self.client.get(
+                    "/api/diagnostics?" + query,
+                    headers=self.headers,
+                )
+                self.assertEqual(response.status, 400)
+
+    async def test_snapshot_exposes_diagnostic_writer_health_only(self):
+        snapshot = await (
+            await self.client.get("/api/snapshot", headers=self.headers)
+        ).json()
+        self.assertTrue(snapshot["diagnostics"]["available"])
+        self.assertTrue(snapshot["diagnostics"]["writer_alive"])
+        self.assertEqual(snapshot["diagnostics"]["retention_days"], 30)
+        self.assertEqual(snapshot["diagnostics"]["max_rows"], 25000)
+        encoded = json.dumps(snapshot)
+        self.assertNotIn(str(self.diagnostics.path), encoded)
 
     async def test_revoked_admin_socket_closes(self):
         socket = await self.client.ws_connect("/ws", headers=self.headers)
