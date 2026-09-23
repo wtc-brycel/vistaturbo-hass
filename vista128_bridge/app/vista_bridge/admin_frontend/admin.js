@@ -349,7 +349,11 @@ function renderDiagnosticJournal() {
         node("span", "diagnostic-incident-meta", `${dateTime(incident.started_at)} · ${number(incident.event_count)} events · ${incident.categories.join(", ").replaceAll("_", " ")}`)
       );
       button.append(node("span", "diagnostic-incident-severity", incident.severity.toUpperCase()), copy);
-      button.addEventListener("click", () => loadDiagnostics(true, incident.correlation_id));
+      button.addEventListener("click", () => {
+        byId("diagnostic-severity").value = "";
+        byId("diagnostic-category").value = "";
+        loadDiagnostics(true, incident.correlation_id);
+      });
       incidents.append(button);
     }
   }
@@ -362,12 +366,27 @@ function renderDiagnosticJournal() {
     const row = node("div", `table-row diagnostic-event-row severity-${diagnosticSeverity(record.severity)}`);
     row.setAttribute("role", "row");
     const event = node("div", "diagnostic-event-description");
+    const details = node("div", "diagnostic-event-details");
+    details.hidden = true;
+    const detailEntries = Object.entries(record.details || {}).sort(([a], [b]) => a.localeCompare(b));
+    if (detailEntries.length) {
+      for (const [key, value] of detailEntries) {
+        const detailRow = node("div", "diagnostic-detail-row");
+        detailRow.append(
+          node("span", "diagnostic-detail-key", key.replaceAll("_", " ")),
+          node("span", "diagnostic-detail-value", typeof value === "string" ? value : JSON.stringify(value))
+        );
+        details.append(detailRow);
+      }
+    }
     event.append(
       node("div", "event-description-main", record.message || record.event_type),
       node("div", "event-description-sub", [
         record.event_type,
         record.correlation_id ? `incident ${record.correlation_id}` : "",
-      ].filter(Boolean).join(" · "))
+        detailEntries.length ? "details" : "",
+      ].filter(Boolean).join(" · ")),
+      details
     );
     const cells = [
       node("div", "diagnostic-time", dateTime(record.occurred_at)),
@@ -377,7 +396,22 @@ function renderDiagnosticJournal() {
       node("div", "diagnostic-component", text(record.component, "—")),
     ];
     cells.forEach((cell) => cell.setAttribute("role", "cell"));
-    row.append(...cells); list.append(row);
+    row.append(...cells);
+    if (detailEntries.length) {
+      row.tabIndex = 0;
+      row.setAttribute("aria-expanded", "false");
+      const toggle = () => {
+        details.hidden = !details.hidden;
+        row.setAttribute("aria-expanded", details.hidden ? "false" : "true");
+      };
+      row.addEventListener("click", toggle);
+      row.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault(); toggle();
+        }
+      });
+    }
+    list.append(row);
   }
   const stats = appState.diagnosticStats;
   const correlation = appState.diagnosticFilters.correlation_id;
