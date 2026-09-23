@@ -7,6 +7,7 @@ Detailed release-candidate notes are kept in [`../release/`](../release/). This 
 - Add an independent MQTT transport watchdog using broker-confirmed QoS 1 heartbeat acknowledgements.
 - Replace a stalled Paho client without restarting the VISTA panel session or the Home Assistant App.
 - Republish MQTT Discovery and the current authoritative VISTA state after every MQTT connection or recovery.
+- Keep Home Assistant unavailable until the replay completes, and retry instead of publishing online after a partial or rejected replay.
 - Avoid startup publish errors before the broker connection is established.
 - Expose a disabled-by-default MQTT Watchdog Restarts diagnostic counter.
 - Keep MQTT as compatibility infrastructure while preserving the native private API/WebSocket migration defined by ADR 0001.
