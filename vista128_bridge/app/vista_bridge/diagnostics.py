@@ -468,6 +468,20 @@ class DiagnosticJournal:
                 self._write_queue.qsize(),
             )
 
+    def runtime_state(self) -> dict[str, Any]:
+        with self._counter_lock:
+            write_errors = self.write_errors
+            dropped_events = self.dropped_events
+        return {
+            "available": self.available,
+            "write_errors": write_errors,
+            "dropped_events": dropped_events,
+            "pending_writes": self._write_queue.qsize(),
+            "writer_alive": bool(
+                self._writer_thread is not None and self._writer_thread.is_alive()
+            ),
+        }
+
     def flush(self, timeout: float = 2.0) -> bool:
         """Wait briefly for already-queued diagnostic writes to reach SQLite."""
         if not self.available:
@@ -506,7 +520,7 @@ class DiagnosticJournal:
 
             try:
                 self._persist_batch(batch)
-            except sqlite3.Error:
+            except Exception:
                 with self._counter_lock:
                     self.write_errors += len(batch)
                 LOG.exception(
