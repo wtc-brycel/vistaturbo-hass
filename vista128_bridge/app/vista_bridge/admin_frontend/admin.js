@@ -200,7 +200,6 @@ function renderDiagnostics(snapshot) {
       ["Maximum rows", number(snapshot.diagnostics?.max_rows)],
     ]),
   );
-  renderDiagnosticJournal();
 }
 
 const RESULT_LABELS = {
