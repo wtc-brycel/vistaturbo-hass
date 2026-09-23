@@ -613,9 +613,10 @@ class VistaBridge:
                 panel_clock_offset_seconds=self.handler.last_panel_clock_offset_seconds,
             )
 
-    def _publish_mqtt_recovery_snapshot(self) -> None:
+    def _publish_mqtt_recovery_snapshot(self) -> bool:
         """Republish current authoritative state after an MQTT (re)connection."""
         LOG.info("Republishing Home Assistant state after MQTT connection")
+        publish_errors_before = self.mqtt.publish_errors
         self.mqtt.publish_discovery()
         self._publish_metrics()
         self.mqtt.publish(
@@ -639,16 +640,35 @@ class VistaBridge:
         self._publish_dynamic_state(include_discovery=True)
         self.mqtt.publish_zone_summaries(self.state)
         self.mqtt.publish_alarm_states(self.state)
+        if (
+            not self.mqtt.connected
+            or self.mqtt.publish_errors != publish_errors_before
+        ):
+            LOG.warning(
+                "MQTT recovery replay incomplete; Home Assistant remains unavailable"
+            )
+            return False
+
         # Flip Home Assistant availability only after discovery and the current
         # authoritative snapshot have been restored.
-        self.mqtt.publish("bridge/availability", "online", retain=True, qos=1)
+        online = self.mqtt.publish(
+            "bridge/availability", "online", retain=True, qos=1
+        )
+        if not online:
+            LOG.warning(
+                "MQTT recovery replay could not publish availability; "
+                "Home Assistant remains unavailable"
+            )
+        return online
 
     async def _metrics_loop(self) -> None:
         ticks = 0
         while True:
             self.mqtt.watchdog_tick()
             if self.mqtt.consume_recovery_request():
-                self._publish_mqtt_recovery_snapshot()
+                recovered = self._publish_mqtt_recovery_snapshot()
+                if not recovered and self.mqtt.connected:
+                    self.mqtt.request_recovery_replay()
             else:
                 self._publish_metrics()
                 if ticks % 2 == 0:
