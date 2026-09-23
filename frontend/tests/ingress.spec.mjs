@@ -14,7 +14,7 @@ const prefix = "/api/hassio_ingress/fixture/";
 async function mount(page, { state = "normal", width = 1280, dark = false } = {}) {
   await page.setViewportSize({ width, height: 850 });
   await page.emulateMedia({ colorScheme: dark ? "dark" : "light" });
-  const errors = [], posts = [], queries = [];
+  const errors = [], posts = [], queries = [], diagnosticQueries = [];
   page.on("pageerror", (error) => errors.push(error.message));
   const current = { snapshot: structuredClone(fixture[state]), connected: true, socket: null, timer: null };
   await page.route(origin + "/**", async (route) => {
@@ -29,6 +29,24 @@ async function mount(page, { state = "normal", width = 1280, dark = false } = {}
       });
       const cursor = Number(url.searchParams.get("cursor") || 0);
       return route.fulfill({ json: { events: rows.slice(cursor, cursor + 50), next_cursor: rows.length > cursor + 50 ? String(cursor + 50) : "", enabled: true } });
+    }
+    if (path === "api/diagnostics") {
+      diagnosticQueries.push(Object.fromEntries(url.searchParams));
+      let rows = fixture.diagnostics_api.records.filter((record) => {
+        const severity = url.searchParams.get("severity");
+        const category = url.searchParams.get("category");
+        const correlation = url.searchParams.get("correlation_id");
+        return (!severity || record.severity === severity)
+          && (!category || record.category === category)
+          && (!correlation || record.correlation_id === correlation);
+      });
+      const cursor = Number(url.searchParams.get("cursor") || 0);
+      const records = rows.slice(cursor, cursor + 50);
+      return route.fulfill({ json: {
+        ...fixture.diagnostics_api,
+        records,
+        next_cursor: rows.length > cursor + 50 ? String(cursor + 50) : "",
+      } });
     }
     if (path === "api/keypad") {
       const body = route.request().postDataJSON(); posts.push(body);
@@ -47,7 +65,7 @@ async function mount(page, { state = "normal", width = 1280, dark = false } = {}
   });
   await page.goto(origin + prefix);
   await expect(page.locator("#system-state-title")).toHaveText(current.snapshot.system.condition.title);
-  return { current, errors, posts, queries, close: () => { current.connected = false; clearInterval(current.timer); current.socket.close({ code: 1001 }); } };
+  return { current, errors, posts, queries, diagnosticQueries, close: () => { current.connected = false; clearInterval(current.timer); current.socket.close({ code: 1001 }); } };
 }
 
 test("ingress has no branding bar or redundant overlines", async ({ page }) => {
@@ -101,6 +119,35 @@ test("journal pages use applied filters, not unsubmitted edits", async ({ page }
   await page.getByRole("button", { name: "Apply", exact: true }).click();
   await expect(page.locator("#event-list .event-row")).toHaveCount(fixture.events.filter(e => e.partition === 0).length);
   expect(h.queries.at(-1).cursor).toBeUndefined();
+  expect(h.errors).toEqual([]); h.close();
+});
+
+test("diagnostics loads categorized journal and correlated incidents", async ({ page }) => {
+  const h = await mount(page);
+  await page.getByRole("button", { name: "Diagnostics", exact: true }).click();
+  await expect(page.locator("#diagnostic-event-list .diagnostic-event-row")).toHaveCount(50);
+  await expect(page.locator("#diagnostic-incidents .diagnostic-incident")).toHaveCount(1);
+  await expect(page.locator("#diagnostic-summary")).toContainText("65 retained");
+  await page.locator("#diagnostic-severity").selectOption("error");
+  await page.locator("#diagnostic-category").selectOption("ha_transport");
+  await page.getByRole("button", { name: "Apply", exact: true }).click();
+  await expect(page.locator("#diagnostic-event-list .diagnostic-event-row")).toHaveCount(
+    fixture.diagnostics_api.records.filter((r) => r.severity === "error" && r.category === "ha_transport").length
+  );
+  expect(h.diagnosticQueries.at(-1).severity).toBe("error");
+  expect(h.diagnosticQueries.at(-1).category).toBe("ha_transport");
+  expect(h.errors).toEqual([]); h.close();
+});
+
+test("diagnostic incident opens its correlated event sequence", async ({ page }) => {
+  const h = await mount(page);
+  await page.getByRole("button", { name: "Diagnostics", exact: true }).click();
+  await page.locator("#diagnostic-incidents .diagnostic-incident").click();
+  await expect(page.locator("#diagnostic-summary")).toContainText("Incident selected");
+  expect(h.diagnosticQueries.at(-1).correlation_id).toBe("ha_fixture_1");
+  await expect(page.locator("#diagnostic-event-list .diagnostic-event-row")).toHaveCount(
+    fixture.diagnostics_api.records.filter((r) => r.correlation_id === "ha_fixture_1").length
+  );
   expect(h.errors).toEqual([]); h.close();
 });
 
