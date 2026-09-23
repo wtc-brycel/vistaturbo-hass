@@ -22,6 +22,90 @@ class MqttPublisherTests(unittest.TestCase):
     def setUp(self):
         self.publisher = MqttPublisher(make_settings(), lambda data: (True, "queued"))
 
+    def _connect_publisher(self, publisher=None):
+        publisher = publisher or self.publisher
+        publisher.start()
+        client = publisher._client
+        client.on_connect(client, None, None, 0, None)
+        return client
+
+    def test_startup_publish_is_deferred_until_broker_connected(self):
+        self.publisher.start()
+        client = self.publisher._client
+        published_before = len(client.published)
+
+        self.assertFalse(
+            self.publisher.publish("panel/connected", "ON", retain=True, qos=1)
+        )
+
+        self.assertEqual(len(client.published), published_before)
+        self.assertEqual(self.publisher.publish_errors, 0)
+
+    def test_connect_requests_full_state_republish(self):
+        client = self._connect_publisher()
+
+        self.assertTrue(self.publisher.connected)
+        self.assertTrue(self.publisher.consume_recovery_request())
+        self.assertFalse(self.publisher.consume_recovery_request())
+        self.assertTrue(client.suppress_exceptions)
+        self.assertFalse(
+            any(
+                item[0] == "vista128/bridge/availability" and item[1] == "online"
+                for item in client.published
+            )
+        )
+
+    def test_heartbeat_puback_confirms_network_loop_progress(self):
+        client = self._connect_publisher()
+        now = (
+            self.publisher._last_heartbeat_monotonic
+            + self.publisher.HEARTBEAT_INTERVAL_SECONDS
+            + 0.1
+        )
+
+        self.assertFalse(self.publisher.watchdog_tick(now))
+        heartbeat_mid = self.publisher._heartbeat_mid
+        self.assertIsNotNone(heartbeat_mid)
+
+        client.on_publish(client, None, heartbeat_mid, 0, None)
+
+        self.assertIsNone(self.publisher._heartbeat_mid)
+        self.assertGreater(self.publisher._last_puback_monotonic, 0)
+
+    def test_missing_heartbeat_puback_replaces_wedged_client(self):
+        old_client = self._connect_publisher()
+        now = (
+            self.publisher._last_heartbeat_monotonic
+            + self.publisher.HEARTBEAT_INTERVAL_SECONDS
+            + 0.1
+        )
+        self.assertFalse(self.publisher.watchdog_tick(now))
+        self.assertIsNotNone(self.publisher._heartbeat_mid)
+
+        restarted = self.publisher.watchdog_tick(
+            now + self.publisher.WATCHDOG_TIMEOUT_SECONDS + 1
+        )
+
+        self.assertTrue(restarted)
+        self.assertIsNot(self.publisher._client, old_client)
+        self.assertEqual(self.publisher.watchdog_restarts, 1)
+        self.assertTrue(self.publisher._client.loop_started)
+        self.assertIsNotNone(self.publisher._client.connect_args)
+        self.assertFalse(self.publisher.connected)
+
+    def test_disconnected_transport_is_replaced_after_watchdog_timeout(self):
+        client = self._connect_publisher()
+        client.on_disconnect(client, None, None, 7, None)
+        disconnected_at = self.publisher._last_disconnect_monotonic
+
+        restarted = self.publisher.watchdog_tick(
+            disconnected_at + self.publisher.WATCHDOG_TIMEOUT_SECONDS + 1
+        )
+
+        self.assertTrue(restarted)
+        self.assertIsNot(self.publisher._client, client)
+        self.assertEqual(self.publisher.watchdog_restarts, 1)
+
     def test_discovery_uses_runtime_version(self):
         self.publisher.publish_discovery()
         payloads = [
@@ -420,6 +504,14 @@ class MqttPublisherTests(unittest.TestCase):
             published["homeassistant/sensor/vista128_bridge/automation_availability_source/config"]
         )
         self.assertEqual(source["state_topic"], "vista128/panel/automation_availability_source")
+        watchdog = json.loads(
+            published["homeassistant/sensor/vista128_bridge/mqtt_watchdog_restarts/config"]
+        )
+        self.assertEqual(
+            watchdog["state_topic"],
+            "vista128/stats/mqtt_watchdog_restarts",
+        )
+        self.assertFalse(watchdog["enabled_by_default"])
 
 
 if __name__ == "__main__":

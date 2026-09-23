@@ -4,6 +4,8 @@ import json
 import inspect
 import logging
 import ssl
+import threading
+import time
 from datetime import datetime, timezone
 from typing import Callable
 import uuid
@@ -34,6 +36,9 @@ LOG = logging.getLogger(__name__)
 
 
 class MqttPublisher:
+    HEARTBEAT_INTERVAL_SECONDS = 15.0
+    WATCHDOG_TIMEOUT_SECONDS = 60.0
+
     def __init__(
         self,
         settings: Settings,
@@ -60,8 +65,27 @@ class MqttPublisher:
             semantic_command_callback, 2
         )
         self.publish_errors = 0
+        self.watchdog_restarts = 0
         self._retained_payloads: dict[str, tuple[str, int]] = {}
-        self._client = mqtt.Client(
+        self._started = False
+        self._stopping = False
+        self._connected = threading.Event()
+        self._client_lock = threading.RLock()
+        self._restart_lock = threading.Lock()
+        self._client_started_monotonic = time.monotonic()
+        self._last_connect_monotonic = 0.0
+        self._last_disconnect_monotonic = self._client_started_monotonic
+        self._last_puback_monotonic = 0.0
+        self._last_heartbeat_monotonic = 0.0
+        self._heartbeat_sent_monotonic = 0.0
+        self._heartbeat_mid: int | None = None
+        self._acked_mids: set[int] = set()
+        self._recovery_generation = 0
+        self._consumed_recovery_generation = 0
+        self._client = self._build_client()
+
+    def _build_client(self):
+        client = mqtt.Client(
             callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
             client_id="vista128-bridge",
             protocol=mqtt.MQTTv311,
@@ -71,12 +95,12 @@ class MqttPublisher:
         # publication into unbounded process memory growth. Paho rejects new
         # publishes once either finite limit is reached; this bridge does not
         # add a second retry queue.
-        self._client.max_inflight_messages_set(self.mqtt.inflight_messages_max)
-        self._client.max_queued_messages_set(self.mqtt.outbound_queue_max)
+        client.max_inflight_messages_set(self.mqtt.inflight_messages_max)
+        client.max_queued_messages_set(self.mqtt.outbound_queue_max)
         if self.mqtt.tls_enabled:
             # Paho raises on unusable certificate configuration and the broker
             # connection cannot fall back to plaintext after this point.
-            self._client.tls_set(
+            client.tls_set(
                 ca_certs=self.mqtt.tls_ca or None,
                 certfile=self.mqtt.tls_client_cert or None,
                 keyfile=self.mqtt.tls_client_key or None,
@@ -84,31 +108,194 @@ class MqttPublisher:
             )
             LOG.info("MQTT TLS enabled with certificate verification")
         if self.mqtt.username:
-            self._client.username_pw_set(self.mqtt.username, self.mqtt.password)
-        self._client.on_connect = self._on_connect
-        self._client.on_disconnect = self._on_disconnect
-        self._client.on_message = self._on_message
-        self._client.reconnect_delay_set(min_delay=1, max_delay=30)
-        self._client.will_set(
+            client.username_pw_set(self.mqtt.username, self.mqtt.password)
+        client.on_connect = self._on_connect
+        client.on_disconnect = self._on_disconnect
+        client.on_message = self._on_message
+        client.on_publish = self._on_publish
+        # A callback exception must not terminate Paho's network-loop thread.
+        # The watchdog below still detects a loop that stops making progress.
+        client.suppress_exceptions = True
+        client.reconnect_delay_set(min_delay=1, max_delay=30)
+        client.will_set(
             self.topic("bridge/availability"),
             "offline",
             qos=1,
             retain=True,
         )
+        return client
+
+    def _start_client(self, client) -> None:
+        with self._client_lock:
+            self._client_started_monotonic = time.monotonic()
+            self._last_disconnect_monotonic = self._client_started_monotonic
+        client.connect_async(self.mqtt.host, self.mqtt.port, keepalive=30)
+        client.loop_start()
+
+    @property
+    def connected(self) -> bool:
+        return self._connected.is_set()
+
+    def consume_recovery_request(self) -> bool:
+        with self._client_lock:
+            if self._recovery_generation == self._consumed_recovery_generation:
+                return False
+            self._consumed_recovery_generation = self._recovery_generation
+            return True
+
+    def request_recovery_replay(self) -> None:
+        with self._client_lock:
+            self._recovery_generation += 1
+
+    def watchdog_tick(self, now: float | None = None) -> bool:
+        """Check broker progress and replace a wedged Paho transport if needed."""
+        if not self._started or self._stopping:
+            return False
+        current = time.monotonic() if now is None else now
+        if not self._connected.is_set():
+            with self._client_lock:
+                baseline = max(
+                    self._client_started_monotonic,
+                    self._last_connect_monotonic,
+                    self._last_disconnect_monotonic,
+                )
+            if current - baseline >= self.WATCHDOG_TIMEOUT_SECONDS:
+                return self._restart_transport(
+                    f"broker connection made no progress for {current - baseline:.0f}s"
+                )
+            return False
+
+        with self._client_lock:
+            heartbeat_mid = self._heartbeat_mid
+            heartbeat_sent = self._heartbeat_sent_monotonic
+            last_heartbeat = self._last_heartbeat_monotonic
+
+        if (
+            heartbeat_mid is not None
+            and current - heartbeat_sent >= self.WATCHDOG_TIMEOUT_SECONDS
+        ):
+            return self._restart_transport(
+                f"heartbeat PUBACK not received for {current - heartbeat_sent:.0f}s"
+            )
+
+        if (
+            heartbeat_mid is None
+            and current - last_heartbeat >= self.HEARTBEAT_INTERVAL_SECONDS
+        ):
+            if not self._publish_heartbeat(current):
+                return self._restart_transport("heartbeat publish was rejected")
+        return False
+
+    def _publish_heartbeat(self, now: float) -> bool:
+        client = self._client
+        try:
+            result = client.publish(
+                self.topic("bridge/heartbeat"),
+                payload=str(int(time.time())),
+                qos=1,
+                retain=False,
+            )
+        except Exception as exc:
+            self.publish_errors += 1
+            LOG.error("MQTT heartbeat publish failed: %s", type(exc).__name__)
+            return False
+        result_code = getattr(result, "rc", None)
+        if result_code not in (None, 0):
+            self.publish_errors += 1
+            LOG.error("MQTT heartbeat publish rejected (rc=%s)", result_code)
+            return False
+        mid = getattr(result, "mid", None)
+        if mid is None:
+            self.publish_errors += 1
+            LOG.error("MQTT heartbeat publish returned no message id")
+            return False
+
+        with self._client_lock:
+            self._last_heartbeat_monotonic = now
+            self._heartbeat_sent_monotonic = now
+            if mid in self._acked_mids:
+                self._acked_mids.discard(mid)
+                self._heartbeat_mid = None
+            else:
+                self._heartbeat_mid = int(mid)
+        return True
+
+    def _restart_transport(self, reason: str) -> bool:
+        if self._stopping or not self._started:
+            return False
+        if not self._restart_lock.acquire(blocking=False):
+            return False
+        try:
+            LOG.error("MQTT watchdog restarting transport: %s", reason)
+            try:
+                replacement = self._build_client()
+            except Exception:
+                LOG.exception("MQTT watchdog could not build replacement client")
+                with self._client_lock:
+                    self._client_started_monotonic = time.monotonic()
+                    self._last_disconnect_monotonic = self._client_started_monotonic
+                return False
+
+            with self._client_lock:
+                old_client = self._client
+                self._client = replacement
+                self._connected.clear()
+                self._heartbeat_mid = None
+                self._acked_mids.clear()
+                self._last_puback_monotonic = 0.0
+                self.watchdog_restarts += 1
+
+            try:
+                self._start_client(replacement)
+            except Exception:
+                LOG.exception("MQTT watchdog could not start replacement client")
+                with self._client_lock:
+                    self._client = old_client
+                    self.watchdog_restarts -= 1
+                    self._client_started_monotonic = time.monotonic()
+                    self._last_disconnect_monotonic = self._client_started_monotonic
+                return False
+
+            threading.Thread(
+                target=self._cleanup_client,
+                args=(old_client,),
+                name="mqtt-client-cleanup",
+                daemon=True,
+            ).start()
+            return True
+        finally:
+            self._restart_lock.release()
+
+    @staticmethod
+    def _cleanup_client(client) -> None:
+        try:
+            client.disconnect()
+        except Exception:
+            LOG.debug("Old MQTT client disconnect failed during watchdog recovery", exc_info=True)
+        try:
+            client.loop_stop()
+        except Exception:
+            LOG.debug("Old MQTT client loop cleanup failed during watchdog recovery", exc_info=True)
 
     def topic(self, suffix: str) -> str:
         return f"{self.mqtt.base_topic}/{suffix.strip('/')}"
 
     def start(self) -> None:
-        self._client.connect_async(self.mqtt.host, self.mqtt.port, keepalive=30)
-        self._client.loop_start()
+        self._stopping = False
+        self._started = True
+        self._start_client(self._client)
 
     def stop(self) -> None:
+        self._stopping = True
+        client = self._client
         try:
-            self.publish("bridge/availability", "offline", retain=True)
-            self._client.disconnect()
+            if self._connected.is_set():
+                self.publish("bridge/availability", "offline", retain=True, qos=1)
+            client.disconnect()
         finally:
-            self._client.loop_stop()
+            client.loop_stop()
+            self._connected.clear()
+            self._started = False
 
     def publish(
         self,
@@ -131,6 +318,11 @@ class MqttPublisher:
         retain: bool = False,
     ) -> bool:
         value = str(payload)
+        # Before Paho has completed its first broker connection, publish() can
+        # return MQTT_ERR_NO_CONN. Drop those transient startup writes quietly;
+        # the bridge republishes a complete snapshot after on_connect.
+        if self._started and not self._connected.is_set():
+            return False
         if retain and self._retained_payloads.get(topic) == (value, qos):
             return True
         try:
@@ -593,13 +785,28 @@ class MqttPublisher:
         self._clear_discovery_config("sensor", "event_journal")
 
     def _on_connect(self, client, userdata, flags, reason_code, properties) -> None:
+        if client is not self._client:
+            return
         if reason_code != 0:
+            self._connected.clear()
+            with self._client_lock:
+                self._last_disconnect_monotonic = time.monotonic()
             LOG.error("MQTT connection rejected: %s", reason_code)
             return
+
+        now = time.monotonic()
+        with self._client_lock:
+            self._connected.set()
+            self._last_connect_monotonic = now
+            self._last_puback_monotonic = now
+            self._last_heartbeat_monotonic = now
+            self._heartbeat_sent_monotonic = 0.0
+            self._heartbeat_mid = None
+            self._acked_mids.clear()
+            self._recovery_generation += 1
+            self._retained_payloads.clear()
+
         LOG.info("Connected to MQTT broker")
-        self._retained_payloads.clear()
-        self.publish("bridge/availability", "online", retain=True, qos=1)
-        self.publish_discovery()
         if self.settings.control.enabled and self.settings.control.native_alarm_enabled:
             client.subscribe(self.topic("partition/+/command"), qos=1)
         if self.settings.control.enabled and self.settings.control.keypad_enabled:
@@ -613,6 +820,19 @@ class MqttPublisher:
             client.subscribe(self.topic("admin/raw_tx"), qos=1)
             LOG.warning("Privileged raw transmit enabled on %s", self.topic("admin/raw_tx"))
 
+    def _on_publish(self, client, userdata, mid, reason_code, properties) -> None:
+        if client is not self._client:
+            return
+        now = time.monotonic()
+        with self._client_lock:
+            self._last_puback_monotonic = now
+            if self._heartbeat_mid == mid:
+                self._heartbeat_mid = None
+            else:
+                self._acked_mids.add(int(mid))
+                if len(self._acked_mids) > 64:
+                    self._acked_mids.pop()
+
     def _on_disconnect(
         self,
         client,
@@ -621,9 +841,23 @@ class MqttPublisher:
         reason_code,
         properties,
     ) -> None:
-        LOG.warning("Disconnected from MQTT broker: %s", reason_code)
+        if client is not self._client:
+            return
+        self._connected.clear()
+        with self._client_lock:
+            self._last_disconnect_monotonic = time.monotonic()
+            self._heartbeat_mid = None
+            self._acked_mids.clear()
+        if self._stopping:
+            LOG.info("Disconnected from MQTT broker: %s", reason_code)
+        else:
+            LOG.warning("Disconnected from MQTT broker: %s", reason_code)
 
     def _on_message(self, client, userdata, message) -> None:
+        # Paho always supplies the active client. Unit tests invoke this handler
+        # directly with None; still reject callbacks from a real superseded client.
+        if client is not None and client is not self._client:
+            return
         is_keypad = self._is_keypad_command(message.topic)
         is_partition = self._is_partition_command(message.topic)
         is_semantic = self._is_semantic_command(message.topic)

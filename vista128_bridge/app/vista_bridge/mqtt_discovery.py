@@ -306,6 +306,17 @@ def diagnostic_entities(
                 "entity_category": "diagnostic",
             },
         ),
+        "mqtt_watchdog_restarts": (
+            "sensor",
+            {
+                "name": "MQTT Watchdog Restarts",
+                "unique_id": "vista128_bridge_mqtt_watchdog_restarts",
+                "state_topic": topic("stats/mqtt_watchdog_restarts"),
+                "state_class": "total_increasing",
+                "entity_category": "diagnostic",
+                "enabled_by_default": False,
+            },
+        ),
         "last_sync": (
             "sensor",
             {

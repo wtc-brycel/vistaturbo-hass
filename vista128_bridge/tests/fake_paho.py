@@ -9,9 +9,15 @@ class FakeClient:
         self.on_connect = None
         self.on_disconnect = None
         self.on_message = None
+        self.on_publish = None
+        self.suppress_exceptions = False
         self.tls = None
         self.max_inflight_messages = None
         self.max_queued_messages = None
+        self.connect_args = None
+        self.loop_started = False
+        self.disconnect_calls = 0
+        self._next_mid = 1
 
     def username_pw_set(self, *args, **kwargs):
         pass
@@ -32,19 +38,22 @@ class FakeClient:
         self.max_queued_messages = value
 
     def connect_async(self, *args, **kwargs):
-        pass
+        self.connect_args = (args, kwargs)
 
     def loop_start(self):
-        pass
+        self.loop_started = True
 
     def loop_stop(self):
-        pass
+        self.loop_started = False
 
     def disconnect(self):
-        pass
+        self.disconnect_calls += 1
 
     def publish(self, topic, payload=None, qos=0, retain=False):
         self.published.append((topic, payload, qos, retain))
+        mid = self._next_mid
+        self._next_mid += 1
+        return types.SimpleNamespace(rc=0, mid=mid)
 
     def subscribe(self, topic, qos=0):
         self.subscriptions.append((topic, qos))

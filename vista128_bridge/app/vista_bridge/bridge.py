@@ -613,12 +613,66 @@ class VistaBridge:
                 panel_clock_offset_seconds=self.handler.last_panel_clock_offset_seconds,
             )
 
+    def _publish_mqtt_recovery_snapshot(self) -> bool:
+        """Republish current authoritative state after an MQTT (re)connection."""
+        LOG.info("Republishing Home Assistant state after MQTT connection")
+        publish_errors_before = self.mqtt.publish_errors
+        self.mqtt.publish_discovery()
+        self._publish_metrics()
+        self.mqtt.publish(
+            "panel/state_fresh",
+            "ON" if self.state.live_snapshot_complete else "OFF",
+            retain=True,
+            qos=1,
+        )
+        self.mqtt.publish(
+            "panel/automation_available",
+            "ON" if self.control.automation_available() else "OFF",
+            retain=True,
+            qos=1,
+        )
+        self.mqtt.publish(
+            "panel/automation_availability_source",
+            self.control.automation_availability_source(),
+            retain=True,
+            qos=1,
+        )
+        self._publish_dynamic_state(include_discovery=True)
+        self.mqtt.publish_zone_summaries(self.state)
+        self.mqtt.publish_alarm_states(self.state)
+        if (
+            not self.mqtt.connected
+            or self.mqtt.publish_errors != publish_errors_before
+        ):
+            LOG.warning(
+                "MQTT recovery replay incomplete; Home Assistant remains unavailable"
+            )
+            return False
+
+        # Flip Home Assistant availability only after discovery and the current
+        # authoritative snapshot have been restored.
+        online = self.mqtt.publish(
+            "bridge/availability", "online", retain=True, qos=1
+        )
+        if not online:
+            LOG.warning(
+                "MQTT recovery replay could not publish availability; "
+                "Home Assistant remains unavailable"
+            )
+        return online
+
     async def _metrics_loop(self) -> None:
         ticks = 0
         while True:
-            self._publish_metrics()
-            if ticks % 2 == 0:
-                self._publish_dynamic_state(include_discovery=ticks % 12 == 0)
+            self.mqtt.watchdog_tick()
+            if self.mqtt.consume_recovery_request():
+                recovered = self._publish_mqtt_recovery_snapshot()
+                if not recovered and self.mqtt.connected:
+                    self.mqtt.request_recovery_replay()
+            else:
+                self._publish_metrics()
+                if ticks % 2 == 0:
+                    self._publish_dynamic_state(include_discovery=ticks % 12 == 0)
             ticks += 1
             await asyncio.sleep(5)
 
@@ -635,6 +689,7 @@ class VistaBridge:
             "stats/tx_bytes": self.tx_bytes,
             "stats/invalid_frames": self.invalid_frames,
             "stats/mqtt_publish_errors": self.mqtt.publish_errors,
+            "stats/mqtt_watchdog_restarts": self.mqtt.watchdog_restarts,
             "sync/consecutive_failures": self.synchronizer.failures_consecutive,
             "sync/failures_total": self.synchronizer.failures_total,
         }
