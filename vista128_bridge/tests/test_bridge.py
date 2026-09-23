@@ -21,6 +21,8 @@ class FakeMqtt:
         self.alarm_state_publishes = 0
         self.discovery_publishes = 0
         self.zone_summary_publishes = 0
+        self.publish_errors = 0
+        self.connected = True
 
     def publish(self, *args, **kwargs):
         self.published.append((args, kwargs))
@@ -162,7 +164,7 @@ class BridgeFrameTests(unittest.TestCase):
             lambda *, include_discovery=False: dynamic_calls.append(include_discovery)
         )
 
-        bridge._publish_mqtt_recovery_snapshot()
+        self.assertTrue(bridge._publish_mqtt_recovery_snapshot())
 
         self.assertEqual(bridge.mqtt.discovery_publishes, 1)
         self.assertEqual(bridge.mqtt.zone_summary_publishes, 1)
@@ -187,6 +189,25 @@ class BridgeFrameTests(unittest.TestCase):
         self.assertEqual(
             bridge.mqtt.published[-1],
             (("bridge/availability", "online"), {"retain": True, "qos": 1}),
+        )
+
+    def test_mqtt_recovery_does_not_mark_online_after_publish_error(self):
+        bridge = VistaBridge.__new__(VistaBridge)
+        bridge.mqtt = FakeMqtt()
+        bridge.state = SimpleNamespace(live_snapshot_complete=True)
+        bridge.control = SimpleNamespace(
+            automation_available=lambda: True,
+            automation_availability_source=lambda: "inferred",
+        )
+        bridge._publish_metrics = lambda: setattr(
+            bridge.mqtt, "publish_errors", bridge.mqtt.publish_errors + 1
+        )
+        bridge._publish_dynamic_state = lambda **kwargs: None
+
+        self.assertFalse(bridge._publish_mqtt_recovery_snapshot())
+        self.assertNotIn(
+            (("bridge/availability", "online"), {"retain": True, "qos": 1}),
+            bridge.mqtt.published,
         )
 
     def test_control_and_raw_tx_logs_redact_payloads(self):
