@@ -61,13 +61,13 @@ class Bridge:
                           uncertain=0, failed=0, dropped=0, last_error="", last_completed_at=""))
         self.mqtt = NS(connected=True, publish_errors=0)
         self.diagnostics = diagnostics or NS(
-            available=False,
+            available=True,
             runtime_state=lambda: {
-                "available": False,
+                "available": True,
                 "write_errors": 0,
                 "dropped_events": 0,
                 "pending_writes": 0,
-                "writer_alive": False,
+                "writer_alive": True,
             },
         )
         self.rx_frames, self.rx_bytes, self.tx_frames, self.tx_bytes, self.invalid_frames = 6248, 109520, 1802, 25180, 0
