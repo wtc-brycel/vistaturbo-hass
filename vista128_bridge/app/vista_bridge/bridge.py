@@ -943,6 +943,7 @@ class VistaBridge:
                 "raw_tx_queue_depth": self._raw_tx_queue.qsize(),
                 "printer_status": printer.status,
                 "printer_queue_depth": printer.queue_depth,
+                "diagnostic_journal": self.diagnostics.runtime_state(),
             },
         )
 
