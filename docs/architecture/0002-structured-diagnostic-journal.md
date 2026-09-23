@@ -153,6 +153,8 @@ Sensitive keys such as passwords, PINs, credentials, tokens, private keys, comma
 
 Diagnostics are best-effort. Failure to initialize or write the Diagnostic Journal must not stop panel processing or Home Assistant control.
 
+Diagnostic persistence is isolated from live transport threads. Callers sanitize and enqueue records into a bounded in-process queue; one dedicated writer thread persists small batches to SQLite. If the queue saturates, new diagnostic events are dropped and counted rather than applying backpressure to panel or Home Assistant transport processing. Normal shutdown briefly flushes the queue. The writer's availability, pending depth, dropped-event count, and write-error count are exposed as runtime health.
+
 ## Management UI contract
 
 The management UI may read the journal through the App backend.
