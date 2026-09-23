@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <title>Vista Turbo</title>
+  <link rel="stylesheet" href="./admin.css">
+  <script defer src="./vista-keypad-card.js"></script>
+  <script defer src="./admin.js"></script>
+</head>
+<body>
+  <svg class="svg-sprite" aria-hidden="true">
+    <symbol id="i-overview" viewBox="0 0 24 24">
+      <path d="M12 3 20 6v5c0 5.2-3.2 8.4-8 10-4.8-1.6-8-4.8-8-10V6l8-3Z"/>
+      <path d="m8.5 12 2.2 2.2 4.8-5"/>
+    </symbol>
+    <symbol id="i-keypad" viewBox="0 0 24 24">
+      <rect x="4" y="3" width="16" height="18" rx="2"/>
+      <rect x="7" y="6" width="10" height="4" rx="1"/>
+      <circle cx="8" cy="14" r="1"/><circle cx="12" cy="14" r="1"/><circle cx="16" cy="14" r="1"/>
+      <circle cx="8" cy="18" r="1"/><circle cx="12" cy="18" r="1"/><circle cx="16" cy="18" r="1"/>
+    </symbol>
+    <symbol id="i-history" viewBox="0 0 24 24">
+      <path d="M4 12a8 8 0 1 0 2.3-5.7L4 8.6"/>
+      <path d="M4 4v4.6h4.6M12 7v5l3.5 2"/>
+    </symbol>
+    <symbol id="i-diagnostics" viewBox="0 0 24 24">
+      <path d="M14.7 6.3a4 4 0 0 0-5 5L4 17l3 3 5.7-5.7a4 4 0 0 0 5-5l-2.4 2.4-3-3 2.4-2.4Z"/>
+    </symbol>
+    <symbol id="i-check" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="9"/><path d="m8 12 2.7 2.7L16.5 9"/>
+    </symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24">
+      <path d="M12 3 22 20H2L12 3Z"/><path d="M12 9v5M12 17h.01"/>
+    </symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24">
+      <path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.2 8.2A7 7 0 0 1 18.5 9M17.8 15.8A7 7 0 0 1 5.5 15"/>
+    </symbol>
+  </svg>
+
+  <section id="system-banner" class="system-banner state-unknown">
+    <div class="system-banner-main">
+      <svg class="system-icon"><use id="system-icon-use" href="#i-alert"></use></svg>
+      <div>
+        <div id="system-state-title" class="system-state-title" role="status">CONNECTING</div>
+        <div id="system-state-detail" class="system-state-detail"></div>
+      </div>
+    </div>
+    <div class="system-context">
+      <div class="context-block">
+        <span>PANEL</span>
+        <strong id="context-panel">UNKNOWN</strong>
+      </div>
+      <div class="context-block">
+        <span>AUTOMATION</span>
+        <strong id="context-automation">UNKNOWN</strong>
+      </div>
+      <div class="context-block">
+        <span>AC POWER</span>
+        <strong id="context-power">UNKNOWN</strong>
+      </div>
+      <div class="context-block">
+        <span>STATE</span>
+        <strong id="context-freshness">UNKNOWN</strong>
+      </div>
+    </div>
+  </section>
+
+  <div class="admin-shell">
+    <nav class="side-nav" aria-label="Vista Turbo management">
+      <button type="button" class="nav-button active" data-view="overview" aria-label="Overview">
+        <svg class="nav-icon"><use href="#i-overview"></use></svg>
+        <span>Overview</span>
+      </button>
+      <button type="button" class="nav-button" data-view="keypad" aria-label="Keypad">
+        <svg class="nav-icon"><use href="#i-keypad"></use></svg>
+        <span>Keypad</span>
+      </button>
+      <button type="button" class="nav-button" data-view="events" aria-label="Event Journal">
+        <svg class="nav-icon"><use href="#i-history"></use></svg>
+        <span>Event Journal</span>
+      </button>
+      <button type="button" class="nav-button" data-view="diagnostics" aria-label="Diagnostics">
+        <svg class="nav-icon"><use href="#i-diagnostics"></use></svg>
+        <span>Diagnostics</span>
+      </button>
+    </nav>
+
+    <main class="workspace">
+      <section id="view-overview" class="view active">
+        <div class="screen-header">
+          <div>
+            <h1>Overview</h1>
+          </div>
+          <div id="overview-sync" class="screen-meta"></div>
+        </div>
+
+        <div class="overview-layout">
+          <section class="surface conditions-surface">
+            <div class="section-bar">
+              <h2>Current conditions</h2>
+              <span id="condition-summary" class="section-state">UNKNOWN</span>
+            </div>
+            <div class="indicator-strip">
+              <div class="indicator-item">
+                <span id="indicator-power" class="indicator-lamp unknown"></span>
+                <span>POWER</span>
+                <strong id="indicator-power-text">Unknown</strong>
+              </div>
+              <div class="indicator-item">
+                <span id="indicator-battery" class="indicator-lamp unknown"></span>
+                <span>BATTERY</span>
+                <strong id="indicator-battery-text">Unknown</strong>
+              </div>
+              <div class="indicator-item">
+                <span id="indicator-automation" class="indicator-lamp unknown"></span>
+                <span>AUTOMATION</span>
+                <strong id="indicator-automation-text">Unknown</strong>
+              </div>
+              <div class="indicator-item">
+                <span id="indicator-snapshot" class="indicator-lamp unknown"></span>
+                <span>ALARM STATE</span>
+                <strong id="indicator-snapshot-text">Unknown</strong>
+              </div>
+            </div>
+            <div id="active-conditions" class="condition-list"></div>
+          </section>
+
+          <section class="surface latest-surface">
+            <div class="section-bar">
+              <h2>Last received event</h2>
+              <span id="latest-event-code" class="event-code-badge">--</span>
+            </div>
+            <div id="latest-event" class="latest-event empty-state">No events received.</div>
+          </section>
+        </div>
+
+        <section class="surface partition-surface">
+          <div class="section-bar">
+            <h2>Partitions</h2>
+            
+          </div>
+          <div class="data-table partition-table" role="table" aria-label="Partitions">
+            <div class="table-head" role="row">
+              <div role="columnheader">PARTITION</div>
+              <div role="columnheader">MODE</div>
+              <div role="columnheader">READY</div>
+              <div role="columnheader">CONDITION</div>
+            </div>
+            <div id="partition-grid" class="table-body"></div>
+          </div>
+        </section>
+      </section>
+
+      <section id="view-keypad" class="view">
+        <div class="screen-header">
+          <div>
+            <h1>Keypad</h1>
+          </div>
+          <label class="compact-field">
+            <span>PARTITION</span>
+            <select id="keypad-partition"></select>
+          </label>
+        </div>
+
+        <div id="keypad-warning" class="notice" role="status" hidden></div>
+
+        <div id="keypad-result" class="notice" role="status" hidden></div>
+        <section class="surface keypad-surface">
+          <vista-keypad-card id="ingress-keypad"></vista-keypad-card>
+        </section>
+      </section>
+
+      <section id="view-events" class="view">
+        <div class="screen-header">
+          <div>
+            <h1>Event Journal</h1>
+          </div>
+          <div id="journal-header-meta" class="screen-meta"></div>
+        </div>
+
+        <form id="event-filters" class="table-toolbar">
+          <div class="toolbar-search">
+            <input id="event-search" aria-label="Search journal" type="search" maxlength="80" placeholder="Search journal">
+          </div>
+          <label class="compact-field">
+            <span>WHERE</span>
+            <select id="event-partition">
+              <option value="0">All partitions</option>
+              <option value="system">System</option>
+              <option value="1">Partition 1</option>
+              <option value="2">Partition 2</option>
+              <option value="3">Partition 3</option>
+              <option value="4">Partition 4</option>
+              <option value="5">Partition 5</option>
+              <option value="6">Partition 6</option>
+              <option value="7">Partition 7</option>
+              <option value="8">Partition 8</option>
+            </select>
+          </label>
+          <label class="compact-field">
+            <span>SOURCE</span>
+            <select id="event-source">
+              <option value="">All sources</option>
+              <option value="live">Live only</option>
+              <option value="history">Panel history only</option>
+              <option value="both">Seen live + history</option>
+            </select>
+          </label>
+          <button type="submit" class="primary-button">Apply</button>
+          <button id="events-refresh" type="button" class="icon-button" aria-label="Refresh event journal">
+            <svg><use href="#i-refresh"></use></svg>
+          </button>
+        </form>
+
+        <section class="surface journal-surface">
+          <div id="event-summary" class="journal-summary" role="status"></div>
+          <div class="data-table event-table" role="table" aria-label="Event journal">
+            <div class="table-head event-head" role="row">
+              <div role="columnheader">TIME</div>
+              <div role="columnheader">CODE</div>
+              <div role="columnheader">EVENT</div>
+              <div role="columnheader">SOURCE</div>
+            </div>
+            <div id="event-list" class="table-body event-list"></div>
+          </div>
+          <div class="load-more-row">
+            <button id="event-newer" type="button" class="secondary-button" hidden>Newer</button>
+            <button id="event-more" type="button" class="secondary-button" hidden>Older</button>
+          </div>
+        </section>
+      </section>
+
+      <section id="view-diagnostics" class="view">
+        <div class="screen-header">
+          <div>
+            <h1>Diagnostics</h1>
+          </div>
+          <div id="diagnostic-version" class="screen-meta"></div>
+        </div>
+        <section class="surface diagnostic-sheet">
+          <div id="diagnostics-grid" class="diagnostics-grid"></div>
+        </section>
+      </section>
+    </main>
+  </div>
+</body>
+</html>
