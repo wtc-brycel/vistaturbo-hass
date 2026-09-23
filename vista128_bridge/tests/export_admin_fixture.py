@@ -56,7 +56,7 @@ diagnostic_types = [
     ("warning", "protocol", "vista-rs232", "protocol.invalid_frame", "Invalid VISTA protocol frame rejected", ""),
     ("info", "synchronization", "synchronizer", "synchronization.completed", "read-only VISTA startup synchronization", "sync_fixture_1"),
 ]
-for index in range(24):
+for index in range(65):
     severity, category, component, event_type, message, correlation = diagnostic_types[index % len(diagnostic_types)]
     occurred = diag_start - timedelta(minutes=index * 3)
     diagnostic_records.append({
@@ -90,7 +90,7 @@ diagnostics_api = {
     "next_cursor": "",
     "incidents": diagnostic_incidents,
     "stats": {
-        "count": 24,
+        "count": 65,
         "oldest_at": diagnostic_records[-1]["occurred_at"],
         "newest_at": diagnostic_records[0]["occurred_at"],
         "write_errors": 0,
