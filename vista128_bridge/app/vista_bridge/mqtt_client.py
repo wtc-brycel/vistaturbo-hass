@@ -14,7 +14,7 @@ import paho.mqtt.client as mqtt
 
 from .command_model import VistaCommand, command_from_request
 from .config import Settings
-from .diagnostics import DiagnosticJournal
+from .diagnostics import DiagnosticEvents as DE, DiagnosticJournal
 from .mqtt_discovery import (
     KEYPAD_ALARM_SPECS,
     PANEL_ALARM_SPECS,
@@ -301,14 +301,14 @@ class MqttPublisher:
             state = self.diagnostic_state()
             LOG.error("MQTT watchdog restarting transport: %s", reason)
             self._diag(
-                "ha_transport.watchdog_triggered",
+                DE.HA_WATCHDOG_TRIGGERED,
                 severity="error",
                 message=reason,
                 details=state,
                 correlation_id=correlation_id,
             )
             self._diag(
-                "ha_transport.recovery_started",
+                DE.HA_RECOVERY_STARTED,
                 severity="warning",
                 message="Replacing MQTT transport after watchdog trigger",
                 details={"reason": reason, **state},
@@ -319,7 +319,7 @@ class MqttPublisher:
             except Exception as exc:
                 LOG.exception("MQTT watchdog could not build replacement client")
                 self._diag(
-                    "ha_transport.recovery_failed",
+                    DE.HA_RECOVERY_FAILED,
                     severity="error",
                     message="Could not build replacement MQTT client",
                     details={"exception_type": type(exc).__name__},
@@ -344,7 +344,7 @@ class MqttPublisher:
             except Exception as exc:
                 LOG.exception("MQTT watchdog could not start replacement client")
                 self._diag(
-                    "ha_transport.recovery_failed",
+                    DE.HA_RECOVERY_FAILED,
                     severity="error",
                     message="Could not start replacement MQTT client",
                     details={"exception_type": type(exc).__name__},
@@ -358,7 +358,7 @@ class MqttPublisher:
                 return False
 
             self._diag(
-                "ha_transport.client_replaced",
+                DE.HA_CLIENT_REPLACED,
                 message="MQTT client replaced; awaiting broker connection",
                 details={
                     "watchdog_restarts": self.watchdog_restarts,
@@ -909,7 +909,7 @@ class MqttPublisher:
                 self._last_disconnect_monotonic = time.monotonic()
             LOG.error("MQTT connection rejected: %s", reason_code)
             self._diag(
-                "ha_transport.connection_rejected",
+                DE.HA_CONNECTION_REJECTED,
                 severity="error",
                 message="MQTT broker rejected connection",
                 details={"reason_code": str(reason_code)},
@@ -942,7 +942,7 @@ class MqttPublisher:
 
         LOG.info("Connected to MQTT broker")
         self._diag(
-            "ha_transport.connected",
+            DE.HA_CONNECTED,
             message="MQTT broker connection established",
             details={"transport_generation": transport_generation},
             correlation_id=correlation_id,
@@ -995,7 +995,7 @@ class MqttPublisher:
             self._acked_mids.clear()
             transport_generation = self._transport_generation
         self._diag(
-            "ha_transport.disconnected",
+            DE.HA_DISCONNECTED,
             severity="info" if self._stopping else "warning",
             message=(
                 "MQTT transport stopped"
