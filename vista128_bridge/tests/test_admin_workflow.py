@@ -300,6 +300,14 @@ class AdminApiWorkflowTests(unittest.IsolatedAsyncioTestCase):
         ).json()
         self.assertNotEqual(first["records"][0]["id"], second["records"][0]["id"])
 
+        oldest = await (
+            await self.client.get(
+                "/api/diagnostics?limit=1&order=oldest",
+                headers=self.headers,
+            )
+        ).json()
+        self.assertEqual(oldest["records"][0]["event_type"], DE.HA_WATCHDOG_TRIGGERED)
+
         incident = await (
             await self.client.get(
                 "/api/diagnostics?correlation_id=" + correlation,
@@ -336,6 +344,7 @@ class AdminApiWorkflowTests(unittest.IsolatedAsyncioTestCase):
             "event_type=ha_transport.nope",
             "component=bad%20component",
             "correlation_id=bad%20incident",
+            "order=sideways",
             "cursor=!!",
         ):
             with self.subTest(query=query):
