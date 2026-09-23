@@ -431,7 +431,8 @@ class VistaBridge:
         self._panel_session_id = ""
 
     def _is_connected(self) -> bool:
-        return self._panel_connected.is_set()
+        panel_connected = getattr(self, "_panel_connected", None)
+        return bool(panel_connected is not None and panel_connected.is_set())
 
     def _force_reconnect(self) -> None:
         if self._writer is not None:
