@@ -5,6 +5,8 @@ import os
 import sqlite3
 import sys
 import tempfile
+import threading
+import time
 import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "app"))
@@ -114,6 +116,14 @@ class DiagnosticJournalTests(unittest.TestCase):
             )
             transport = journal.recent(category="ha_transport")
             self.assertEqual(len(transport), 1)
+            window = journal.recent(
+                since="2026-09-23T10:00:30+00:00",
+                until="2026-09-23T10:01:30+00:00",
+            )
+            self.assertEqual(
+                [item.event_type for item in window],
+                [DE.HA_DISCONNECTED],
+            )
 
     def test_prune_enforces_age_and_row_limits(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -144,6 +154,51 @@ class DiagnosticJournalTests(unittest.TestCase):
             )
             self.assertEqual(deleted, 100)
             self.assertEqual(journal.stats().count, 0)
+
+    def test_record_does_not_block_on_slow_sqlite_writer(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = self.make_journal(os.path.join(tmp, "diagnostics.sqlite3"))
+            gate = threading.Event()
+            original_persist = journal._persist_batch
+
+            def slow_persist(batch):
+                gate.wait(timeout=1.0)
+                original_persist(batch)
+
+            journal._persist_batch = slow_persist
+            started = time.monotonic()
+            event_id = journal.record(
+                DE.HA_DISCONNECTED,
+                severity="warning",
+                component="mqtt",
+                details={"reason_code": 7},
+            )
+            elapsed = time.monotonic() - started
+
+            self.assertIsNotNone(event_id)
+            self.assertLess(elapsed, 0.1)
+            gate.set()
+            self.assertTrue(journal.flush(timeout=2.0))
+            journal.close()
+
+    def test_close_flushes_last_queued_event(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "diagnostics.sqlite3")
+            journal = self.make_journal(path)
+            event_id = journal.record(
+                DE.APP_STOPPED,
+                component="bridge",
+                occurred_at="2026-09-23T19:30:00+00:00",
+            )
+
+            self.assertIsNotNone(event_id)
+            self.assertTrue(journal.close(timeout=2.0))
+            with sqlite3.connect(path) as db:
+                row = db.execute(
+                    "SELECT event_type FROM diagnostic_events WHERE event_id = ?",
+                    (event_id,),
+                ).fetchone()
+            self.assertEqual(row, (DE.APP_STOPPED,))
 
     def test_invalid_event_taxonomy_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
