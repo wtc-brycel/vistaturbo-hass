@@ -72,7 +72,11 @@ for index in range(65):
         "panel_session_id": "panel_fixture",
         "transport_session_id": "ha_session_fixture" if component == "mqtt" else "",
         "correlation_id": correlation,
-        "details": {},
+        "details": (
+            {"last_puback_age_seconds": 61.2, "transport_generation": 7}
+            if event_type == "ha_transport.watchdog_triggered"
+            else {}
+        ),
     })
 diagnostic_incidents = [{
     "correlation_id": "ha_fixture_1",
