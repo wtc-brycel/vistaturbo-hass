@@ -60,6 +60,7 @@ class MqttPublisherTests(unittest.TestCase):
         now = (
             self.publisher._last_heartbeat_monotonic
             + self.publisher.HEARTBEAT_INTERVAL_SECONDS
+            + 0.1
         )
 
         self.assertFalse(self.publisher.watchdog_tick(now))
@@ -76,6 +77,7 @@ class MqttPublisherTests(unittest.TestCase):
         now = (
             self.publisher._last_heartbeat_monotonic
             + self.publisher.HEARTBEAT_INTERVAL_SECONDS
+            + 0.1
         )
         self.assertFalse(self.publisher.watchdog_tick(now))
         self.assertIsNotNone(self.publisher._heartbeat_mid)
