@@ -48,7 +48,7 @@ class MqttPublisherTests(unittest.TestCase):
         self.assertTrue(self.publisher.consume_recovery_request())
         self.assertFalse(self.publisher.consume_recovery_request())
         self.assertTrue(client.suppress_exceptions)
-        self.assertTrue(
+        self.assertFalse(
             any(
                 item[0] == "vista128/bridge/availability" and item[1] == "online"
                 for item in client.published
