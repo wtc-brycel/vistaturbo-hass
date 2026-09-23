@@ -128,6 +128,11 @@ test("diagnostics loads categorized journal and correlated incidents", async ({ 
   await expect(page.locator("#diagnostic-event-list .diagnostic-event-row")).toHaveCount(50);
   await expect(page.locator("#diagnostic-incidents .diagnostic-incident")).toHaveCount(1);
   await expect(page.locator("#diagnostic-summary")).toContainText("65 retained");
+  const firstDiagnostic = page.locator("#diagnostic-event-list .diagnostic-event-row").first();
+  await firstDiagnostic.click();
+  await expect(firstDiagnostic.locator(".diagnostic-event-details")).toBeVisible();
+  await expect(firstDiagnostic.locator(".diagnostic-event-details")).toContainText("last puback age seconds");
+  await expect(firstDiagnostic.locator(".diagnostic-event-details")).toContainText("61.2");
   await page.locator("#diagnostic-severity").selectOption("error");
   await page.locator("#diagnostic-category").selectOption("ha_transport");
   await page.getByRole("button", { name: "Apply", exact: true }).click();
