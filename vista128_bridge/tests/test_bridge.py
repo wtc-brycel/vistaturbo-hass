@@ -1,5 +1,8 @@
 import os
+import queue
 import sys
+import tempfile
+import threading
 import unittest
 from types import SimpleNamespace
 
@@ -11,6 +14,7 @@ from fake_paho import install_fake_paho  # noqa: E402
 install_fake_paho()
 
 from vista_bridge.bridge import VistaBridge  # noqa: E402
+from vista_bridge.diagnostics import DiagnosticEvents as DE, DiagnosticJournal  # noqa: E402
 from vista_bridge.framing import RawFrame  # noqa: E402
 from vista_bridge.bridge import TxItem  # noqa: E402
 
@@ -210,6 +214,61 @@ class BridgeFrameTests(unittest.TestCase):
             (("bridge/availability", "online"), {"retain": True, "qos": 1}),
             bridge.mqtt.published,
         )
+
+    def test_health_snapshot_is_bounded_and_contains_both_health_planes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bridge = VistaBridge.__new__(VistaBridge)
+            bridge.settings = SimpleNamespace(
+                diagnostics=SimpleNamespace(health_snapshot_interval_seconds=900)
+            )
+            bridge.diagnostics = DiagnosticJournal(
+                os.path.join(tmp, "diagnostics.sqlite3")
+            )
+            bridge._started_monotonic = 100.0
+            bridge._last_health_snapshot_monotonic = 0.0
+            bridge._panel_connected = threading.Event()
+            bridge._panel_connected.set()
+            bridge.state = SimpleNamespace(
+                live_snapshot_complete=True,
+                session_generation=4,
+            )
+            bridge.mqtt = SimpleNamespace(
+                diagnostic_state=lambda now: {
+                    "connected": True,
+                    "transport_generation": 3,
+                    "last_puback_age_seconds": 1.5,
+                }
+            )
+            bridge.synchronizer = SimpleNamespace(
+                last_success_at="2026-09-23T18:00:00+00:00",
+                failures_consecutive=0,
+            )
+            bridge.rx_frames = 100
+            bridge.rx_bytes = 2000
+            bridge.tx_frames = 25
+            bridge.tx_bytes = 500
+            bridge.invalid_frames = 1
+            bridge._tx_queue = queue.Queue()
+            bridge._raw_tx_queue = queue.Queue()
+            bridge.printer = SimpleNamespace(
+                metrics=SimpleNamespace(status="idle", queue_depth=0)
+            )
+
+            bridge._maybe_record_health_snapshot(now=1000.0)
+            bridge._maybe_record_health_snapshot(now=1100.0)
+
+            records = bridge.diagnostics.recent(
+                event_type=DE.HEALTH_SNAPSHOT,
+                order="oldest",
+            )
+            self.assertEqual(len(records), 1)
+            details = records[0].details
+            self.assertTrue(details["panel_connected"])
+            self.assertTrue(details["panel_state_fresh"])
+            self.assertEqual(details["state_session_generation"], 4)
+            self.assertTrue(details["ha_transport"]["connected"])
+            self.assertEqual(details["ha_transport"]["transport_generation"], 3)
+            self.assertEqual(details["tx_queue_depth"], 0)
 
     def test_control_and_raw_tx_logs_redact_payloads(self):
         bridge = self.make_bridge()
