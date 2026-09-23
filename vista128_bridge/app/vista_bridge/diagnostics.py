@@ -376,6 +376,202 @@ class DiagnosticJournal:
             return []
         self.flush(timeout=0.5)
         limit = max(1, min(1000, int(limit)))
+        severity, category, event_type, order = self._validate_filters(
+            severity=severity,
+            category=category,
+            event_type=event_type,
+            order=order,
+        )
+        clauses, values = self._filter_clauses(
+            severity=severity,
+            category=category,
+            component=component,
+            event_type=event_type,
+            correlation_id=correlation_id,
+            boot_id=boot_id,
+            since=since,
+            until=until,
+        )
+
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        direction = "DESC" if order == "newest" else "ASC"
+        query = (
+            "SELECT * FROM diagnostic_events "
+            f"{where} ORDER BY occurred_at {direction}, id {direction} LIMIT ?"
+        )
+        values.append(limit)
+
+        try:
+            with closing(self._connect()) as db:
+                rows = db.execute(query, values).fetchall()
+        except sqlite3.Error:
+            LOG.exception("Could not read diagnostic journal")
+            return []
+        return [self._record_from_row(row) for row in rows]
+
+    def query_page(
+        self,
+        *,
+        limit: int = 100,
+        cursor: dict[str, Any] | None = None,
+        severity: str | None = None,
+        category: str | None = None,
+        component: str | None = None,
+        event_type: str | None = None,
+        correlation_id: str | None = None,
+        boot_id: str | None = None,
+        since: str | None = None,
+        until: str | None = None,
+        order: str = "newest",
+    ) -> dict[str, Any]:
+        """Return one stable cursor page for the management API."""
+        if not self.available:
+            return {"records": [], "next_cursor": None}
+        self.flush(timeout=0.5)
+        limit = max(1, min(500, int(limit)))
+        severity, category, event_type, order = self._validate_filters(
+            severity=severity,
+            category=category,
+            event_type=event_type,
+            order=order,
+        )
+        clauses, values = self._filter_clauses(
+            severity=severity,
+            category=category,
+            component=component,
+            event_type=event_type,
+            correlation_id=correlation_id,
+            boot_id=boot_id,
+            since=since,
+            until=until,
+        )
+        direction = "DESC" if order == "newest" else "ASC"
+        if cursor is not None:
+            if not isinstance(cursor, dict) or set(cursor) != {"occurred_at", "id"}:
+                raise ValueError("invalid diagnostic cursor")
+            occurred_at = cursor.get("occurred_at")
+            record_id = cursor.get("id")
+            if (
+                not isinstance(occurred_at, str)
+                or not 1 <= len(occurred_at) <= 64
+                or type(record_id) is not int
+                or record_id < 1
+            ):
+                raise ValueError("invalid diagnostic cursor")
+            operator = "<" if order == "newest" else ">"
+            clauses.append(
+                f"(occurred_at {operator} ? OR "
+                f"(occurred_at = ? AND id {operator} ?))"
+            )
+            values.extend((occurred_at, occurred_at, record_id))
+
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        query = (
+            "SELECT * FROM diagnostic_events "
+            f"{where} ORDER BY occurred_at {direction}, id {direction} LIMIT ?"
+        )
+        values.append(limit + 1)
+        try:
+            with closing(self._connect()) as db:
+                rows = db.execute(query, values).fetchall()
+        except sqlite3.Error:
+            LOG.exception("Could not page diagnostic journal")
+            return {"records": [], "next_cursor": None}
+
+        has_more = len(rows) > limit
+        rows = rows[:limit]
+        records = [self._record_from_row(row) for row in rows]
+        next_cursor = None
+        if has_more and records:
+            last = records[-1]
+            next_cursor = {"occurred_at": last.occurred_at, "id": last.id}
+        return {"records": records, "next_cursor": next_cursor}
+
+    def recent_incidents(self, *, limit: int = 20) -> list[dict[str, Any]]:
+        """Summarize recent correlated diagnostic sequences for the UI."""
+        if not self.available:
+            return []
+        self.flush(timeout=0.5)
+        limit = max(1, min(100, int(limit)))
+        try:
+            with closing(self._connect()) as db:
+                correlations = db.execute(
+                    """
+                    SELECT correlation_id, MIN(occurred_at) AS started_at,
+                           MAX(occurred_at) AS ended_at, COUNT(*) AS event_count
+                    FROM diagnostic_events
+                    WHERE correlation_id <> ''
+                    GROUP BY correlation_id
+                    ORDER BY ended_at DESC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                ).fetchall()
+                incidents: list[dict[str, Any]] = []
+                severity_rank = {
+                    "debug": 0,
+                    "info": 1,
+                    "warning": 2,
+                    "error": 3,
+                    "critical": 4,
+                }
+                for correlation in correlations:
+                    rows = db.execute(
+                        """
+                        SELECT severity, category, component, event_type, message
+                        FROM diagnostic_events
+                        WHERE correlation_id = ?
+                        ORDER BY occurred_at ASC, id ASC
+                        """,
+                        (correlation["correlation_id"],),
+                    ).fetchall()
+                    if not rows:
+                        continue
+                    highest = max(
+                        (str(row["severity"]) for row in rows),
+                        key=lambda value: severity_rank.get(value, -1),
+                    )
+                    incidents.append(
+                        {
+                            "correlation_id": str(correlation["correlation_id"]),
+                            "started_at": str(correlation["started_at"]),
+                            "ended_at": str(correlation["ended_at"]),
+                            "event_count": int(correlation["event_count"]),
+                            "severity": highest,
+                            "categories": sorted(
+                                {str(row["category"]) for row in rows}
+                            ),
+                            "components": sorted(
+                                {
+                                    str(row["component"])
+                                    for row in rows
+                                    if row["component"]
+                                }
+                            ),
+                            "event_types": [str(row["event_type"]) for row in rows],
+                            "summary": next(
+                                (
+                                    str(row["message"])
+                                    for row in rows
+                                    if str(row["message"])
+                                ),
+                                str(rows[0]["event_type"]),
+                            ),
+                        }
+                    )
+                return incidents
+        except sqlite3.Error:
+            LOG.exception("Could not summarize diagnostic incidents")
+            return []
+
+    @staticmethod
+    def _validate_filters(
+        *,
+        severity: str | None,
+        category: str | None,
+        event_type: str | None,
+        order: str,
+    ) -> tuple[str | None, str | None, str | None, str]:
         if severity is not None:
             severity = severity.lower().strip()
             if severity not in DIAGNOSTIC_SEVERITIES:
@@ -393,7 +589,21 @@ class DiagnosticJournal:
                 raise ValueError("invalid diagnostic event type filter")
         if order not in {"newest", "oldest"}:
             raise ValueError("diagnostic order must be newest or oldest")
+        return severity, category, event_type, order
 
+    @classmethod
+    def _filter_clauses(
+        cls,
+        *,
+        severity: str | None,
+        category: str | None,
+        component: str | None,
+        event_type: str | None,
+        correlation_id: str | None,
+        boot_id: str | None,
+        since: str | None,
+        until: str | None,
+    ) -> tuple[list[str], list[Any]]:
         clauses: list[str] = []
         values: list[Any] = []
         for column, value in (
@@ -407,29 +617,14 @@ class DiagnosticJournal:
             if value is None:
                 continue
             clauses.append(f"{column} = ?")
-            values.append(self._clean_text(value, 96))
+            values.append(cls._clean_text(value, 96))
         if since:
             clauses.append("occurred_at >= ?")
-            values.append(self._clean_text(since, 64))
+            values.append(cls._clean_text(since, 64))
         if until:
             clauses.append("occurred_at <= ?")
-            values.append(self._clean_text(until, 64))
-
-        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-        direction = "DESC" if order == "newest" else "ASC"
-        query = (
-            "SELECT * FROM diagnostic_events "
-            f"{where} ORDER BY occurred_at {direction}, id {direction} LIMIT ?"
-        )
-        values.append(limit)
-
-        try:
-            with closing(self._connect()) as db:
-                rows = db.execute(query, values).fetchall()
-        except sqlite3.Error:
-            LOG.exception("Could not read diagnostic journal")
-            return []
-        return [self._record_from_row(row) for row in rows]
+            values.append(cls._clean_text(until, 64))
+        return clauses, values
 
     def stats(self) -> DiagnosticStats:
         if self.available:
