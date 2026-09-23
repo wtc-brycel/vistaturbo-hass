@@ -780,6 +780,7 @@ class VistaControlCoordinator:
         verification = str(extra.get("verification", ""))
         payload = {
             "request_id": request.request_id,
+            "interaction_id": request.interaction_id,
             "ok": bool(ok),
             "kind": request.kind,
             "partition": request.partition,
