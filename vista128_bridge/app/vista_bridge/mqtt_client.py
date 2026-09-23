@@ -143,6 +143,10 @@ class MqttPublisher:
             self._consumed_recovery_generation = self._recovery_generation
             return True
 
+    def request_recovery_replay(self) -> None:
+        with self._client_lock:
+            self._recovery_generation += 1
+
     def watchdog_tick(self, now: float | None = None) -> bool:
         """Check broker progress and replace a wedged Paho transport if needed."""
         if not self._started or self._stopping:
