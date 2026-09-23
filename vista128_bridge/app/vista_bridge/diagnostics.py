@@ -374,6 +374,7 @@ class DiagnosticJournal:
     ) -> list[DiagnosticRecord]:
         if not self.available:
             return []
+        self.flush(timeout=0.5)
         limit = max(1, min(1000, int(limit)))
         if severity is not None:
             severity = severity.lower().strip()
@@ -431,6 +432,8 @@ class DiagnosticJournal:
         return [self._record_from_row(row) for row in rows]
 
     def stats(self) -> DiagnosticStats:
+        if self.available:
+            self.flush(timeout=0.5)
         if not self.available:
             return DiagnosticStats(
                 0,
