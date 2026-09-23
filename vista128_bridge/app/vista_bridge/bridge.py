@@ -6,8 +6,10 @@ from datetime import datetime, timezone
 import logging
 import queue
 import threading
+import time
 
 from .config import Settings
+from .diagnostics import DiagnosticJournal
 from .control import VistaControlCoordinator
 from .event_store import EventStore
 from .framing import RawFrame, VistaStreamFramer
@@ -19,6 +21,7 @@ from .protocol import identify_message, validate_packet
 from .state import VistaState
 from .synchronizer import VistaSynchronizer
 from .telnet_transport import TelnetSerialFilter
+from .version import VERSION
 
 LOG = logging.getLogger(__name__)
 
@@ -38,6 +41,14 @@ class VistaBridge:
         self._telnet = TelnetSerialFilter()
         self._installer_guard = InstallerProgrammingGuard()
         self._tx_safety_lock = threading.Lock()
+        self._started_monotonic = time.monotonic()
+        self._last_health_snapshot_monotonic = 0.0
+        self._panel_session_id = ""
+        self.diagnostics = DiagnosticJournal(
+            settings.diagnostics.sqlite_path,
+            max_age_days=settings.diagnostics.max_age_days,
+            max_rows=settings.diagnostics.max_rows,
+        )
         self.printer = TransPortEventPrinter(settings)
         self.event_store = (
             EventStore(
@@ -70,6 +81,7 @@ class VistaBridge:
             self._force_reconnect,
             self._on_query_start,
             self._on_snapshot_check,
+            diagnostics=self.diagnostics,
         )
         self.control = VistaControlCoordinator(
             settings.control,
@@ -87,6 +99,7 @@ class VistaBridge:
             self.enqueue_alarm_control,
             self._record_control_audit,
             self.control.enqueue_command,
+            diagnostics=self.diagnostics,
         )
         self.handler = ProtocolMessageHandler(
             settings,
@@ -159,6 +172,16 @@ class VistaBridge:
         return self._enqueue_tx(data, source="debug", label="raw")
 
     async def run(self) -> None:
+        self.diagnostics.record(
+            "system.app_started",
+            component="bridge",
+            message="Vista Turbo bridge started",
+            details={
+                "version": VERSION,
+                "diagnostic_retention_days": self.settings.diagnostics.max_age_days,
+                "diagnostic_max_rows": self.settings.diagnostics.max_rows,
+            },
+        )
         self.mqtt.start()
         background = [
             asyncio.create_task(self._metrics_loop(), name="metrics"),
@@ -168,6 +191,12 @@ class VistaBridge:
         try:
             await self._connection_loop()
         finally:
+            self.diagnostics.record(
+                "system.app_stopping",
+                component="bridge",
+                message="Vista Turbo bridge stopping",
+                details={"uptime_seconds": round(time.monotonic() - self._started_monotonic, 3)},
+            )
             self._stop.set()
             for task in background:
                 task.cancel()
@@ -177,6 +206,12 @@ class VistaBridge:
             self.mqtt.publish("panel/automation_available", "OFF", retain=True)
             self.mqtt.publish("panel/automation_availability_source", "offline", retain=True)
             self.mqtt.stop()
+            self.diagnostics.record(
+                "system.app_stopped",
+                component="bridge",
+                message="Vista Turbo bridge stopped",
+                details={"uptime_seconds": round(time.monotonic() - self._started_monotonic, 3)},
+            )
 
     async def _connection_loop(self) -> None:
         delay = self.settings.panel.reconnect_min_seconds
@@ -230,11 +265,42 @@ class VistaBridge:
                     self.settings.panel.port,
                     self.settings.panel.connect_timeout_seconds,
                 )
+                self.diagnostics.record(
+                    "panel_transport.connect_failed",
+                    severity="warning",
+                    component="tcp",
+                    message="Panel TCP connection timed out",
+                    details={
+                        "exception_type": "TimeoutError",
+                        "timeout_seconds": self.settings.panel.connect_timeout_seconds,
+                        "port": self.settings.panel.port,
+                    },
+                )
             except Exception as exc:
+                was_connected = self._is_connected()
                 LOG.warning(
                     "Panel connection lost/failed (%s): %s",
                     type(exc).__name__,
                     exc,
+                )
+                self.diagnostics.record(
+                    (
+                        "panel_transport.connection_lost"
+                        if was_connected
+                        else "panel_transport.connect_failed"
+                    ),
+                    severity="warning",
+                    component="tcp",
+                    message=(
+                        "Panel TCP connection lost"
+                        if was_connected
+                        else "Panel TCP connection failed"
+                    ),
+                    details={
+                        "exception_type": type(exc).__name__,
+                        "detail": str(exc),
+                        "port": self.settings.panel.port,
+                    },
                 )
             finally:
                 await self._stop_session(tasks)
@@ -242,6 +308,12 @@ class VistaBridge:
             if self._stop.is_set():
                 return
             LOG.info("Reconnecting in %ss", delay)
+            self.diagnostics.record(
+                "panel_transport.reconnect_scheduled",
+                component="tcp",
+                message="Panel TCP reconnect scheduled",
+                details={"delay_seconds": delay},
+            )
             await asyncio.sleep(delay)
             delay = min(delay * 2, self.settings.panel.reconnect_max_seconds)
 
@@ -260,6 +332,8 @@ class VistaBridge:
 
     def _start_session(self, writer: asyncio.StreamWriter) -> None:
         self._writer = writer
+        self._panel_session_id = self.diagnostics.new_id("panel")
+        self.diagnostics.set_panel_session(self._panel_session_id)
         self.framer = VistaStreamFramer()
         self._telnet = TelnetSerialFilter()
         self._installer_guard.reset()
@@ -269,6 +343,15 @@ class VistaBridge:
         self.mqtt.publish_alarm_states(self.state)
         self._panel_connected.set()
         LOG.info("Panel TCP connection established")
+        self.diagnostics.record(
+            "panel_transport.connected",
+            component="tcp",
+            message="Panel TCP session established",
+            details={
+                "port": self.settings.panel.port,
+                "state_session_generation": self.state.session_generation,
+            },
+        )
         self.mqtt.publish("panel/connected", "ON", retain=True)
         self.mqtt.publish("panel/state_fresh", "OFF", retain=True, qos=1)
         self.mqtt.publish("panel/automation_available", "OFF", retain=True)
@@ -301,6 +384,8 @@ class VistaBridge:
             except Exception:
                 pass
             self._writer = None
+        self.diagnostics.clear_panel_session()
+        self._panel_session_id = ""
 
     def _is_connected(self) -> bool:
         return self._panel_connected.is_set()
@@ -352,12 +437,30 @@ class VistaBridge:
                     "Blocked installer-programming keypad sequence on partition %d",
                     guard_update.partition,
                 )
+                self.diagnostics.record(
+                    "control.safety_interlock_blocked",
+                    severity="warning",
+                    component="panel-control",
+                    message="Installer-programming keypad sequence blocked",
+                    details={"partition": guard_update.partition, "source": source},
+                )
                 return False, "installer_programming_blocked"
             try:
                 target.put_nowait(item)
             except queue.Full:
                 reason = "raw_tx_queue_full" if source == "debug" else "tx_queue_full"
                 LOG.warning("Rejected %s because its bounded TX queue is full", source)
+                self.diagnostics.record(
+                    "system.queue_saturated",
+                    severity="warning",
+                    component="panel-control",
+                    message="Panel transmit queue is full",
+                    details={
+                        "queue": "raw_tx" if source == "debug" else "tx",
+                        "source": source,
+                        "max_size": target.maxsize,
+                    },
+                )
                 return False, reason
             installer_guard.commit(guard_update)
         return True, "queued for immediate transmit"
@@ -541,6 +644,21 @@ class VistaBridge:
             expected,
             received,
         )
+        self.diagnostics.record(
+            "protocol.invalid_frame",
+            severity="warning",
+            component="vista-rs232",
+            message="Invalid VISTA protocol frame rejected",
+            details={
+                "sequence": self.rx_frames,
+                "length_ok": validation.length_ok,
+                "checksum_ok": validation.checksum_ok,
+                "declared_length": validation.declared_length,
+                "actual_length": validation.actual_length,
+                "checksum_expected": expected,
+                "checksum_received": received,
+            },
+        )
 
     def _publish_raw_frame(self, frame: RawFrame, message_type: str, validation) -> None:
         metadata = {
@@ -616,7 +734,20 @@ class VistaBridge:
     def _publish_mqtt_recovery_snapshot(self) -> bool:
         """Republish current authoritative state after an MQTT (re)connection."""
         LOG.info("Republishing Home Assistant state after MQTT connection")
+        correlation_id = self.mqtt.recovery_correlation_id
+        replay_started = time.monotonic()
         publish_errors_before = self.mqtt.publish_errors
+        self.diagnostics.record(
+            "state_delivery.replay_started",
+            component="mqtt",
+            message="Replaying Home Assistant discovery and current state",
+            correlation_id=correlation_id,
+            details={
+                "panel_connected": self._is_connected(),
+                "state_fresh": self.state.live_snapshot_complete,
+                "publish_errors_before": publish_errors_before,
+            },
+        )
         self.mqtt.publish_discovery()
         self._publish_metrics()
         self.mqtt.publish(
@@ -647,6 +778,18 @@ class VistaBridge:
             LOG.warning(
                 "MQTT recovery replay incomplete; Home Assistant remains unavailable"
             )
+            self.diagnostics.record(
+                "state_delivery.replay_failed",
+                severity="warning",
+                component="mqtt",
+                message="Home Assistant state replay was incomplete",
+                correlation_id=correlation_id,
+                details={
+                    "duration_ms": round((time.monotonic() - replay_started) * 1000, 1),
+                    "mqtt_connected": self.mqtt.connected,
+                    "publish_error_delta": self.mqtt.publish_errors - publish_errors_before,
+                },
+            )
             return False
 
         # Flip Home Assistant availability only after discovery and the current
@@ -659,7 +802,31 @@ class VistaBridge:
                 "MQTT recovery replay could not publish availability; "
                 "Home Assistant remains unavailable"
             )
-        return online
+            self.diagnostics.record(
+                "state_delivery.replay_failed",
+                severity="warning",
+                component="mqtt",
+                message="Could not publish Home Assistant availability after replay",
+                correlation_id=correlation_id,
+                details={
+                    "duration_ms": round((time.monotonic() - replay_started) * 1000, 1),
+                    "publish_error_delta": self.mqtt.publish_errors - publish_errors_before,
+                },
+            )
+            return False
+        self.diagnostics.record(
+            "state_delivery.replay_completed",
+            component="mqtt",
+            message="Home Assistant discovery and state replay completed",
+            correlation_id=correlation_id,
+            details={
+                "duration_ms": round((time.monotonic() - replay_started) * 1000, 1),
+                "panel_connected": self._is_connected(),
+                "state_fresh": self.state.live_snapshot_complete,
+            },
+        )
+        self.mqtt.complete_recovery()
+        return True
 
     async def _metrics_loop(self) -> None:
         ticks = 0
@@ -673,8 +840,43 @@ class VistaBridge:
                 self._publish_metrics()
                 if ticks % 2 == 0:
                     self._publish_dynamic_state(include_discovery=ticks % 12 == 0)
+            self._maybe_record_health_snapshot()
             ticks += 1
             await asyncio.sleep(5)
+
+    def _maybe_record_health_snapshot(self, now: float | None = None) -> None:
+        current = time.monotonic() if now is None else now
+        interval = self.settings.diagnostics.health_snapshot_interval_seconds
+        if (
+            self._last_health_snapshot_monotonic
+            and current - self._last_health_snapshot_monotonic < interval
+        ):
+            return
+        self._last_health_snapshot_monotonic = current
+        printer = self.printer.metrics
+        self.diagnostics.record(
+            "system.health_snapshot",
+            component="bridge",
+            message="Periodic bridge health snapshot",
+            details={
+                "uptime_seconds": round(current - self._started_monotonic, 3),
+                "panel_connected": self._is_connected(),
+                "panel_state_fresh": self.state.live_snapshot_complete,
+                "state_session_generation": self.state.session_generation,
+                "ha_transport": self.mqtt.diagnostic_state(current),
+                "last_sync_at": self.synchronizer.last_success_at or None,
+                "sync_failures_consecutive": self.synchronizer.failures_consecutive,
+                "rx_frames": self.rx_frames,
+                "rx_bytes": self.rx_bytes,
+                "tx_frames": self.tx_frames,
+                "tx_bytes": self.tx_bytes,
+                "invalid_frames": self.invalid_frames,
+                "tx_queue_depth": self._tx_queue.qsize(),
+                "raw_tx_queue_depth": self._raw_tx_queue.qsize(),
+                "printer_status": printer.status,
+                "printer_queue_depth": printer.queue_depth,
+            },
+        )
 
     def _publish_metrics(self) -> None:
         self.mqtt.publish(
