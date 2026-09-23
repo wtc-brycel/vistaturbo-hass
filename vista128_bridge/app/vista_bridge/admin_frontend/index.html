@@ -242,6 +242,65 @@
         <section class="surface diagnostic-sheet">
           <div id="diagnostics-grid" class="diagnostics-grid"></div>
         </section>
+
+        <section class="surface diagnostic-incidents-surface">
+          <div class="section-bar">
+            <span>RECENT INCIDENTS</span>
+            <span id="diagnostic-incident-count" class="section-state"></span>
+          </div>
+          <div id="diagnostic-incidents" class="diagnostic-incidents"></div>
+        </section>
+
+        <form id="diagnostic-filters" class="table-toolbar diagnostic-toolbar">
+          <label class="compact-field">
+            SEVERITY
+            <select id="diagnostic-severity">
+              <option value="">All severities</option>
+              <option value="critical">Critical</option>
+              <option value="error">Error</option>
+              <option value="warning">Warning</option>
+              <option value="info">Info</option>
+              <option value="debug">Debug</option>
+            </select>
+          </label>
+          <label class="compact-field">
+            CATEGORY
+            <select id="diagnostic-category">
+              <option value="">All categories</option>
+              <option value="system">System</option>
+              <option value="panel_transport">Panel transport</option>
+              <option value="protocol">Protocol</option>
+              <option value="synchronization">Synchronization</option>
+              <option value="ha_transport">HA transport</option>
+              <option value="state_delivery">State delivery</option>
+              <option value="control">Control</option>
+              <option value="persistence">Persistence</option>
+              <option value="printer">Printer</option>
+              <option value="management">Management</option>
+            </select>
+          </label>
+          <button class="primary-button" type="submit">Apply</button>
+          <button id="diagnostics-refresh" class="icon-button" type="button" aria-label="Refresh diagnostics">
+            <svg><use href="#i-refresh"></use></svg>
+          </button>
+        </form>
+
+        <section class="surface diagnostic-events-surface">
+          <div id="diagnostic-summary" class="journal-summary">Not loaded</div>
+          <div class="data-table diagnostic-event-table" role="table" aria-label="Diagnostic events">
+            <div class="table-head" role="row">
+              <div role="columnheader">Time</div>
+              <div role="columnheader">Severity</div>
+              <div role="columnheader">Category</div>
+              <div role="columnheader">Event</div>
+              <div role="columnheader">Component</div>
+            </div>
+            <div id="diagnostic-event-list" class="diagnostic-event-list" role="rowgroup"></div>
+          </div>
+          <div class="load-more-row">
+            <button id="diagnostic-more" type="button" class="secondary-button" hidden>Older</button>
+          </div>
+        </section>
       </section>
     </main>
   </div>
