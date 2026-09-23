@@ -9,7 +9,7 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "app"))
 
-from vista_bridge.diagnostics import DiagnosticJournal  # noqa: E402
+from vista_bridge.diagnostics import DiagnosticEvents as DE, DiagnosticJournal  # noqa: E402
 
 
 class DiagnosticJournalTests(unittest.TestCase):
@@ -26,7 +26,7 @@ class DiagnosticJournalTests(unittest.TestCase):
             journal.set_transport_session(transport_session)
 
             event_id = journal.record(
-                "ha_transport.watchdog_timeout",
+                DE.HA_WATCHDOG_TRIGGERED,
                 severity="error",
                 component="mqtt",
                 correlation_id=correlation,
@@ -51,7 +51,7 @@ class DiagnosticJournalTests(unittest.TestCase):
             journal = self.make_journal(path)
             secret = "super-secret-value"
             journal.record(
-                "control.command_failed",
+                DE.CONTROL_SAFETY_INTERLOCK_BLOCKED,
                 severity="warning",
                 details={
                     "pin": "1234",
