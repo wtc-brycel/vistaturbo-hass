@@ -111,6 +111,13 @@ class DiagnosticEvents:
     CONTROL_SAFETY_INTERLOCK_BLOCKED = "control.safety_interlock_blocked"
 
 
+DIAGNOSTIC_EVENT_TYPES = frozenset(
+    value
+    for name, value in vars(DiagnosticEvents).items()
+    if name.isupper() and isinstance(value, str)
+)
+
+
 @dataclass(frozen=True)
 class DiagnosticRecord:
     id: int
@@ -265,6 +272,8 @@ class DiagnosticJournal:
             raise ValueError(f"unsupported diagnostic severity: {severity}")
         if not EVENT_TYPE_RE.fullmatch(event_type):
             raise ValueError(f"invalid diagnostic event type: {event_type}")
+        if event_type not in DIAGNOSTIC_EVENT_TYPES:
+            raise ValueError(f"unsupported diagnostic event type: {event_type}")
         category = event_type.split(".", 1)[0]
         if category not in DIAGNOSTIC_CATEGORIES:
             raise ValueError(f"unsupported diagnostic category: {category}")
@@ -345,7 +354,10 @@ class DiagnosticJournal:
                 raise ValueError("invalid diagnostic category filter")
         if event_type is not None:
             event_type = event_type.lower().strip()
-            if not EVENT_TYPE_RE.fullmatch(event_type):
+            if (
+                not EVENT_TYPE_RE.fullmatch(event_type)
+                or event_type not in DIAGNOSTIC_EVENT_TYPES
+            ):
                 raise ValueError("invalid diagnostic event type filter")
         if order not in {"newest", "oldest"}:
             raise ValueError("diagnostic order must be newest or oldest")
