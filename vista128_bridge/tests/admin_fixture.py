@@ -21,7 +21,7 @@ class Authorizer:
 
 
 class Bridge:
-    def __init__(self, store=None):
+    def __init__(self, store=None, diagnostics=None):
         self.connected = True
         self.state = VistaState()
         self.state.apply_arming_status(ArmingStatusReport(("D",) * 8))
@@ -41,6 +41,7 @@ class Bridge:
             control=ControlSettings(True, True, False, 3, 0),
             event_history=NS(enabled=True, max_age_days=90, max_rows=10000),
             mqtt=NS(tls_enabled=False, password="never-export-mqtt-password"),
+            diagnostics=NS(max_age_days=30, max_rows=25000),
         )
         self.synchronizer = NS(
             lock=asyncio.Lock(), is_active=lambda: False, pending_transaction_kind=lambda: None,
@@ -58,7 +59,17 @@ class Bridge:
         self.handler = NS(last_event_received_at="")
         self.printer = NS(enabled=False, metrics=NS(status="disabled", queue_depth=0, completed=0,
                           uncertain=0, failed=0, dropped=0, last_error="", last_completed_at=""))
-        self.mqtt = NS(_client=NS(is_connected=lambda: True), publish_errors=0)
+        self.mqtt = NS(connected=True, publish_errors=0)
+        self.diagnostics = diagnostics or NS(
+            available=False,
+            runtime_state=lambda: {
+                "available": False,
+                "write_errors": 0,
+                "dropped_events": 0,
+                "pending_writes": 0,
+                "writer_alive": False,
+            },
+        )
         self.rx_frames, self.rx_bytes, self.tx_frames, self.tx_bytes, self.invalid_frames = 6248, 109520, 1802, 25180, 0
         self._tx_queue, self._raw_tx_queue = Queue(), Queue()
         self._telnet = NS(active=True)
