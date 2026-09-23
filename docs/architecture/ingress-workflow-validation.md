@@ -19,7 +19,7 @@ unchanged.
 | Event Journal | Retained SQLite `events`, never PIN-bearing `keypad_interactions` | Fifty-row cursor pages; applied filters remain fixed until Apply. System scope is distinct from all partitions. Database browsing remains available when the panel is offline. |
 | Event emphasis | `event_codes.py` canonical code mappings | A restore is historical restoration, not proof of current system normal. Code 07 is Close (Arm). English description matching cannot determine alarm family. |
 | Keypad | Current selected KD, core snapshot, original control gates, shared coordinator | Ordinary numeric/*/# keys only. No invented A-D, acknowledge, silence, reset, programming, or user-management workflow. |
-| Diagnostics | Current bridge health plus the structured Diagnostic Journal from ADR 0002 | Read-only. Current health remains live; retained diagnostics use bounded cursor pages and severity/category filters. Correlated recovery sequences are grouped as incidents, and selecting an incident shows its complete sequence regardless of list filters. No credentials, key sequences, raw payloads, private-key content, or diagnostic database paths are returned. |
+| Diagnostics | Current bridge health plus the structured Diagnostic Journal from ADR 0002 | Read-only. Current health remains live; retained diagnostics use bounded cursor pages, severity/category filters, and explicit newest/oldest ordering. Correlated recovery sequences are grouped as incidents, and selecting an incident shows its complete sequence regardless of category/severity filters while retaining the selected time order. No credentials, key sequences, raw payloads, private-key content, or diagnostic database paths are returned. |
 
 ## Keypad delivery
 
@@ -84,13 +84,13 @@ untyped alarms, keypad-only alarms, partition trouble, fault/bypass distinction,
 canonical event colors, actual coordinator admission/results, duplicate keys,
 actor isolation, unauthorized ingress, CSRF/origin failures, revoked WebSockets,
 query validation, system-only scope, event-journal paging, diagnostic redaction,
-diagnostic cursor paging, incident correlation, and diagnostic filter validation.
+diagnostic cursor paging, incident correlation, diagnostic ordering, and filter validation.
 
 Browser tests load the shipped HTML/CSS/JavaScript and unchanged keypad bundle
 with deterministic fixtures produced by the real snapshot builder. They check
 all four destinations, responsive labels/widths, light/dark rendering, keyboard
 component input, acknowledgement feedback, stale-state invalidation, event paging,
-diagnostic category/severity filters, complete incident views, and diagnostic paging.
+diagnostic category/severity filters, newest/oldest ordering, complete incident views, and diagnostic paging.
 Captures show fixture state, not a connected installation.
 
 These checks do not qualify the installed Supervisor proxy, its actual API
