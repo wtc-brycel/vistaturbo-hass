@@ -40,6 +40,7 @@ async function mount(page, { state = "normal", width = 1280, dark = false } = {}
           && (!category || record.category === category)
           && (!correlation || record.correlation_id === correlation);
       });
+      if (url.searchParams.get("order") === "oldest") rows = [...rows].reverse();
       const cursor = Number(url.searchParams.get("cursor") || 0);
       const records = rows.slice(cursor, cursor + 50);
       return route.fulfill({ json: {
@@ -151,14 +152,27 @@ test("diagnostic incident opens its full correlated event sequence", async ({ pa
   await page.getByRole("button", { name: "Diagnostics", exact: true }).click();
   await page.locator("#diagnostic-severity").selectOption("error");
   await page.locator("#diagnostic-category").selectOption("ha_transport");
+  await page.locator("#diagnostic-order").selectOption("oldest");
   await page.locator("#diagnostic-incidents .diagnostic-incident").click();
   await expect(page.locator("#diagnostic-summary")).toContainText("Incident selected");
   expect(h.diagnosticQueries.at(-1).correlation_id).toBe("ha_fixture_1");
   expect(h.diagnosticQueries.at(-1).severity).toBeUndefined();
   expect(h.diagnosticQueries.at(-1).category).toBeUndefined();
+  expect(h.diagnosticQueries.at(-1).order).toBe("oldest");
   await expect(page.locator("#diagnostic-event-list .diagnostic-event-row")).toHaveCount(
     fixture.diagnostics_api.records.filter((r) => r.correlation_id === "ha_fixture_1").length
   );
+  expect(h.errors).toEqual([]); h.close();
+});
+
+test("diagnostics can sort oldest first", async ({ page }) => {
+  const h = await mount(page);
+  await page.getByRole("button", { name: "Diagnostics", exact: true }).click();
+  await page.locator("#diagnostic-order").selectOption("oldest");
+  await page.getByRole("button", { name: "Apply", exact: true }).click();
+  expect(h.diagnosticQueries.at(-1).order).toBe("oldest");
+  const oldest = fixture.diagnostics_api.records.at(-1);
+  await expect(page.locator("#diagnostic-event-list .diagnostic-event-row").first()).toContainText(oldest.event_type);
   expect(h.errors).toEqual([]); h.close();
 });
 
