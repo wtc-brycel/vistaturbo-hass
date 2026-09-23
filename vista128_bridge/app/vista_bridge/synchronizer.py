@@ -10,7 +10,7 @@ import threading
 import time
 
 from .config import KeypadSettings, SyncSettings
-from .diagnostics import DiagnosticJournal
+from .diagnostics import DiagnosticEvents as DE, DiagnosticJournal
 from .protocol import (
     ARMING_STATUS_QUERY,
     EVENT_LOG_QUERY,
@@ -523,7 +523,7 @@ class VistaSynchronizer:
         )
         if lifecycle_correlation:
             self._diag(
-                "synchronization.started",
+                DE.SYNC_STARTED,
                 message=description,
                 correlation_id=lifecycle_correlation,
                 details={
@@ -583,7 +583,7 @@ class VistaSynchronizer:
                 self.failures_consecutive,
             )
             self._diag(
-                "synchronization.failed",
+                DE.SYNC_FAILED,
                 severity="warning",
                 message=description,
                 correlation_id=lifecycle_correlation,
@@ -603,7 +603,7 @@ class VistaSynchronizer:
         LOG.info("%s complete", description)
         if lifecycle_correlation:
             self._diag(
-                "synchronization.completed",
+                DE.SYNC_COMPLETED,
                 message=description,
                 correlation_id=lifecycle_correlation,
                 details={
@@ -693,7 +693,7 @@ class VistaSynchronizer:
         self._session_tainted = True
         LOG.warning("VISTA session marked unsafe after %s; reconnecting", reason)
         self._diag(
-            "synchronization.session_tainted",
+            DE.SYNC_SESSION_TAINTED,
             severity="warning",
             message="VISTA session marked unsafe; reconnect required",
             details={"reason": reason},
