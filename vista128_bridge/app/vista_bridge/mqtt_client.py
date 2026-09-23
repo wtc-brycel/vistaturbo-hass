@@ -804,7 +804,6 @@ class MqttPublisher:
 
         LOG.info("Connected to MQTT broker")
         self.publish("bridge/availability", "online", retain=True, qos=1)
-        self.publish_discovery()
         if self.settings.control.enabled and self.settings.control.native_alarm_enabled:
             client.subscribe(self.topic("partition/+/command"), qos=1)
         if self.settings.control.enabled and self.settings.control.keypad_enabled:
