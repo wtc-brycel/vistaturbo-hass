@@ -136,7 +136,7 @@ class EventStoreTests(unittest.TestCase):
 
     def test_pruning_enforces_age_and_row_limits(self):
         with tempfile.TemporaryDirectory() as tmp:
-            store = EventStore(os.path.join(tmp, "events.sqlite3"), max_age_days=30, max_rows=2)
+            store = EventStore(os.path.join(tmp, "events.sqlite3"), max_age_days=3650, max_rows=2)
             base = sample_event()
             for occurrence in (1, 2, 3):
                 store.record(
@@ -158,7 +158,7 @@ class EventStoreTests(unittest.TestCase):
     def test_keypad_audit_upserts_one_logical_interaction_with_command(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "events.sqlite3")
-            store = EventStore(path, max_age_days=30, max_rows=10)
+            store = EventStore(path, max_age_days=3650, max_rows=10)
             store.record_keypad_interaction(
                 interaction_id="interaction-1",
                 observed_at="2026-08-17T10:00:00+00:00",
@@ -315,7 +315,7 @@ class EventStoreTests(unittest.TestCase):
 
     def test_keypad_audit_retention_is_bounded(self):
         with tempfile.TemporaryDirectory() as tmp:
-            store = EventStore(os.path.join(tmp, "events.sqlite3"), max_age_days=30, max_rows=2)
+            store = EventStore(os.path.join(tmp, "events.sqlite3"), max_age_days=3650, max_rows=2)
             for index in range(3):
                 store.record_keypad_interaction(
                     interaction_id=f"interaction-{index}",
