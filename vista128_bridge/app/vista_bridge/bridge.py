@@ -616,6 +616,7 @@ class VistaBridge:
     def _publish_mqtt_recovery_snapshot(self) -> None:
         """Republish current authoritative state after an MQTT (re)connection."""
         LOG.info("Republishing Home Assistant state after MQTT connection")
+        self.mqtt.publish_discovery()
         self._publish_metrics()
         self.mqtt.publish(
             "panel/state_fresh",
