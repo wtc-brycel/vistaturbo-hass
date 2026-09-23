@@ -430,11 +430,17 @@ async function loadDiagnostics(reset, correlationId = null) {
   appState.diagnosticAbort?.abort(); appState.diagnosticAbort = new AbortController();
   const filters = reset
     ? correlationId
-      ? { severity: "", category: "", correlation_id: correlationId }
+      ? {
+          severity: "",
+          category: "",
+          correlation_id: correlationId,
+          order: byId("diagnostic-order").value,
+        }
       : {
           severity: byId("diagnostic-severity").value,
           category: byId("diagnostic-category").value,
           correlation_id: "",
+          order: byId("diagnostic-order").value,
         }
     : appState.diagnosticFilters;
   const params = new URLSearchParams({ limit: "50" });
