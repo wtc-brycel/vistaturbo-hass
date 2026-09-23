@@ -139,15 +139,31 @@ test("diagnostics loads categorized journal and correlated incidents", async ({ 
   expect(h.errors).toEqual([]); h.close();
 });
 
-test("diagnostic incident opens its correlated event sequence", async ({ page }) => {
+test("diagnostic incident opens its full correlated event sequence", async ({ page }) => {
   const h = await mount(page);
   await page.getByRole("button", { name: "Diagnostics", exact: true }).click();
+  await page.locator("#diagnostic-severity").selectOption("error");
+  await page.locator("#diagnostic-category").selectOption("ha_transport");
   await page.locator("#diagnostic-incidents .diagnostic-incident").click();
   await expect(page.locator("#diagnostic-summary")).toContainText("Incident selected");
   expect(h.diagnosticQueries.at(-1).correlation_id).toBe("ha_fixture_1");
+  expect(h.diagnosticQueries.at(-1).severity).toBeUndefined();
+  expect(h.diagnosticQueries.at(-1).category).toBeUndefined();
   await expect(page.locator("#diagnostic-event-list .diagnostic-event-row")).toHaveCount(
     fixture.diagnostics_api.records.filter((r) => r.correlation_id === "ha_fixture_1").length
   );
+  expect(h.errors).toEqual([]); h.close();
+});
+
+test("diagnostic history uses bounded older paging", async ({ page }) => {
+  const h = await mount(page);
+  await page.getByRole("button", { name: "Diagnostics", exact: true }).click();
+  await expect(page.locator("#diagnostic-event-list .diagnostic-event-row")).toHaveCount(50);
+  await expect(page.getByRole("button", { name: "Older", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Older", exact: true }).click();
+  await expect(page.locator("#diagnostic-event-list .diagnostic-event-row")).toHaveCount(65);
+  expect(h.diagnosticQueries.at(-1).cursor).toBe("50");
+  await expect(page.getByRole("button", { name: "Older", exact: true })).toBeHidden();
   expect(h.errors).toEqual([]); h.close();
 });
 
