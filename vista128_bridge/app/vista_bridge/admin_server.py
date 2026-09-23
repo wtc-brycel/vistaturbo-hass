@@ -326,6 +326,7 @@ class AdminServer:
             component = request.query.get("component", "").strip()
             event_type = request.query.get("event_type", "").strip().lower()
             correlation_id = request.query.get("correlation_id", "").strip()
+            order = request.query.get("order", "newest").strip().lower()
             if severity and severity not in DIAGNOSTIC_SEVERITIES:
                 raise ValueError("invalid severity")
             if category and category not in DIAGNOSTIC_CATEGORIES:
@@ -336,6 +337,8 @@ class AdminServer:
                 raise ValueError("invalid component")
             if correlation_id and not IDENTIFIER.fullmatch(correlation_id):
                 raise ValueError("invalid correlation")
+            if order not in {"newest", "oldest"}:
+                raise ValueError("invalid order")
         except (ValueError, TypeError):
             raise web.HTTPBadRequest(text="Invalid diagnostic query") from None
 
@@ -348,7 +351,7 @@ class AdminServer:
                 component=component or None,
                 event_type=event_type or None,
                 correlation_id=correlation_id or None,
-                order="newest",
+                order=order,
             )
             stats = journal.stats()
             return page, journal.recent_incidents(limit=12), stats, journal.runtime_state()
