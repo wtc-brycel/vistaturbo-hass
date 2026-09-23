@@ -699,6 +699,124 @@ button:focus-visible {
 
 .diagnostic-sheet { padding: 0; }
 
+.diagnostic-incidents-surface,
+.diagnostic-events-surface {
+  margin-top: 14px;
+}
+
+.diagnostic-toolbar {
+  grid-template-columns: 180px 220px auto 40px;
+  margin-top: 14px;
+}
+
+.diagnostic-incidents {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.diagnostic-incident {
+  min-width: 0;
+  min-height: 62px;
+  display: grid;
+  grid-template-columns: 68px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  border: 0;
+  border-right: 1px solid var(--divider-color);
+  border-bottom: 1px solid var(--divider-color);
+  background: var(--card-background-color);
+  color: var(--primary-text-color);
+  padding: 10px 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.diagnostic-incident:nth-child(2n) { border-right: 0; }
+.diagnostic-incident:hover { background: var(--surface-alt); }
+
+.diagnostic-incident-severity,
+.diagnostic-severity {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .05em;
+}
+
+.diagnostic-incident-copy {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.diagnostic-incident-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.diagnostic-incident-meta,
+.diagnostic-time,
+.diagnostic-category,
+.diagnostic-component {
+  color: var(--secondary-text-color);
+  font-size: 9px;
+}
+
+.diagnostic-incident-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.severity-critical .diagnostic-incident-severity,
+.diagnostic-severity.severity-critical,
+.severity-error .diagnostic-incident-severity,
+.diagnostic-severity.severity-error {
+  color: var(--error-color);
+}
+
+.severity-warning .diagnostic-incident-severity,
+.diagnostic-severity.severity-warning {
+  color: var(--warning-color);
+}
+
+.diagnostic-event-table .table-head,
+.diagnostic-event-table .diagnostic-event-row {
+  grid-template-columns: 142px 78px 135px minmax(220px, 1fr) 120px;
+}
+
+.diagnostic-event-row {
+  position: relative;
+}
+
+.diagnostic-event-row.severity-critical::before,
+.diagnostic-event-row.severity-error::before,
+.diagnostic-event-row.severity-warning::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+}
+
+.diagnostic-event-row.severity-critical::before,
+.diagnostic-event-row.severity-error::before { background: var(--error-color); }
+.diagnostic-event-row.severity-warning::before { background: var(--warning-color); }
+
+.diagnostic-time,
+.diagnostic-component {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.diagnostic-category {
+  text-transform: capitalize;
+}
+
+.diagnostic-event-description {
+  min-width: 0;
+  overflow: hidden;
+}
+
 .diagnostics-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -836,6 +954,22 @@ button:focus-visible {
     display: none;
   }
 
+  .diagnostic-toolbar {
+    grid-template-columns: 1fr 1fr;
+  }
+  .diagnostic-toolbar .primary-button { grid-column: 1; }
+  .diagnostic-toolbar .icon-button { grid-column: 2; justify-self: end; }
+  .diagnostic-incidents { grid-template-columns: 1fr; }
+  .diagnostic-incident { border-right: 0; }
+  .diagnostic-event-table .table-head,
+  .diagnostic-event-table .diagnostic-event-row {
+    grid-template-columns: 110px 70px minmax(110px, .75fr) minmax(180px, 1.4fr);
+  }
+  .diagnostic-event-table .table-head > :last-child,
+  .diagnostic-event-table .diagnostic-event-row > :last-child {
+    display: none;
+  }
+
   .diagnostics-grid { grid-template-columns: 1fr; }
   .diagnostic-group,
   .diagnostic-group:nth-child(2n),
@@ -886,6 +1020,16 @@ button:focus-visible {
 
   .event-table .table-head > :nth-child(4),
   .event-table .table-row > :nth-child(4) {
+    display: none;
+  }
+
+  .diagnostic-event-table .table-head,
+  .diagnostic-event-table .diagnostic-event-row {
+    grid-template-columns: 94px 64px minmax(0, 1fr);
+  }
+
+  .diagnostic-event-table .table-head > :nth-child(3),
+  .diagnostic-event-table .diagnostic-event-row > :nth-child(3) {
     display: none;
   }
 
