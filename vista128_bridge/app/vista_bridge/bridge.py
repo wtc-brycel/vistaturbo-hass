@@ -44,6 +44,7 @@ class VistaBridge:
         self._started_monotonic = time.monotonic()
         self._last_health_snapshot_monotonic = 0.0
         self._panel_session_id = ""
+        self._panel_recovery_correlation_id = ""
         self.diagnostics = DiagnosticJournal(
             settings.diagnostics.sqlite_path,
             max_age_days=settings.diagnostics.max_age_days,
@@ -116,6 +117,17 @@ class VistaBridge:
         if diagnostics is None:
             return None
         return diagnostics.record(event_type, **kwargs)
+
+    def _ensure_panel_recovery_correlation(self) -> str:
+        correlation_id = getattr(self, "_panel_recovery_correlation_id", "")
+        if correlation_id:
+            return correlation_id
+        diagnostics = getattr(self, "diagnostics", None)
+        if diagnostics is None:
+            return ""
+        correlation_id = diagnostics.new_id("panel_recovery")
+        self._panel_recovery_correlation_id = correlation_id
+        return correlation_id
 
     def _publish_control_result(self, payload: dict) -> None:
         self.mqtt.publish_json("control/result", payload, qos=1)
@@ -312,6 +324,7 @@ class VistaBridge:
                     DE.PANEL_CONNECT_FAILED,
                     severity="warning",
                     component="tcp",
+                    correlation_id=self._ensure_panel_recovery_correlation(),
                     message="Panel TCP connection timed out",
                     details={
                         "exception_type": "TimeoutError",
@@ -334,6 +347,7 @@ class VistaBridge:
                     ),
                     severity="warning",
                     component="tcp",
+                    correlation_id=self._ensure_panel_recovery_correlation(),
                     message=(
                         "Panel TCP connection lost"
                         if was_connected
@@ -354,6 +368,7 @@ class VistaBridge:
             self._diagnostic_record(
                 DE.PANEL_RECONNECT_SCHEDULED,
                 component="tcp",
+                correlation_id=getattr(self, "_panel_recovery_correlation_id", ""),
                 message="Panel TCP reconnect scheduled",
                 details={"delay_seconds": delay},
             )
@@ -386,15 +401,21 @@ class VistaBridge:
         self.mqtt.publish_alarm_states(self.state)
         self._panel_connected.set()
         LOG.info("Panel TCP connection established")
+        recovery_correlation_id = getattr(
+            self, "_panel_recovery_correlation_id", ""
+        )
         self._diagnostic_record(
             DE.PANEL_CONNECTED,
             component="tcp",
+            correlation_id=recovery_correlation_id,
             message="Panel TCP session established",
             details={
                 "port": self.settings.panel.port,
                 "state_session_generation": self.state.session_generation,
+                "recovered": bool(recovery_correlation_id),
             },
         )
+        self._panel_recovery_correlation_id = ""
         self.mqtt.publish("panel/connected", "ON", retain=True)
         self.mqtt.publish("panel/state_fresh", "OFF", retain=True, qos=1)
         self.mqtt.publish("panel/automation_available", "OFF", retain=True)
