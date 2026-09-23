@@ -851,7 +851,9 @@ class MqttPublisher:
             LOG.warning("Disconnected from MQTT broker: %s", reason_code)
 
     def _on_message(self, client, userdata, message) -> None:
-        if client is not self._client:
+        # Paho always supplies the active client. Unit tests invoke this handler
+        # directly with None; still reject callbacks from a real superseded client.
+        if client is not None and client is not self._client:
             return
         is_keypad = self._is_keypad_command(message.topic)
         is_partition = self._is_partition_command(message.topic)
