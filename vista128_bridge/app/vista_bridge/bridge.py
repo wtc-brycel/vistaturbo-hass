@@ -639,6 +639,9 @@ class VistaBridge:
         self._publish_dynamic_state(include_discovery=True)
         self.mqtt.publish_zone_summaries(self.state)
         self.mqtt.publish_alarm_states(self.state)
+        # Flip Home Assistant availability only after discovery and the current
+        # authoritative snapshot have been restored.
+        self.mqtt.publish("bridge/availability", "online", retain=True, qos=1)
 
     async def _metrics_loop(self) -> None:
         ticks = 0
