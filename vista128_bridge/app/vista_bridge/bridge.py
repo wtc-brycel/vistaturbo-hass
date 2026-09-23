@@ -740,7 +740,7 @@ class VistaBridge:
     def _publish_mqtt_recovery_snapshot(self) -> bool:
         """Republish current authoritative state after an MQTT (re)connection."""
         LOG.info("Republishing Home Assistant state after MQTT connection")
-        correlation_id = self.mqtt.recovery_correlation_id
+        correlation_id = getattr(self.mqtt, "recovery_correlation_id", "")
         replay_started = time.monotonic()
         publish_errors_before = self.mqtt.publish_errors
         self._diagnostic_record(
@@ -831,7 +831,9 @@ class VistaBridge:
                 "state_fresh": self.state.live_snapshot_complete,
             },
         )
-        self.mqtt.complete_recovery()
+        complete_recovery = getattr(self.mqtt, "complete_recovery", None)
+        if callable(complete_recovery):
+            complete_recovery()
         return True
 
     async def _metrics_loop(self) -> None:
