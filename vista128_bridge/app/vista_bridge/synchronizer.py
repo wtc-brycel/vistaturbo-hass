@@ -7,8 +7,10 @@ from dataclasses import dataclass
 import itertools
 import logging
 import threading
+import time
 
 from .config import KeypadSettings, SyncSettings
+from .diagnostics import DiagnosticJournal
 from .protocol import (
     ARMING_STATUS_QUERY,
     EVENT_LOG_QUERY,
@@ -54,6 +56,7 @@ class VistaSynchronizer:
         force_reconnect: VoidCallback,
         on_query_start: QueryCallback | None = None,
         on_snapshot_check: SnapshotCallback | None = None,
+        diagnostics: DiagnosticJournal | None = None,
     ) -> None:
         self.settings = settings
         self.keypad_settings = keypad_settings
@@ -64,6 +67,7 @@ class VistaSynchronizer:
         self.force_reconnect = force_reconnect
         self.on_query_start = on_query_start
         self.on_snapshot_check = on_snapshot_check
+        self.diagnostics = diagnostics
         self.ready_event = asyncio.Event()
         self.descriptor_complete_event = asyncio.Event()
         self.keypad_response_event = asyncio.Event()
@@ -84,6 +88,26 @@ class VistaSynchronizer:
         self.failures_total = 0
         self.failures_consecutive = 0
         self.last_success_at = ""
+
+    def _diag(
+        self,
+        event_type: str,
+        *,
+        severity: str = "info",
+        message: str = "",
+        details: dict | None = None,
+        correlation_id: str = "",
+    ) -> None:
+        if self.diagnostics is None:
+            return
+        self.diagnostics.record(
+            event_type,
+            severity=severity,
+            component="synchronizer",
+            message=message,
+            details=details,
+            correlation_id=correlation_id,
+        )
 
     def is_active(self) -> bool:
         return self._active.is_set()
@@ -489,6 +513,24 @@ class VistaSynchronizer:
             return False
 
         failures = 0
+        failed_query = ""
+        failure_reason = ""
+        started = time.monotonic()
+        lifecycle_correlation = (
+            self.diagnostics.new_id("sync")
+            if self.diagnostics is not None and source in {"startup", "resync"}
+            else ""
+        )
+        if lifecycle_correlation:
+            self._diag(
+                "synchronization.started",
+                message=description,
+                correlation_id=lifecycle_correlation,
+                details={
+                    "source": source,
+                    "queries": [query.name for query in queries],
+                },
+            )
         async with self.lock:
             self._active.set()
             try:
@@ -502,12 +544,16 @@ class VistaSynchronizer:
                     if not accepted:
                         LOG.warning("Sync query %s was not sent: %s", query.name, detail)
                         failures += 1
+                        failed_query = query.name
+                        failure_reason = detail
                         break
                     LOG.info("Queued %s query: %s", source, query.name)
 
                     if not await self._wait_for_query(query, transaction):
                         if query.required:
                             failures += 1
+                            failed_query = query.name
+                            failure_reason = "timeout"
                             LOG.warning(
                                 "Required %s query %s timed out after %ss",
                                 source,
@@ -536,11 +582,36 @@ class VistaSynchronizer:
                 description,
                 self.failures_consecutive,
             )
+            self._diag(
+                "synchronization.failed",
+                severity="warning",
+                message=description,
+                correlation_id=lifecycle_correlation,
+                details={
+                    "source": source,
+                    "failed_query": failed_query or None,
+                    "failure_reason": failure_reason or None,
+                    "consecutive_failures": self.failures_consecutive,
+                    "failures_total": self.failures_total,
+                    "duration_ms": round((time.monotonic() - started) * 1000, 1),
+                },
+            )
             return False
 
         self.last_success_at = datetime.now(timezone.utc).isoformat()
         self.failures_consecutive = 0
         LOG.info("%s complete", description)
+        if lifecycle_correlation:
+            self._diag(
+                "synchronization.completed",
+                message=description,
+                correlation_id=lifecycle_correlation,
+                details={
+                    "source": source,
+                    "duration_ms": round((time.monotonic() - started) * 1000, 1),
+                    "queries": [query.name for query in queries],
+                },
+            )
         return True
 
     def _prepare_query(
@@ -621,6 +692,12 @@ class VistaSynchronizer:
             return
         self._session_tainted = True
         LOG.warning("VISTA session marked unsafe after %s; reconnecting", reason)
+        self._diag(
+            "synchronization.session_tainted",
+            severity="warning",
+            message="VISTA session marked unsafe; reconnect required",
+            details={"reason": reason},
+        )
         self.force_reconnect()
 
     def _check_snapshot(self) -> None:
