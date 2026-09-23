@@ -45,9 +45,79 @@ for index in range(65):
         "source": ["live", "history", "both"][index % 3],
     }))
 normal["last_event"] = records[0]
+
+diagnostic_records = []
+diag_start = datetime(2026, 9, 21, 23, 15, tzinfo=timezone.utc)
+diagnostic_types = [
+    ("error", "ha_transport", "mqtt", "ha_transport.watchdog_triggered", "Heartbeat acknowledgement timed out", "ha_fixture_1"),
+    ("warning", "ha_transport", "mqtt", "ha_transport.recovery_started", "Replacing MQTT transport after watchdog trigger", "ha_fixture_1"),
+    ("info", "ha_transport", "mqtt", "ha_transport.connected", "MQTT broker connection established", "ha_fixture_1"),
+    ("info", "state_delivery", "mqtt", "state_delivery.replay_completed", "Home Assistant discovery and state replay completed", "ha_fixture_1"),
+    ("warning", "protocol", "vista-rs232", "protocol.invalid_frame", "Invalid VISTA protocol frame rejected", ""),
+    ("info", "synchronization", "synchronizer", "synchronization.completed", "read-only VISTA startup synchronization", "sync_fixture_1"),
+]
+for index in range(24):
+    severity, category, component, event_type, message, correlation = diagnostic_types[index % len(diagnostic_types)]
+    occurred = diag_start - timedelta(minutes=index * 3)
+    diagnostic_records.append({
+        "id": 200 - index,
+        "event_id": f"diag_fixture_{index:02d}",
+        "occurred_at": occurred.isoformat(),
+        "severity": severity,
+        "category": category,
+        "component": component,
+        "event_type": event_type,
+        "message": message,
+        "boot_id": "boot_fixture",
+        "panel_session_id": "panel_fixture",
+        "transport_session_id": "ha_session_fixture" if component == "mqtt" else "",
+        "correlation_id": correlation,
+        "details": {},
+    })
+diagnostic_incidents = [{
+    "correlation_id": "ha_fixture_1",
+    "started_at": diagnostic_records[3]["occurred_at"],
+    "ended_at": diagnostic_records[0]["occurred_at"],
+    "event_count": 4,
+    "severity": "error",
+    "categories": ["ha_transport", "state_delivery"],
+    "components": ["mqtt"],
+    "event_types": [item["event_type"] for item in diagnostic_records[:4]],
+    "summary": "Heartbeat acknowledgement timed out",
+}]
+diagnostics_api = {
+    "records": diagnostic_records,
+    "next_cursor": "",
+    "incidents": diagnostic_incidents,
+    "stats": {
+        "count": 24,
+        "oldest_at": diagnostic_records[-1]["occurred_at"],
+        "newest_at": diagnostic_records[0]["occurred_at"],
+        "write_errors": 0,
+        "dropped_events": 0,
+        "pending_writes": 0,
+    },
+    "runtime": {
+        "available": True,
+        "write_errors": 0,
+        "dropped_events": 0,
+        "pending_writes": 0,
+        "writer_alive": True,
+    },
+    "retention_days": 30,
+    "max_rows": 25000,
+    "enabled": True,
+}
+
 bridge.state.apply_system_event(SystemEvent("01", "Fire Alarm", 1, 0, 1, 14, 23, 21, 9, 26))
 fire = snapshot(bridge)
 fire["last_event"]["descriptor"] = "Lobby smoke"
 bridge = Bridge(); bridge.state.system_battery_low = None
 unknown = snapshot(bridge)
-print(json.dumps({"normal": normal, "fire": fire, "unknown": unknown, "events": records}, separators=(",", ":")))
+print(json.dumps({
+    "normal": normal,
+    "fire": fire,
+    "unknown": unknown,
+    "events": records,
+    "diagnostics_api": diagnostics_api,
+}, separators=(",", ":")))
