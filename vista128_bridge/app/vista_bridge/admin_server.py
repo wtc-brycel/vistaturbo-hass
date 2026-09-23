@@ -20,6 +20,11 @@ from aiohttp import WSMsgType, web
 from .admin_auth import AdminAuthorizationUnavailable, HomeAssistantAdminAuthorizer
 from .admin_snapshot import AdminSnapshotBuilder
 from .admin_status import event_presentation
+from .diagnostics import (
+    DIAGNOSTIC_CATEGORIES,
+    DIAGNOSTIC_EVENT_TYPES,
+    DIAGNOSTIC_SEVERITIES,
+)
 
 LOG = logging.getLogger(__name__)
 DEFAULT_INGRESS_PORT = 8099
@@ -54,6 +59,59 @@ def _decode_cursor(value):
     if not isinstance(payload["sort_at"], str) or not 1 <= len(payload["sort_at"]) <= 64:
         raise ValueError("invalid cursor")
     return payload
+
+
+def _encode_diagnostic_cursor(cursor):
+    if not cursor:
+        return ""
+    return base64.urlsafe_b64encode(
+        json.dumps(cursor, separators=(",", ":")).encode()
+    ).decode().rstrip("=")
+
+
+def _decode_diagnostic_cursor(value):
+    if not value:
+        return None
+    if not isinstance(value, str) or len(value) > 512:
+        raise ValueError("invalid cursor")
+    try:
+        payload = json.loads(
+            base64.b64decode(
+                value + "=" * (-len(value) % 4),
+                altchars=b"-_",
+                validate=True,
+            )
+        )
+    except (ValueError, UnicodeError) as exc:
+        raise ValueError("invalid cursor") from exc
+    if not isinstance(payload, dict) or set(payload) != {"id", "occurred_at"}:
+        raise ValueError("invalid cursor")
+    if type(payload["id"]) is not int or not 1 <= payload["id"] < 2**63:
+        raise ValueError("invalid cursor")
+    if (
+        not isinstance(payload["occurred_at"], str)
+        or not 1 <= len(payload["occurred_at"]) <= 64
+    ):
+        raise ValueError("invalid cursor")
+    return payload
+
+
+def _diagnostic_record(record):
+    return {
+        "id": record.id,
+        "event_id": record.event_id,
+        "occurred_at": record.occurred_at,
+        "severity": record.severity,
+        "category": record.category,
+        "component": record.component,
+        "event_type": record.event_type,
+        "message": record.message,
+        "boot_id": record.boot_id,
+        "panel_session_id": record.panel_session_id,
+        "transport_session_id": record.transport_session_id,
+        "correlation_id": record.correlation_id,
+        "details": record.details,
+    }
 
 
 def _integer(value, minimum, maximum):
@@ -96,6 +154,7 @@ class AdminServer:
             web.get("/admin.css", self._static), web.get("/admin.js", self._static),
             web.get("/vista-keypad-card.js", self._static),
             web.get("/api/snapshot", self._snapshot), web.get("/api/events", self._events),
+            web.get("/api/diagnostics", self._diagnostics),
             web.post("/api/keypad", self._keypad), web.get("/ws", self._websocket),
         ])
 
@@ -232,6 +291,90 @@ class AdminServer:
                                            event_code=code, source=source, search=search, cursor=cursor)
         return web.json_response({"events": [event_presentation(e) for e in page["events"]],
                                   "next_cursor": _encode_cursor(page["next_cursor"]), "enabled": True})
+
+    async def _diagnostics(self, request):
+        journal = getattr(self.bridge, "diagnostics", None)
+        if journal is None or not journal.available:
+            return web.json_response(
+                {
+                    "records": [],
+                    "next_cursor": "",
+                    "incidents": [],
+                    "stats": {
+                        "count": 0,
+                        "oldest_at": "",
+                        "newest_at": "",
+                        "write_errors": 0,
+                        "dropped_events": 0,
+                        "pending_writes": 0,
+                    },
+                    "runtime": {
+                        "available": False,
+                        "write_errors": 0,
+                        "dropped_events": 0,
+                        "pending_writes": 0,
+                        "writer_alive": False,
+                    },
+                    "enabled": False,
+                }
+            )
+        try:
+            limit = _integer(request.query.get("limit", "50"), 1, 100)
+            cursor = _decode_diagnostic_cursor(request.query.get("cursor", ""))
+            severity = request.query.get("severity", "").strip().lower()
+            category = request.query.get("category", "").strip().lower()
+            component = request.query.get("component", "").strip()
+            event_type = request.query.get("event_type", "").strip().lower()
+            correlation_id = request.query.get("correlation_id", "").strip()
+            if severity and severity not in DIAGNOSTIC_SEVERITIES:
+                raise ValueError("invalid severity")
+            if category and category not in DIAGNOSTIC_CATEGORIES:
+                raise ValueError("invalid category")
+            if event_type and event_type not in DIAGNOSTIC_EVENT_TYPES:
+                raise ValueError("invalid event type")
+            if component and not IDENTIFIER.fullmatch(component):
+                raise ValueError("invalid component")
+            if correlation_id and not IDENTIFIER.fullmatch(correlation_id):
+                raise ValueError("invalid correlation")
+        except (ValueError, TypeError):
+            raise web.HTTPBadRequest(text="Invalid diagnostic query") from None
+
+        def read_diagnostics():
+            page = journal.query_page(
+                limit=limit,
+                cursor=cursor,
+                severity=severity or None,
+                category=category or None,
+                component=component or None,
+                event_type=event_type or None,
+                correlation_id=correlation_id or None,
+                order="newest",
+            )
+            stats = journal.stats()
+            return page, journal.recent_incidents(limit=12), stats, journal.runtime_state()
+
+        async with self._db_slots:
+            page, incidents, stats, runtime = await asyncio.to_thread(read_diagnostics)
+
+        return web.json_response(
+            {
+                "records": [_diagnostic_record(record) for record in page["records"]],
+                "next_cursor": _encode_diagnostic_cursor(page["next_cursor"]),
+                "incidents": incidents,
+                "stats": {
+                    "count": stats.count,
+                    "oldest_at": stats.oldest_at,
+                    "newest_at": stats.newest_at,
+                    "write_errors": stats.write_errors,
+                    "dropped_events": stats.dropped_events,
+                    "pending_writes": stats.pending_writes,
+                },
+                "runtime": runtime,
+                "retention_days": self.bridge.settings.diagnostics.max_age_days,
+                "max_rows": self.bridge.settings.diagnostics.max_rows,
+                "enabled": True,
+            }
+        )
 
     async def _keypad(self, request):
         user = request["ingress_user"]
