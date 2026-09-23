@@ -125,6 +125,109 @@ class DiagnosticJournalTests(unittest.TestCase):
                 [DE.HA_DISCONNECTED],
             )
 
+    def test_cursor_pages_are_stable_and_do_not_duplicate_rows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = self.make_journal(os.path.join(tmp, "diagnostics.sqlite3"))
+            for index in range(5):
+                journal.record(
+                    DE.HEALTH_SNAPSHOT,
+                    occurred_at=f"2026-09-23T10:0{index}:00+00:00",
+                    details={"sequence": index},
+                )
+            self.assertTrue(journal.flush(timeout=2.0))
+
+            first = journal.query_page(limit=2, order="newest")
+            second = journal.query_page(
+                limit=2,
+                order="newest",
+                cursor=first["next_cursor"],
+            )
+            third = journal.query_page(
+                limit=2,
+                order="newest",
+                cursor=second["next_cursor"],
+            )
+
+            ids = [
+                record.id
+                for page in (first, second, third)
+                for record in page["records"]
+            ]
+            self.assertEqual(len(ids), 5)
+            self.assertEqual(len(set(ids)), 5)
+            self.assertIsNotNone(first["next_cursor"])
+            self.assertIsNotNone(second["next_cursor"])
+            self.assertIsNone(third["next_cursor"])
+            self.assertEqual(
+                [record.details["sequence"] for record in first["records"]],
+                [4, 3],
+            )
+
+    def test_cursor_page_rejects_invalid_cursor(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = self.make_journal(os.path.join(tmp, "diagnostics.sqlite3"))
+            with self.assertRaises(ValueError):
+                journal.query_page(cursor={"id": 1})
+            with self.assertRaises(ValueError):
+                journal.query_page(cursor={"occurred_at": "x", "id": True})
+
+    def test_incident_summary_groups_correlated_sequences(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = self.make_journal(os.path.join(tmp, "diagnostics.sqlite3"))
+            correlation = journal.new_id("ha")
+            journal.record(
+                DE.HA_WATCHDOG_TRIGGERED,
+                severity="error",
+                component="mqtt",
+                message="Heartbeat acknowledgement timed out",
+                correlation_id=correlation,
+                occurred_at="2026-09-23T10:00:00+00:00",
+            )
+            journal.record(
+                DE.HA_RECOVERY_STARTED,
+                severity="warning",
+                component="mqtt",
+                correlation_id=correlation,
+                occurred_at="2026-09-23T10:00:01+00:00",
+            )
+            journal.record(
+                DE.STATE_REPLAY_COMPLETED,
+                component="mqtt",
+                correlation_id=correlation,
+                occurred_at="2026-09-23T10:00:03+00:00",
+            )
+            journal.record(
+                DE.HEALTH_SNAPSHOT,
+                component="bridge",
+                occurred_at="2026-09-23T10:05:00+00:00",
+            )
+            self.assertTrue(journal.flush(timeout=2.0))
+
+            incidents = journal.recent_incidents(limit=10)
+
+            self.assertEqual(len(incidents), 1)
+            incident = incidents[0]
+            self.assertEqual(incident["correlation_id"], correlation)
+            self.assertEqual(incident["event_count"], 3)
+            self.assertEqual(incident["severity"], "error")
+            self.assertEqual(
+                incident["event_types"],
+                [
+                    DE.HA_WATCHDOG_TRIGGERED,
+                    DE.HA_RECOVERY_STARTED,
+                    DE.STATE_REPLAY_COMPLETED,
+                ],
+            )
+            self.assertEqual(
+                incident["categories"],
+                ["ha_transport", "state_delivery"],
+            )
+            self.assertEqual(incident["components"], ["mqtt"])
+            self.assertEqual(
+                incident["summary"],
+                "Heartbeat acknowledgement timed out",
+            )
+
     def test_prune_enforces_age_and_row_limits(self):
         with tempfile.TemporaryDirectory() as tmp:
             journal = self.make_journal(
