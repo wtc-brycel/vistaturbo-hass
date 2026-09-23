@@ -232,6 +232,7 @@ class VistaBridge:
                 message="Vista Turbo bridge stopped",
                 details={"uptime_seconds": round(time.monotonic() - self._started_monotonic, 3)},
             )
+            self.diagnostics.close(timeout=2.0)
 
     def _background_task_done(self, task: asyncio.Task) -> None:
         if task.cancelled() or self._stop.is_set():
