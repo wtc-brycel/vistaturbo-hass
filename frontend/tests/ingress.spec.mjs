@@ -133,6 +133,8 @@ test("diagnostics loads categorized journal and correlated incidents", async ({ 
   await expect(firstDiagnostic.locator(".diagnostic-event-details")).toBeVisible();
   await expect(firstDiagnostic.locator(".diagnostic-event-details")).toContainText("last puback age seconds");
   await expect(firstDiagnostic.locator(".diagnostic-event-details")).toContainText("61.2");
+  await page.waitForTimeout(500);
+  await expect(firstDiagnostic.locator(".diagnostic-event-details")).toBeVisible();
   await page.locator("#diagnostic-severity").selectOption("error");
   await page.locator("#diagnostic-category").selectOption("ha_transport");
   await page.getByRole("button", { name: "Apply", exact: true }).click();
