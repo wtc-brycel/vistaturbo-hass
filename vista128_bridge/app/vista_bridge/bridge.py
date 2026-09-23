@@ -111,6 +111,12 @@ class VistaBridge:
             self.control,
         )
 
+    def _diagnostic_record(self, event_type: str, **kwargs) -> str | None:
+        diagnostics = getattr(self, "diagnostics", None)
+        if diagnostics is None:
+            return None
+        return diagnostics.record(event_type, **kwargs)
+
     def _publish_control_result(self, payload: dict) -> None:
         self.mqtt.publish_json("control/result", payload, qos=1)
 
@@ -172,7 +178,7 @@ class VistaBridge:
         return self._enqueue_tx(data, source="debug", label="raw")
 
     async def run(self) -> None:
-        self.diagnostics.record(
+        self._diagnostic_record(
             "system.app_started",
             component="bridge",
             message="Vista Turbo bridge started",
@@ -191,7 +197,7 @@ class VistaBridge:
         try:
             await self._connection_loop()
         finally:
-            self.diagnostics.record(
+            self._diagnostic_record(
                 "system.app_stopping",
                 component="bridge",
                 message="Vista Turbo bridge stopping",
@@ -206,7 +212,7 @@ class VistaBridge:
             self.mqtt.publish("panel/automation_available", "OFF", retain=True)
             self.mqtt.publish("panel/automation_availability_source", "offline", retain=True)
             self.mqtt.stop()
-            self.diagnostics.record(
+            self._diagnostic_record(
                 "system.app_stopped",
                 component="bridge",
                 message="Vista Turbo bridge stopped",
@@ -265,7 +271,7 @@ class VistaBridge:
                     self.settings.panel.port,
                     self.settings.panel.connect_timeout_seconds,
                 )
-                self.diagnostics.record(
+                self._diagnostic_record(
                     "panel_transport.connect_failed",
                     severity="warning",
                     component="tcp",
@@ -283,7 +289,7 @@ class VistaBridge:
                     type(exc).__name__,
                     exc,
                 )
-                self.diagnostics.record(
+                self._diagnostic_record(
                     (
                         "panel_transport.connection_lost"
                         if was_connected
@@ -308,7 +314,7 @@ class VistaBridge:
             if self._stop.is_set():
                 return
             LOG.info("Reconnecting in %ss", delay)
-            self.diagnostics.record(
+            self._diagnostic_record(
                 "panel_transport.reconnect_scheduled",
                 component="tcp",
                 message="Panel TCP reconnect scheduled",
@@ -343,7 +349,7 @@ class VistaBridge:
         self.mqtt.publish_alarm_states(self.state)
         self._panel_connected.set()
         LOG.info("Panel TCP connection established")
-        self.diagnostics.record(
+        self._diagnostic_record(
             "panel_transport.connected",
             component="tcp",
             message="Panel TCP session established",
@@ -437,7 +443,7 @@ class VistaBridge:
                     "Blocked installer-programming keypad sequence on partition %d",
                     guard_update.partition,
                 )
-                self.diagnostics.record(
+                self._diagnostic_record(
                     "control.safety_interlock_blocked",
                     severity="warning",
                     component="panel-control",
@@ -450,7 +456,7 @@ class VistaBridge:
             except queue.Full:
                 reason = "raw_tx_queue_full" if source == "debug" else "tx_queue_full"
                 LOG.warning("Rejected %s because its bounded TX queue is full", source)
-                self.diagnostics.record(
+                self._diagnostic_record(
                     "system.queue_saturated",
                     severity="warning",
                     component="panel-control",
@@ -644,7 +650,7 @@ class VistaBridge:
             expected,
             received,
         )
-        self.diagnostics.record(
+        self._diagnostic_record(
             "protocol.invalid_frame",
             severity="warning",
             component="vista-rs232",
@@ -737,7 +743,7 @@ class VistaBridge:
         correlation_id = self.mqtt.recovery_correlation_id
         replay_started = time.monotonic()
         publish_errors_before = self.mqtt.publish_errors
-        self.diagnostics.record(
+        self._diagnostic_record(
             "state_delivery.replay_started",
             component="mqtt",
             message="Replaying Home Assistant discovery and current state",
@@ -778,7 +784,7 @@ class VistaBridge:
             LOG.warning(
                 "MQTT recovery replay incomplete; Home Assistant remains unavailable"
             )
-            self.diagnostics.record(
+            self._diagnostic_record(
                 "state_delivery.replay_failed",
                 severity="warning",
                 component="mqtt",
@@ -802,7 +808,7 @@ class VistaBridge:
                 "MQTT recovery replay could not publish availability; "
                 "Home Assistant remains unavailable"
             )
-            self.diagnostics.record(
+            self._diagnostic_record(
                 "state_delivery.replay_failed",
                 severity="warning",
                 component="mqtt",
@@ -814,7 +820,7 @@ class VistaBridge:
                 },
             )
             return False
-        self.diagnostics.record(
+        self._diagnostic_record(
             "state_delivery.replay_completed",
             component="mqtt",
             message="Home Assistant discovery and state replay completed",
@@ -854,7 +860,7 @@ class VistaBridge:
             return
         self._last_health_snapshot_monotonic = current
         printer = self.printer.metrics
-        self.diagnostics.record(
+        self._diagnostic_record(
             "system.health_snapshot",
             component="bridge",
             message="Periodic bridge health snapshot",
