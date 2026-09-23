@@ -82,6 +82,10 @@ class AdminSnapshotTests(unittest.TestCase):
                 password="must-not-leak",
                 tls_client_key="/secret/private-key.pem",
             ),
+            diagnostics=SimpleNamespace(
+                max_age_days=30,
+                max_rows=25000,
+            ),
         )
         metrics = SimpleNamespace(
             status="idle",
@@ -101,8 +105,17 @@ class AdminSnapshotTests(unittest.TestCase):
             synchronizer=_FakeSynchronizer(),
             printer=SimpleNamespace(enabled=False, metrics=metrics),
             mqtt=SimpleNamespace(
-                _client=_FakeMqttClient(),
+                connected=True,
                 publish_errors=1,
+            ),
+            diagnostics=SimpleNamespace(
+                runtime_state=lambda: {
+                    "available": True,
+                    "write_errors": 0,
+                    "dropped_events": 0,
+                    "pending_writes": 0,
+                    "writer_alive": True,
+                }
             ),
             rx_frames=10,
             rx_bytes=100,
