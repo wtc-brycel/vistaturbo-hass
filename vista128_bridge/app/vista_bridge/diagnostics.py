@@ -76,6 +76,41 @@ MAX_DETAIL_STRING = 512
 MAX_DETAILS_JSON = 8192
 
 
+class DiagnosticEvents:
+    APP_STARTED = "system.app_started"
+    APP_STOPPING = "system.app_stopping"
+    APP_STOPPED = "system.app_stopped"
+    HEALTH_SNAPSHOT = "system.health_snapshot"
+    TASK_FAILED = "system.task_failed"
+    QUEUE_SATURATED = "system.queue_saturated"
+
+    PANEL_CONNECTED = "panel_transport.connected"
+    PANEL_CONNECT_FAILED = "panel_transport.connect_failed"
+    PANEL_CONNECTION_LOST = "panel_transport.connection_lost"
+    PANEL_RECONNECT_SCHEDULED = "panel_transport.reconnect_scheduled"
+
+    INVALID_FRAME = "protocol.invalid_frame"
+
+    SYNC_STARTED = "synchronization.started"
+    SYNC_COMPLETED = "synchronization.completed"
+    SYNC_FAILED = "synchronization.failed"
+    SYNC_SESSION_TAINTED = "synchronization.session_tainted"
+
+    HA_CONNECTED = "ha_transport.connected"
+    HA_DISCONNECTED = "ha_transport.disconnected"
+    HA_CONNECTION_REJECTED = "ha_transport.connection_rejected"
+    HA_WATCHDOG_TRIGGERED = "ha_transport.watchdog_triggered"
+    HA_RECOVERY_STARTED = "ha_transport.recovery_started"
+    HA_CLIENT_REPLACED = "ha_transport.client_replaced"
+    HA_RECOVERY_FAILED = "ha_transport.recovery_failed"
+
+    STATE_REPLAY_STARTED = "state_delivery.replay_started"
+    STATE_REPLAY_COMPLETED = "state_delivery.replay_completed"
+    STATE_REPLAY_FAILED = "state_delivery.replay_failed"
+
+    CONTROL_SAFETY_INTERLOCK_BLOCKED = "control.safety_interlock_blocked"
+
+
 @dataclass(frozen=True)
 class DiagnosticRecord:
     id: int
