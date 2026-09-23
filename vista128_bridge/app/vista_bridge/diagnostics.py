@@ -6,9 +6,11 @@ from datetime import datetime, timedelta, timezone
 import json
 import logging
 from pathlib import Path
+import queue
 import re
 import sqlite3
 import threading
+import time
 from typing import Any
 import uuid
 
@@ -74,6 +76,8 @@ MAX_DETAIL_KEYS = 32
 MAX_DETAIL_ITEMS = 32
 MAX_DETAIL_STRING = 512
 MAX_DETAILS_JSON = 8192
+WRITE_QUEUE_MAX = 2048
+WRITE_BATCH_MAX = 50
 
 
 class DiagnosticEvents:
@@ -141,6 +145,24 @@ class DiagnosticStats:
     oldest_at: str
     newest_at: str
     write_errors: int
+    dropped_events: int = 0
+    pending_writes: int = 0
+
+
+@dataclass(frozen=True)
+class _PendingDiagnostic:
+    event_id: str
+    occurred_at: str
+    severity: str
+    category: str
+    component: str
+    event_type: str
+    message: str
+    boot_id: str
+    panel_session_id: str
+    transport_session_id: str
+    correlation_id: str
+    details_json: str
 
 
 class DiagnosticJournal:
@@ -165,14 +187,27 @@ class DiagnosticJournal:
         self.boot_id = self.new_id("boot")
         self.available = True
         self.write_errors = 0
+        self.dropped_events = 0
         self._context_lock = threading.RLock()
+        self._counter_lock = threading.Lock()
         self._panel_session_id = ""
         self._transport_session_id = ""
+        self._write_queue: queue.Queue[_PendingDiagnostic] = queue.Queue(
+            maxsize=WRITE_QUEUE_MAX
+        )
+        self._writer_stop = threading.Event()
+        self._writer_thread: threading.Thread | None = None
 
         try:
             Path(path).parent.mkdir(parents=True, exist_ok=True)
             self._initialize()
             self.prune()
+            self._writer_thread = threading.Thread(
+                target=self._writer_loop,
+                name="diagnostic-journal-writer",
+                daemon=True,
+            )
+            self._writer_thread.start()
         except Exception:
             self.available = False
             LOG.exception("Diagnostic journal unavailable; continuing without persistence")
@@ -292,40 +327,35 @@ class DiagnosticJournal:
                 else self._clean_text(transport_session_id, 64)
             )
 
-        if not self.available:
+        if not self.available or self._writer_stop.is_set():
             return None
 
-        payload = self._encode_details(details)
+        pending = _PendingDiagnostic(
+            event_id=event_id,
+            occurred_at=self._clean_text(when, 64),
+            severity=severity,
+            category=category,
+            component=self._clean_text(component, 64),
+            event_type=event_type,
+            message=self._clean_text(message, 512),
+            boot_id=self.boot_id,
+            panel_session_id=panel_context,
+            transport_session_id=transport_context,
+            correlation_id=self._clean_text(correlation_id, 96),
+            details_json=self._encode_details(details),
+        )
         try:
-            with closing(self._connect()) as db, db:
-                db.execute(
-                    """
-                    INSERT INTO diagnostic_events (
-                        event_id, occurred_at, severity, category, component,
-                        event_type, message, boot_id, panel_session_id,
-                        transport_session_id, correlation_id, details_json
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        event_id,
-                        self._clean_text(when, 64),
-                        severity,
-                        category,
-                        self._clean_text(component, 64),
-                        event_type,
-                        self._clean_text(message, 512),
-                        self.boot_id,
-                        panel_context,
-                        transport_context,
-                        self._clean_text(correlation_id, 96),
-                        payload,
-                    ),
-                )
-            self.prune()
+            self._write_queue.put_nowait(pending)
             return event_id
-        except sqlite3.Error:
-            self.write_errors += 1
-            LOG.exception("Could not persist diagnostic event %s", event_type)
+        except queue.Full:
+            with self._counter_lock:
+                self.dropped_events += 1
+                dropped = self.dropped_events
+            if dropped == 1 or dropped % 100 == 0:
+                LOG.warning(
+                    "Diagnostic journal write queue full; dropped %d event(s)",
+                    dropped,
+                )
             return None
 
     def recent(
@@ -339,6 +369,7 @@ class DiagnosticJournal:
         correlation_id: str | None = None,
         boot_id: str | None = None,
         since: str | None = None,
+        until: str | None = None,
         order: str = "newest",
     ) -> list[DiagnosticRecord]:
         if not self.available:
@@ -379,6 +410,9 @@ class DiagnosticJournal:
         if since:
             clauses.append("occurred_at >= ?")
             values.append(self._clean_text(since, 64))
+        if until:
+            clauses.append("occurred_at <= ?")
+            values.append(self._clean_text(until, 64))
 
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         direction = "DESC" if order == "newest" else "ASC"
@@ -398,7 +432,14 @@ class DiagnosticJournal:
 
     def stats(self) -> DiagnosticStats:
         if not self.available:
-            return DiagnosticStats(0, "", "", self.write_errors)
+            return DiagnosticStats(
+                0,
+                "",
+                "",
+                self.write_errors,
+                self.dropped_events,
+                self._write_queue.qsize(),
+            )
         try:
             with closing(self._connect()) as db:
                 row = db.execute(
@@ -410,10 +451,100 @@ class DiagnosticJournal:
                 oldest_at=str(row[1] or "") if row else "",
                 newest_at=str(row[2] or "") if row else "",
                 write_errors=self.write_errors,
+                dropped_events=self.dropped_events,
+                pending_writes=self._write_queue.qsize(),
             )
         except sqlite3.Error:
             LOG.exception("Could not read diagnostic journal stats")
-            return DiagnosticStats(0, "", "", self.write_errors)
+            return DiagnosticStats(
+                0,
+                "",
+                "",
+                self.write_errors,
+                self.dropped_events,
+                self._write_queue.qsize(),
+            )
+
+    def flush(self, timeout: float = 2.0) -> bool:
+        """Wait briefly for already-queued diagnostic writes to reach SQLite."""
+        if not self.available:
+            return False
+        deadline = time.monotonic() + max(0.0, float(timeout))
+        while self._write_queue.unfinished_tasks:
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(0.01)
+        return True
+
+    def close(self, timeout: float = 2.0) -> bool:
+        """Flush queued events and stop the writer without blocking transport threads."""
+        if self._writer_stop.is_set():
+            return self._write_queue.unfinished_tasks == 0
+        self._writer_stop.set()
+        flushed = self.flush(timeout=timeout)
+        thread = self._writer_thread
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=max(0.0, float(timeout)))
+        return flushed and (thread is None or not thread.is_alive())
+
+    def _writer_loop(self) -> None:
+        while not self._writer_stop.is_set() or not self._write_queue.empty():
+            try:
+                first = self._write_queue.get(timeout=0.1)
+            except queue.Empty:
+                continue
+
+            batch = [first]
+            while len(batch) < WRITE_BATCH_MAX:
+                try:
+                    batch.append(self._write_queue.get_nowait())
+                except queue.Empty:
+                    break
+
+            try:
+                self._persist_batch(batch)
+            except sqlite3.Error:
+                with self._counter_lock:
+                    self.write_errors += len(batch)
+                LOG.exception(
+                    "Could not persist diagnostic batch containing %d event(s)",
+                    len(batch),
+                )
+            finally:
+                for _ in batch:
+                    self._write_queue.task_done()
+
+    def _persist_batch(self, batch: list[_PendingDiagnostic]) -> None:
+        if not batch:
+            return
+        with closing(self._connect()) as db, db:
+            db.executemany(
+                """
+                INSERT INTO diagnostic_events (
+                    event_id, occurred_at, severity, category, component,
+                    event_type, message, boot_id, panel_session_id,
+                    transport_session_id, correlation_id, details_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        item.event_id,
+                        item.occurred_at,
+                        item.severity,
+                        item.category,
+                        item.component,
+                        item.event_type,
+                        item.message,
+                        item.boot_id,
+                        item.panel_session_id,
+                        item.transport_session_id,
+                        item.correlation_id,
+                        item.details_json,
+                    )
+                    for item in batch
+                ],
+            )
+        self.prune()
 
     def prune(
         self,
