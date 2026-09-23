@@ -194,6 +194,8 @@ class VistaBridge:
             asyncio.create_task(self.control.run(self._stop), name="panel-control"),
             asyncio.create_task(self.printer.run(self._stop), name="transport-printer"),
         ]
+        for task in background:
+            task.add_done_callback(self._background_task_done)
         try:
             await self._connection_loop()
         finally:
@@ -218,6 +220,41 @@ class VistaBridge:
                 message="Vista Turbo bridge stopped",
                 details={"uptime_seconds": round(time.monotonic() - self._started_monotonic, 3)},
             )
+
+    def _background_task_done(self, task: asyncio.Task) -> None:
+        if task.cancelled() or self._stop.is_set():
+            return
+        try:
+            error = task.exception()
+        except asyncio.CancelledError:
+            return
+        if error is None:
+            LOG.warning("Background task %s exited unexpectedly", task.get_name())
+            self._diagnostic_record(
+                DE.TASK_FAILED,
+                severity="warning",
+                component="runtime",
+                message="Long-running background task exited unexpectedly",
+                details={"task": task.get_name(), "exception_type": None},
+            )
+            return
+        LOG.error(
+            "Background task %s failed (%s): %s",
+            task.get_name(),
+            type(error).__name__,
+            error,
+        )
+        self._diagnostic_record(
+            DE.TASK_FAILED,
+            severity="error",
+            component="runtime",
+            message="Long-running background task failed",
+            details={
+                "task": task.get_name(),
+                "exception_type": type(error).__name__,
+                "detail": str(error),
+            },
+        )
 
     async def _connection_loop(self) -> None:
         delay = self.settings.panel.reconnect_min_seconds
