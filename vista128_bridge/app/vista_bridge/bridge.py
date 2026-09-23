@@ -265,7 +265,6 @@ class VistaBridge:
             details={
                 "task": task.get_name(),
                 "exception_type": type(error).__name__,
-                "detail": str(error),
             },
         )
 
@@ -689,6 +688,15 @@ class VistaBridge:
             LOG.warning("Queued full VISTA resynchronization after invalid panel frame")
 
     def _log_invalid_frame(self, validation) -> None:
+        now = time.monotonic()
+        pending = getattr(self, "_invalid_frames_since_report", 0) + 1
+        last_report = getattr(self, "_last_invalid_frame_report_monotonic", 0.0)
+        if last_report and now - last_report < 60.0:
+            self._invalid_frames_since_report = pending
+            return
+
+        self._invalid_frames_since_report = 0
+        self._last_invalid_frame_report_monotonic = now
         expected = (
             f"{validation.checksum_expected:02X}"
             if validation.checksum_expected is not None
@@ -701,7 +709,8 @@ class VistaBridge:
         )
         LOG.warning(
             "Invalid VISTA packet #%d: length_ok=%s checksum_ok=%s declared=%s "
-            "actual=%s checksum_expected=%s checksum_received=%s",
+            "actual=%s checksum_expected=%s checksum_received=%s"
+            "%s",
             self.rx_frames,
             validation.length_ok,
             validation.checksum_ok,
@@ -709,6 +718,11 @@ class VistaBridge:
             validation.actual_length,
             expected,
             received,
+            (
+                f" ({pending} invalid frames since last report)"
+                if pending > 1
+                else ""
+            ),
         )
         self._diagnostic_record(
             DE.INVALID_FRAME,
@@ -723,6 +737,8 @@ class VistaBridge:
                 "actual_length": validation.actual_length,
                 "checksum_expected": expected,
                 "checksum_received": received,
+                "occurrences_since_last_report": pending,
+                "invalid_frames_total": self.invalid_frames,
             },
         )
 
