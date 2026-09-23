@@ -26,6 +26,7 @@ class FakeMqtt:
 
     def publish(self, *args, **kwargs):
         self.published.append((args, kwargs))
+        return True
 
     def publish_json(self, *args, **kwargs):
         self.published.append((args, kwargs))
