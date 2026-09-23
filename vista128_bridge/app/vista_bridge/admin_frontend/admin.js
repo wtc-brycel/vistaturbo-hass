@@ -5,6 +5,9 @@ const appState = {
   view: "overview", keypadPartition: null, keypadSignature: "",
   eventPage: 0, pageCursors: [""], eventRows: [], eventCursor: "", eventLoaded: false, eventLoading: false,
   eventRequest: 0, eventAbort: null, appliedFilters: {}, eventError: "",
+  diagnosticRows: [], diagnosticCursor: "", diagnosticIncidents: [], diagnosticStats: null,
+  diagnosticLoaded: false, diagnosticLoading: false, diagnosticRequest: 0, diagnosticAbort: null,
+  diagnosticFilters: {}, diagnosticError: "",
   lastTransaction: "", lastResult: null, commandTimer: null,
 };
 const byId = (id) => document.getElementById(id);
@@ -187,7 +190,17 @@ function renderDiagnostics(snapshot) {
       ["Printer failures", number(snapshot.printer.failed)],
       ["Printer last error", text(snapshot.printer.last_error, "None")],
     ]),
+    diagnosticCard("Diagnostic journal", [
+      ["Available", yesNo(snapshot.diagnostics?.available)],
+      ["Writer", snapshot.diagnostics?.writer_alive ? "Running" : "Unavailable"],
+      ["Pending writes", number(snapshot.diagnostics?.pending_writes)],
+      ["Dropped events", number(snapshot.diagnostics?.dropped_events)],
+      ["Write errors", number(snapshot.diagnostics?.write_errors)],
+      ["Retention", `${number(snapshot.diagnostics?.retention_days)} days`],
+      ["Maximum rows", number(snapshot.diagnostics?.max_rows)],
+    ]),
   );
+  renderDiagnosticJournal();
 }
 
 const RESULT_LABELS = {
@@ -316,7 +329,96 @@ function switchView(view) {
   });
   renderActive();
   if (view === "events" && !appState.eventLoaded && !appState.eventLoading) loadEvents(true);
+  if (view === "diagnostics" && !appState.diagnosticLoaded && !appState.diagnosticLoading) loadDiagnostics(true);
 }
+function diagnosticSeverity(value) {
+  return ["critical", "error", "warning", "info", "debug"].includes(value) ? value : "info";
+}
+function renderDiagnosticJournal() {
+  const incidents = byId("diagnostic-incidents"); clear(incidents);
+  setText("diagnostic-incident-count", appState.diagnosticIncidents.length ? `${appState.diagnosticIncidents.length} SHOWN` : "");
+  if (!appState.diagnosticIncidents.length) {
+    incidents.append(node("div", "event-empty", appState.diagnosticLoaded ? "No correlated incidents" : "Not loaded"));
+  } else {
+    for (const incident of appState.diagnosticIncidents) {
+      const button = node("button", `diagnostic-incident severity-${diagnosticSeverity(incident.severity)}`);
+      button.type = "button";
+      const copy = node("span", "diagnostic-incident-copy");
+      copy.append(
+        node("span", "diagnostic-incident-title", incident.summary || "Diagnostic incident"),
+        node("span", "diagnostic-incident-meta", `${dateTime(incident.started_at)} · ${number(incident.event_count)} events · ${incident.categories.join(", ").replaceAll("_", " ")}`)
+      );
+      button.append(node("span", "diagnostic-incident-severity", incident.severity.toUpperCase()), copy);
+      button.addEventListener("click", () => loadDiagnostics(true, incident.correlation_id));
+      incidents.append(button);
+    }
+  }
+
+  const list = byId("diagnostic-event-list"); clear(list);
+  if (!appState.diagnosticRows.length) {
+    list.append(node("div", "event-empty", appState.diagnosticError || (appState.diagnosticLoaded ? "No diagnostic events match" : "Not loaded")));
+  }
+  for (const record of appState.diagnosticRows) {
+    const row = node("div", `table-row diagnostic-event-row severity-${diagnosticSeverity(record.severity)}`);
+    row.setAttribute("role", "row");
+    const event = node("div", "diagnostic-event-description");
+    event.append(
+      node("div", "event-description-main", record.message || record.event_type),
+      node("div", "event-description-sub", [
+        record.event_type,
+        record.correlation_id ? `incident ${record.correlation_id}` : "",
+      ].filter(Boolean).join(" · "))
+    );
+    const cells = [
+      node("div", "diagnostic-time", dateTime(record.occurred_at)),
+      node("div", `diagnostic-severity severity-${diagnosticSeverity(record.severity)}`, record.severity.toUpperCase()),
+      node("div", "diagnostic-category", record.category.replaceAll("_", " ")),
+      event,
+      node("div", "diagnostic-component", text(record.component, "—")),
+    ];
+    cells.forEach((cell) => cell.setAttribute("role", "cell"));
+    row.append(...cells); list.append(row);
+  }
+  const stats = appState.diagnosticStats;
+  const correlation = appState.diagnosticFilters.correlation_id;
+  setText("diagnostic-summary", appState.diagnosticError || (stats
+    ? `${number(appState.diagnosticRows.length)} shown · ${number(stats.count)} retained${correlation ? " · Incident selected" : ""}`
+    : "Not loaded"));
+  byId("diagnostic-more").hidden = !appState.diagnosticCursor;
+}
+function setDiagnosticLoading(value) {
+  appState.diagnosticLoading = value;
+  byId("diagnostic-more").disabled = value;
+  byId("diagnostics-refresh").disabled = value;
+}
+async function loadDiagnostics(reset, correlationId = null) {
+  if (!reset && (appState.diagnosticLoading || !appState.diagnosticCursor)) return;
+  const requestId = ++appState.diagnosticRequest;
+  appState.diagnosticAbort?.abort(); appState.diagnosticAbort = new AbortController();
+  const filters = reset ? {
+    severity: byId("diagnostic-severity").value,
+    category: byId("diagnostic-category").value,
+    correlation_id: correlationId || "",
+  } : appState.diagnosticFilters;
+  const params = new URLSearchParams({ limit: "50" });
+  for (const [key, value] of Object.entries(filters)) if (value) params.set(key, value);
+  if (!reset && appState.diagnosticCursor) params.set("cursor", appState.diagnosticCursor);
+  setDiagnosticLoading(true); appState.diagnosticError = ""; setText("diagnostic-summary", "Loading");
+  try {
+    const result = await jsonRequest(`api/diagnostics?${params}`, { signal: appState.diagnosticAbort.signal });
+    if (requestId !== appState.diagnosticRequest) return;
+    appState.diagnosticRows = reset ? result.records : [...appState.diagnosticRows, ...result.records];
+    appState.diagnosticCursor = result.next_cursor || "";
+    appState.diagnosticIncidents = result.incidents || [];
+    appState.diagnosticStats = result.stats || null;
+    appState.diagnosticLoaded = true; appState.diagnosticFilters = filters;
+    renderDiagnosticJournal();
+  } catch (error) {
+    if (requestId !== appState.diagnosticRequest || error.name === "AbortError") return;
+    appState.diagnosticError = error.message; setText("diagnostic-summary", error.message);
+  } finally { if (requestId === appState.diagnosticRequest) setDiagnosticLoading(false); }
+}
+
 function renderEvents() {
   const list = byId("event-list"); clear(list);
   if (!appState.eventRows.length) list.append(node("div", "event-empty", appState.snapshot?.journal.enabled === false ? "Journal disabled" : "No events match"));
@@ -384,6 +486,9 @@ byId("event-filters").addEventListener("submit", (event) => { event.preventDefau
 byId("events-refresh").addEventListener("click", () => loadEvents(true));
 byId("event-more").addEventListener("click", () => loadEvents(false));
 byId("event-newer").addEventListener("click", () => loadEvents(false, -1));
+byId("diagnostic-filters").addEventListener("submit", (event) => { event.preventDefault(); loadDiagnostics(true); });
+byId("diagnostics-refresh").addEventListener("click", () => loadDiagnostics(true, appState.diagnosticFilters.correlation_id || ""));
+byId("diagnostic-more").addEventListener("click", () => loadDiagnostics(false));
 window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", renderActive);
 setInterval(() => {
   if (appState.live && performance.now() - appState.lastUpdate > 10000) { invalidate(); appState.socket?.close(); }
