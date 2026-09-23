@@ -705,7 +705,7 @@ button:focus-visible {
 }
 
 .diagnostic-toolbar {
-  grid-template-columns: 180px 220px auto 40px;
+  grid-template-columns: 180px 220px 160px auto 40px;
   margin-top: 14px;
 }
 
