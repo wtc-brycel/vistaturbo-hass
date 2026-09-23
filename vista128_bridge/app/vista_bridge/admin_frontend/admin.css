@@ -817,6 +817,43 @@ button:focus-visible {
   overflow: hidden;
 }
 
+.diagnostic-event-row[tabindex] {
+  cursor: pointer;
+}
+
+.diagnostic-event-row[tabindex]:focus-visible {
+  outline: 2px solid #4e9fd3;
+  outline-offset: -2px;
+}
+
+.diagnostic-event-details {
+  display: grid;
+  gap: 3px;
+  margin-top: 7px;
+  padding-top: 7px;
+  border-top: 1px solid var(--divider-color);
+}
+
+.diagnostic-event-details[hidden] { display: none; }
+
+.diagnostic-detail-row {
+  display: grid;
+  grid-template-columns: minmax(110px, .8fr) minmax(0, 1.2fr);
+  gap: 8px;
+  font-size: 9px;
+}
+
+.diagnostic-detail-key {
+  color: var(--secondary-text-color);
+  text-transform: capitalize;
+}
+
+.diagnostic-detail-value {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
 .diagnostics-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
