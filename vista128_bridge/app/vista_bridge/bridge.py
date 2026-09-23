@@ -9,7 +9,7 @@ import threading
 import time
 
 from .config import Settings
-from .diagnostics import DiagnosticJournal
+from .diagnostics import DiagnosticEvents as DE, DiagnosticJournal
 from .control import VistaControlCoordinator
 from .event_store import EventStore
 from .framing import RawFrame, VistaStreamFramer
@@ -179,7 +179,7 @@ class VistaBridge:
 
     async def run(self) -> None:
         self._diagnostic_record(
-            "system.app_started",
+            DE.APP_STARTED,
             component="bridge",
             message="Vista Turbo bridge started",
             details={
@@ -198,7 +198,7 @@ class VistaBridge:
             await self._connection_loop()
         finally:
             self._diagnostic_record(
-                "system.app_stopping",
+                DE.APP_STOPPING,
                 component="bridge",
                 message="Vista Turbo bridge stopping",
                 details={"uptime_seconds": round(time.monotonic() - self._started_monotonic, 3)},
@@ -213,7 +213,7 @@ class VistaBridge:
             self.mqtt.publish("panel/automation_availability_source", "offline", retain=True)
             self.mqtt.stop()
             self._diagnostic_record(
-                "system.app_stopped",
+                DE.APP_STOPPED,
                 component="bridge",
                 message="Vista Turbo bridge stopped",
                 details={"uptime_seconds": round(time.monotonic() - self._started_monotonic, 3)},
@@ -272,7 +272,7 @@ class VistaBridge:
                     self.settings.panel.connect_timeout_seconds,
                 )
                 self._diagnostic_record(
-                    "panel_transport.connect_failed",
+                    DE.PANEL_CONNECT_FAILED,
                     severity="warning",
                     component="tcp",
                     message="Panel TCP connection timed out",
@@ -291,9 +291,9 @@ class VistaBridge:
                 )
                 self._diagnostic_record(
                     (
-                        "panel_transport.connection_lost"
+                        DE.PANEL_CONNECTION_LOST
                         if was_connected
-                        else "panel_transport.connect_failed"
+                        else DE.PANEL_CONNECT_FAILED
                     ),
                     severity="warning",
                     component="tcp",
@@ -315,7 +315,7 @@ class VistaBridge:
                 return
             LOG.info("Reconnecting in %ss", delay)
             self._diagnostic_record(
-                "panel_transport.reconnect_scheduled",
+                DE.PANEL_RECONNECT_SCHEDULED,
                 component="tcp",
                 message="Panel TCP reconnect scheduled",
                 details={"delay_seconds": delay},
@@ -350,7 +350,7 @@ class VistaBridge:
         self._panel_connected.set()
         LOG.info("Panel TCP connection established")
         self._diagnostic_record(
-            "panel_transport.connected",
+            DE.PANEL_CONNECTED,
             component="tcp",
             message="Panel TCP session established",
             details={
@@ -444,7 +444,7 @@ class VistaBridge:
                     guard_update.partition,
                 )
                 self._diagnostic_record(
-                    "control.safety_interlock_blocked",
+                    DE.CONTROL_SAFETY_INTERLOCK_BLOCKED,
                     severity="warning",
                     component="panel-control",
                     message="Installer-programming keypad sequence blocked",
@@ -457,7 +457,7 @@ class VistaBridge:
                 reason = "raw_tx_queue_full" if source == "debug" else "tx_queue_full"
                 LOG.warning("Rejected %s because its bounded TX queue is full", source)
                 self._diagnostic_record(
-                    "system.queue_saturated",
+                    DE.QUEUE_SATURATED,
                     severity="warning",
                     component="panel-control",
                     message="Panel transmit queue is full",
@@ -651,7 +651,7 @@ class VistaBridge:
             received,
         )
         self._diagnostic_record(
-            "protocol.invalid_frame",
+            DE.INVALID_FRAME,
             severity="warning",
             component="vista-rs232",
             message="Invalid VISTA protocol frame rejected",
@@ -744,7 +744,7 @@ class VistaBridge:
         replay_started = time.monotonic()
         publish_errors_before = self.mqtt.publish_errors
         self._diagnostic_record(
-            "state_delivery.replay_started",
+            DE.STATE_REPLAY_STARTED,
             component="mqtt",
             message="Replaying Home Assistant discovery and current state",
             correlation_id=correlation_id,
@@ -785,7 +785,7 @@ class VistaBridge:
                 "MQTT recovery replay incomplete; Home Assistant remains unavailable"
             )
             self._diagnostic_record(
-                "state_delivery.replay_failed",
+                DE.STATE_REPLAY_FAILED,
                 severity="warning",
                 component="mqtt",
                 message="Home Assistant state replay was incomplete",
@@ -809,7 +809,7 @@ class VistaBridge:
                 "Home Assistant remains unavailable"
             )
             self._diagnostic_record(
-                "state_delivery.replay_failed",
+                DE.STATE_REPLAY_FAILED,
                 severity="warning",
                 component="mqtt",
                 message="Could not publish Home Assistant availability after replay",
@@ -821,7 +821,7 @@ class VistaBridge:
             )
             return False
         self._diagnostic_record(
-            "state_delivery.replay_completed",
+            DE.STATE_REPLAY_COMPLETED,
             component="mqtt",
             message="Home Assistant discovery and state replay completed",
             correlation_id=correlation_id,
@@ -863,7 +863,7 @@ class VistaBridge:
         self._last_health_snapshot_monotonic = current
         printer = self.printer.metrics
         self._diagnostic_record(
-            "system.health_snapshot",
+            DE.HEALTH_SNAPSHOT,
             component="bridge",
             message="Periodic bridge health snapshot",
             details={
