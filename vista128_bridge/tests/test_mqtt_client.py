@@ -1,6 +1,7 @@
 import json
 import os
 import sys
+import tempfile
 import unittest
 from dataclasses import replace
 from unittest.mock import patch
@@ -13,6 +14,7 @@ from fake_paho import install_fake_paho  # noqa: E402
 install_fake_paho()
 
 from helpers import make_settings  # noqa: E402
+from vista_bridge.diagnostics import DiagnosticEvents as DE, DiagnosticJournal  # noqa: E402
 from vista_bridge.mqtt_client import MqttPublisher  # noqa: E402
 from vista_bridge.state import KeypadState, VistaState, ZoneState  # noqa: E402
 from vista_bridge.version import VERSION  # noqa: E402
@@ -105,6 +107,70 @@ class MqttPublisherTests(unittest.TestCase):
         self.assertTrue(restarted)
         self.assertIsNot(self.publisher._client, client)
         self.assertEqual(self.publisher.watchdog_restarts, 1)
+
+    def test_mqtt_connection_lifecycle_is_persisted_with_sessions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            diagnostics = DiagnosticJournal(os.path.join(tmp, "diagnostics.sqlite3"))
+            publisher = MqttPublisher(
+                make_settings(),
+                lambda data: (True, "queued"),
+                diagnostics=diagnostics,
+            )
+            client = self._connect_publisher(publisher)
+            correlation_id = publisher.recovery_correlation_id
+            transport_session_id = diagnostics.transport_session_id
+
+            client.on_disconnect(client, None, None, 7, None)
+
+            records = diagnostics.recent(
+                correlation_id=correlation_id,
+                order="oldest",
+            )
+            self.assertEqual(
+                [record.event_type for record in records],
+                [DE.HA_CONNECTED, DE.HA_DISCONNECTED],
+            )
+            self.assertTrue(transport_session_id)
+            self.assertEqual(records[0].transport_session_id, transport_session_id)
+            self.assertEqual(records[1].transport_session_id, transport_session_id)
+            self.assertEqual(diagnostics.transport_session_id, "")
+
+    def test_watchdog_recovery_is_one_correlated_incident(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            diagnostics = DiagnosticJournal(os.path.join(tmp, "diagnostics.sqlite3"))
+            publisher = MqttPublisher(
+                make_settings(),
+                lambda data: (True, "queued"),
+                diagnostics=diagnostics,
+            )
+            self._connect_publisher(publisher)
+            publisher.complete_recovery()
+            now = (
+                publisher._last_heartbeat_monotonic
+                + publisher.HEARTBEAT_INTERVAL_SECONDS
+                + 0.1
+            )
+            self.assertFalse(publisher.watchdog_tick(now))
+            self.assertTrue(
+                publisher.watchdog_tick(
+                    now + publisher.WATCHDOG_TIMEOUT_SECONDS + 1
+                )
+            )
+            correlation_id = publisher.recovery_correlation_id
+            records = diagnostics.recent(
+                correlation_id=correlation_id,
+                order="oldest",
+            )
+            self.assertEqual(
+                [record.event_type for record in records],
+                [
+                    DE.HA_WATCHDOG_TRIGGERED,
+                    DE.HA_RECOVERY_STARTED,
+                    DE.HA_CLIENT_REPLACED,
+                ],
+            )
+            self.assertEqual(records[0].severity, "error")
+            self.assertEqual(records[1].severity, "warning")
 
     def test_discovery_uses_runtime_version(self):
         self.publisher.publish_discovery()

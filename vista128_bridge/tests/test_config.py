@@ -24,6 +24,10 @@ class ConfigTests(unittest.TestCase):
             "RAW_MQTT_ENABLED": "false",
             "MQTT_OUTBOUND_QUEUE_MAX": "512",
             "MQTT_INFLIGHT_MESSAGES_MAX": "32",
+            "DIAGNOSTICS_SQLITE_PATH": "/tmp/diag.sqlite3",
+            "DIAGNOSTICS_MAX_AGE_DAYS": "45",
+            "DIAGNOSTICS_MAX_ROWS": "12345",
+            "DIAGNOSTICS_HEALTH_SNAPSHOT_INTERVAL_SECONDS": "600",
         }
         with patch.dict(os.environ, environment, clear=True):
             settings = Settings.from_env()
@@ -37,6 +41,10 @@ class ConfigTests(unittest.TestCase):
         self.assertFalse(settings.raw_mqtt_enabled)
         self.assertEqual(settings.mqtt.outbound_queue_max, 512)
         self.assertEqual(settings.mqtt.inflight_messages_max, 32)
+        self.assertEqual(settings.diagnostics.sqlite_path, "/tmp/diag.sqlite3")
+        self.assertEqual(settings.diagnostics.max_age_days, 45)
+        self.assertEqual(settings.diagnostics.max_rows, 12345)
+        self.assertEqual(settings.diagnostics.health_snapshot_interval_seconds, 600)
 
     def test_tls_client_certificate_and_key_must_be_a_pair(self):
         environment = {

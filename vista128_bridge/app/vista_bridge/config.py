@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import os
 
 
@@ -120,6 +120,14 @@ class PrinterSettings:
 
 
 @dataclass(frozen=True)
+class DiagnosticsSettings:
+    sqlite_path: str = "/data/vistaturbo_diagnostics.sqlite3"
+    max_age_days: int = 30
+    max_rows: int = 25000
+    health_snapshot_interval_seconds: int = 900
+
+
+@dataclass(frozen=True)
 class Settings:
     panel: PanelSettings
     mqtt: MqttSettings
@@ -133,6 +141,7 @@ class Settings:
     raw_mqtt_enabled: bool = False
     tx_queue_max: int = 128
     raw_tx_queue_max: int = 16
+    diagnostics: DiagnosticsSettings = field(default_factory=DiagnosticsSettings)
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -222,6 +231,16 @@ class Settings:
                     "TRANSPORT_PRINT_SPOOL_PATH", "/data/vista128_print_queue.sqlite3"
                 ).strip(),
             ),
+            diagnostics=DiagnosticsSettings(
+                sqlite_path=os.environ.get(
+                    "DIAGNOSTICS_SQLITE_PATH", "/data/vistaturbo_diagnostics.sqlite3"
+                ).strip(),
+                max_age_days=int(os.environ.get("DIAGNOSTICS_MAX_AGE_DAYS", "30")),
+                max_rows=int(os.environ.get("DIAGNOSTICS_MAX_ROWS", "25000")),
+                health_snapshot_interval_seconds=int(
+                    os.environ.get("DIAGNOSTICS_HEALTH_SNAPSHOT_INTERVAL_SECONDS", "900")
+                ),
+            ),
             raw_logging=_bool_env("RAW_LOGGING", False),
             debug_raw_tx_enabled=_bool_env("DEBUG_RAW_TX_ENABLED", False),
             raw_mqtt_enabled=_bool_env("RAW_MQTT_ENABLED", False),
@@ -264,6 +283,16 @@ class Settings:
             raise ValueError("event_history_max_age_days must be 1..3650")
         if not 100 <= self.event_history.max_rows <= 1_000_000:
             raise ValueError("event_history_max_rows must be 100..1000000")
+        if not self.diagnostics.sqlite_path:
+            raise ValueError("diagnostics_sqlite_path must not be empty")
+        if not 1 <= self.diagnostics.max_age_days <= 3650:
+            raise ValueError("diagnostics_max_age_days must be 1..3650")
+        if not 100 <= self.diagnostics.max_rows <= 1_000_000:
+            raise ValueError("diagnostics_max_rows must be 100..1000000")
+        if not 60 <= self.diagnostics.health_snapshot_interval_seconds <= 86400:
+            raise ValueError(
+                "diagnostics_health_snapshot_interval_seconds must be 60..86400"
+            )
         if self.printer.enabled and not self.printer.host:
             raise ValueError("transport_host is required when transport_print_enabled is true")
         if not 1 <= self.printer.http_port <= 65535:
