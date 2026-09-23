@@ -13,6 +13,12 @@ stage: experimental
 init: false
 services:
   - mqtt:need
+homeassistant_api: true
+ingress: true
+ingress_port: 8099
+panel_admin: true
+panel_title: "Vista Turbo"
+panel_icon: "mdi:shield-home"
 options:
   # Panel
   panel_host: "192.0.2.10"
