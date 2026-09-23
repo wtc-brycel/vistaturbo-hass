@@ -184,6 +184,10 @@ class BridgeFrameTests(unittest.TestCase):
             ),
             bridge.mqtt.published,
         )
+        self.assertEqual(
+            bridge.mqtt.published[-1],
+            (("bridge/availability", "online"), {"retain": True, "qos": 1}),
+        )
 
     def test_control_and_raw_tx_logs_redact_payloads(self):
         bridge = self.make_bridge()
