@@ -95,9 +95,20 @@ class AdminSnapshotBuilder:
         printer_metrics = bridge.printer.metrics
         mqtt_connected = False
         try:
-            mqtt_connected = bool(bridge.mqtt._client.is_connected())
+            mqtt_connected = bool(bridge.mqtt.connected)
         except Exception:
             mqtt_connected = False
+        diagnostic_runtime = (
+            bridge.diagnostics.runtime_state()
+            if getattr(bridge, "diagnostics", None) is not None
+            else {
+                "available": False,
+                "write_errors": 0,
+                "dropped_events": 0,
+                "pending_writes": 0,
+                "writer_alive": False,
+            }
+        )
 
         return {
             "app": {
@@ -175,6 +186,11 @@ class AdminSnapshotBuilder:
                 "connected": mqtt_connected,
                 "publish_errors": bridge.mqtt.publish_errors,
                 "tls_enabled": bridge.settings.mqtt.tls_enabled,
+            },
+            "diagnostics": {
+                **diagnostic_runtime,
+                "retention_days": bridge.settings.diagnostics.max_age_days,
+                "max_rows": bridge.settings.diagnostics.max_rows,
             },
             "printer": {
                 "enabled": bridge.printer.enabled,
