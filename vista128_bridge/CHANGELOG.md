@@ -2,6 +2,15 @@
 
 Detailed release-candidate notes are kept in [`../release/`](../release/). This file summarizes the user-visible and architectural changes for each published version.
 
+## 0.2.6-rc.28
+
+- Add an independent MQTT transport watchdog using broker-confirmed QoS 1 heartbeat acknowledgements.
+- Replace a stalled Paho client without restarting the VISTA panel session or the Home Assistant App.
+- Republish MQTT Discovery and the current authoritative VISTA state after every MQTT connection or recovery.
+- Avoid startup publish errors before the broker connection is established.
+- Expose a disabled-by-default MQTT Watchdog Restarts diagnostic counter.
+- Keep MQTT as compatibility infrastructure while preserving the native private API/WebSocket migration defined by ADR 0001.
+
 ## 0.2.6-rc.27
 
 - Complete the real-hardware Lantronix transport fix by negotiating Telnet BINARY mode in both directions.
