@@ -395,11 +395,15 @@ async function loadDiagnostics(reset, correlationId = null) {
   if (!reset && (appState.diagnosticLoading || !appState.diagnosticCursor)) return;
   const requestId = ++appState.diagnosticRequest;
   appState.diagnosticAbort?.abort(); appState.diagnosticAbort = new AbortController();
-  const filters = reset ? {
-    severity: byId("diagnostic-severity").value,
-    category: byId("diagnostic-category").value,
-    correlation_id: correlationId || "",
-  } : appState.diagnosticFilters;
+  const filters = reset
+    ? correlationId
+      ? { severity: "", category: "", correlation_id: correlationId }
+      : {
+          severity: byId("diagnostic-severity").value,
+          category: byId("diagnostic-category").value,
+          correlation_id: "",
+        }
+    : appState.diagnosticFilters;
   const params = new URLSearchParams({ limit: "50" });
   for (const [key, value] of Object.entries(filters)) if (value) params.set(key, value);
   if (!reset && appState.diagnosticCursor) params.set("cursor", appState.diagnosticCursor);
