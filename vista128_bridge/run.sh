@@ -122,10 +122,39 @@ export MQTT_PORT="$(bashio::services mqtt 'port')"
 export MQTT_USERNAME="$(bashio::services mqtt 'username')"
 export MQTT_PASSWORD="$(bashio::services mqtt 'password')"
 
+# HA0 native-integration bootstrap. The machine credential is generated once,
+# retained only in the App data directory, and handed to Home Assistant through
+# Supervisor discovery. It is never exposed as an App option or human credential.
+export NATIVE_API_PORT="8098"
+NATIVE_API_TOKEN_FILE="/data/vistaturbo_native_api_token"
+if [[ ! -s "${NATIVE_API_TOKEN_FILE}" ]]; then
+  umask 077
+  python3 -c 'import secrets; print(secrets.token_urlsafe(32))' > "${NATIVE_API_TOKEN_FILE}"
+  chmod 600 "${NATIVE_API_TOKEN_FILE}"
+fi
+export NATIVE_API_TOKEN="$(cat "${NATIVE_API_TOKEN_FILE}")"
+
+native_discovery_config="$(
+  bashio::var.json \
+    host "$(hostname)" \
+    port "^${NATIVE_API_PORT}" \
+    token "${NATIVE_API_TOKEN}" \
+    schema "^1"
+)"
+(
+  sleep 1
+  if bashio::discovery "vistaturbo" "${native_discovery_config}" >/dev/null; then
+    bashio::log.info "Home Assistant native integration discovery announced"
+  else
+    bashio::log.warning "Could not announce Home Assistant native integration discovery; MQTT compatibility remains active"
+  fi
+) &
+
 APP_VERSION="$(python3 -c 'import sys; sys.path.insert(0, "/app"); from vista_bridge.version import VERSION; print(VERSION)')"
 bashio::log.info "Starting Vista Turbo RS232 v${APP_VERSION}"
 bashio::log.info "Serial server: ${PANEL_HOST}:${PANEL_PORT}"
 bashio::log.info "MQTT broker: ${MQTT_HOST}:${MQTT_PORT}"
+bashio::log.info "Native Home Assistant API: internal port ${NATIVE_API_PORT} (read-only HA0)"
 bashio::log.info "Periodic state reconciliation: every ${PERIODIC_SYNC_INTERVAL_SECONDS}s"
 bashio::log.info "Keypad display polling: partitions ${KEYPAD_PARTITIONS}, every ${KEYPAD_POLL_INTERVAL_SECONDS}s"
 bashio::log.info "Event journal: ${EVENT_HISTORY_SQLITE_PATH}; recent HA window ${EVENT_HISTORY_RECENT_LIMIT}; retention ${EVENT_HISTORY_MAX_AGE_DAYS}d"

@@ -1,0 +1,12 @@
+{
+  "domain": "vistaturbo",
+  "name": "Vista Turbo",
+  "version": "0.1.0",
+  "codeowners": ["@wtc-brycel"],
+  "config_flow": true,
+  "documentation": "https://github.com/wtc-brycel/vistaturbo-hass",
+  "issue_tracker": "https://github.com/wtc-brycel/vistaturbo-hass/issues",
+  "integration_type": "hub",
+  "iot_class": "local_push",
+  "requirements": []
+}
