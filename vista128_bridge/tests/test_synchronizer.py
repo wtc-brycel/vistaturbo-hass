@@ -1,12 +1,14 @@
 import asyncio
 import os
 import sys
+import tempfile
 import unittest
 from unittest.mock import AsyncMock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "app"))
 
 from vista_bridge.config import KeypadSettings, SyncSettings  # noqa: E402
+from vista_bridge.diagnostics import DiagnosticEvents as DE, DiagnosticJournal  # noqa: E402
 from vista_bridge.protocol import KeypadDisplayReport, STARTUP_QUERIES  # noqa: E402
 from vista_bridge.synchronizer import VistaSynchronizer  # noqa: E402
 
@@ -80,6 +82,37 @@ class SynchronizerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([label for _, label, _ in sent], [q.name for q in STARTUP_QUERIES])
         self.assertEqual(sync.failures_consecutive, 0)
         self.assertTrue(sync.last_success_at)
+
+    async def test_startup_sync_failure_is_correlated_in_diagnostic_journal(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            diagnostics = DiagnosticJournal(os.path.join(tmp, "diagnostics.sqlite3"))
+            sync = VistaSynchronizer(
+                sync_settings(),
+                keypad_settings(),
+                False,
+                False,
+                lambda: True,
+                lambda data, source, label: (False, "queue full"),
+                lambda: None,
+                diagnostics=diagnostics,
+            )
+
+            ok = await sync.run_sync(
+                STARTUP_QUERIES,
+                source="startup",
+                description="read-only VISTA startup synchronization",
+            )
+
+            self.assertFalse(ok)
+            records = diagnostics.recent(category="synchronization", order="oldest")
+            self.assertEqual(
+                [record.event_type for record in records],
+                [DE.SYNC_STARTED, DE.SYNC_FAILED],
+            )
+            self.assertTrue(records[0].correlation_id)
+            self.assertEqual(records[0].correlation_id, records[1].correlation_id)
+            self.assertEqual(records[1].details["failed_query"], "arming_status")
+            self.assertEqual(records[1].details["failure_reason"], "queue full")
 
     async def test_startup_never_runs_historical_dump(self):
         sync = VistaSynchronizer(

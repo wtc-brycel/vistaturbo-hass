@@ -14,6 +14,7 @@ import paho.mqtt.client as mqtt
 
 from .command_model import VistaCommand, command_from_request
 from .config import Settings
+from .diagnostics import DiagnosticEvents as DE, DiagnosticJournal
 from .mqtt_discovery import (
     KEYPAD_ALARM_SPECS,
     PANEL_ALARM_SPECS,
@@ -47,6 +48,7 @@ class MqttPublisher:
         alarm_command_callback: Callable[..., tuple[bool, str]] | None = None,
         audit_interaction_callback: Callable[[dict], None] | None = None,
         semantic_command_callback: Callable[..., tuple[bool, str]] | None = None,
+        diagnostics: DiagnosticJournal | None = None,
     ) -> None:
         self.settings = settings
         self.mqtt = settings.mqtt
@@ -55,6 +57,7 @@ class MqttPublisher:
         self.alarm_command_callback = alarm_command_callback
         self.audit_interaction_callback = audit_interaction_callback
         self.semantic_command_callback = semantic_command_callback
+        self.diagnostics = diagnostics
         self._keypad_callback_with_metadata = self._accepts_metadata(
             keypad_command_callback, 3
         )
@@ -82,6 +85,9 @@ class MqttPublisher:
         self._acked_mids: set[int] = set()
         self._recovery_generation = 0
         self._consumed_recovery_generation = 0
+        self._transport_generation = 0
+        self._transport_session_id = ""
+        self._recovery_correlation_id = ""
         self._client = self._build_client()
 
     def _build_client(self):
@@ -135,6 +141,71 @@ class MqttPublisher:
     @property
     def connected(self) -> bool:
         return self._connected.is_set()
+
+    @property
+    def recovery_correlation_id(self) -> str:
+        with self._client_lock:
+            return self._recovery_correlation_id
+
+    def complete_recovery(self) -> None:
+        with self._client_lock:
+            self._recovery_correlation_id = ""
+
+    def diagnostic_state(self, now: float | None = None) -> dict:
+        current = time.monotonic() if now is None else now
+        with self._client_lock:
+            last_puback_age = (
+                max(0.0, current - self._last_puback_monotonic)
+                if self._last_puback_monotonic
+                else None
+            )
+            heartbeat_age = (
+                max(0.0, current - self._heartbeat_sent_monotonic)
+                if self._heartbeat_mid is not None
+                else None
+            )
+            return {
+                "connected": self._connected.is_set(),
+                "transport_generation": self._transport_generation,
+                "transport_session_id": self._transport_session_id,
+                "last_puback_age_seconds": (
+                    round(last_puback_age, 3) if last_puback_age is not None else None
+                ),
+                "heartbeat_pending_seconds": (
+                    round(heartbeat_age, 3) if heartbeat_age is not None else None
+                ),
+                "watchdog_restarts": self.watchdog_restarts,
+                "publish_errors": self.publish_errors,
+            }
+
+    def _ensure_recovery_correlation(self) -> str:
+        with self._client_lock:
+            if not self._recovery_correlation_id:
+                if self.diagnostics is not None:
+                    self._recovery_correlation_id = self.diagnostics.new_id("ha")
+                else:
+                    self._recovery_correlation_id = f"ha_{uuid.uuid4().hex[:16]}"
+            return self._recovery_correlation_id
+
+    def _diag(
+        self,
+        event_type: str,
+        *,
+        severity: str = "info",
+        message: str = "",
+        details: dict | None = None,
+        correlation_id: str = "",
+    ) -> None:
+        if self.diagnostics is None:
+            return
+        self.diagnostics.record(
+            event_type,
+            severity=severity,
+            component="mqtt",
+            message=message,
+            details=details,
+            correlation_id=correlation_id,
+        )
 
     def consume_recovery_request(self) -> bool:
         with self._client_lock:
@@ -226,11 +297,34 @@ class MqttPublisher:
         if not self._restart_lock.acquire(blocking=False):
             return False
         try:
+            correlation_id = self._ensure_recovery_correlation()
+            state = self.diagnostic_state()
             LOG.error("MQTT watchdog restarting transport: %s", reason)
+            self._diag(
+                DE.HA_WATCHDOG_TRIGGERED,
+                severity="error",
+                message=reason,
+                details=state,
+                correlation_id=correlation_id,
+            )
+            self._diag(
+                DE.HA_RECOVERY_STARTED,
+                severity="warning",
+                message="Replacing MQTT transport after watchdog trigger",
+                details={"reason": reason, **state},
+                correlation_id=correlation_id,
+            )
             try:
                 replacement = self._build_client()
-            except Exception:
+            except Exception as exc:
                 LOG.exception("MQTT watchdog could not build replacement client")
+                self._diag(
+                    DE.HA_RECOVERY_FAILED,
+                    severity="error",
+                    message="Could not build replacement MQTT client",
+                    details={"exception_type": type(exc).__name__},
+                    correlation_id=correlation_id,
+                )
                 with self._client_lock:
                     self._client_started_monotonic = time.monotonic()
                     self._last_disconnect_monotonic = self._client_started_monotonic
@@ -247,14 +341,35 @@ class MqttPublisher:
 
             try:
                 self._start_client(replacement)
-            except Exception:
+            except Exception as exc:
                 LOG.exception("MQTT watchdog could not start replacement client")
+                self._diag(
+                    DE.HA_RECOVERY_FAILED,
+                    severity="error",
+                    message="Could not start replacement MQTT client",
+                    details={"exception_type": type(exc).__name__},
+                    correlation_id=correlation_id,
+                )
                 with self._client_lock:
                     self._client = old_client
                     self.watchdog_restarts -= 1
                     self._client_started_monotonic = time.monotonic()
                     self._last_disconnect_monotonic = self._client_started_monotonic
                 return False
+
+            self._diag(
+                DE.HA_CLIENT_REPLACED,
+                message="MQTT client replaced; awaiting broker connection",
+                details={
+                    "watchdog_restarts": self.watchdog_restarts,
+                    "previous_transport_generation": self._transport_generation,
+                },
+                correlation_id=correlation_id,
+            )
+            if self.diagnostics is not None:
+                self.diagnostics.clear_transport_session()
+            with self._client_lock:
+                self._transport_session_id = ""
 
             threading.Thread(
                 target=self._cleanup_client,
@@ -788,12 +903,26 @@ class MqttPublisher:
         if client is not self._client:
             return
         if reason_code != 0:
+            correlation_id = self._ensure_recovery_correlation()
             self._connected.clear()
             with self._client_lock:
                 self._last_disconnect_monotonic = time.monotonic()
             LOG.error("MQTT connection rejected: %s", reason_code)
+            self._diag(
+                DE.HA_CONNECTION_REJECTED,
+                severity="error",
+                message="MQTT broker rejected connection",
+                details={"reason_code": str(reason_code)},
+                correlation_id=correlation_id,
+            )
             return
 
+        correlation_id = self._ensure_recovery_correlation()
+        transport_session_id = (
+            self.diagnostics.new_id("ha_session")
+            if self.diagnostics is not None
+            else f"ha_session_{uuid.uuid4().hex[:16]}"
+        )
         now = time.monotonic()
         with self._client_lock:
             self._connected.set()
@@ -805,8 +934,19 @@ class MqttPublisher:
             self._acked_mids.clear()
             self._recovery_generation += 1
             self._retained_payloads.clear()
+            self._transport_generation += 1
+            self._transport_session_id = transport_session_id
+            transport_generation = self._transport_generation
+        if self.diagnostics is not None:
+            self.diagnostics.set_transport_session(transport_session_id)
 
         LOG.info("Connected to MQTT broker")
+        self._diag(
+            DE.HA_CONNECTED,
+            message="MQTT broker connection established",
+            details={"transport_generation": transport_generation},
+            correlation_id=correlation_id,
+        )
         if self.settings.control.enabled and self.settings.control.native_alarm_enabled:
             client.subscribe(self.topic("partition/+/command"), qos=1)
         if self.settings.control.enabled and self.settings.control.keypad_enabled:
@@ -843,11 +983,36 @@ class MqttPublisher:
     ) -> None:
         if client is not self._client:
             return
+        correlation_id = (
+            self.recovery_correlation_id
+            if self._stopping
+            else self._ensure_recovery_correlation()
+        )
         self._connected.clear()
         with self._client_lock:
             self._last_disconnect_monotonic = time.monotonic()
             self._heartbeat_mid = None
             self._acked_mids.clear()
+            transport_generation = self._transport_generation
+        self._diag(
+            DE.HA_DISCONNECTED,
+            severity="info" if self._stopping else "warning",
+            message=(
+                "MQTT transport stopped"
+                if self._stopping
+                else "MQTT broker connection lost"
+            ),
+            details={
+                "reason_code": str(reason_code),
+                "transport_generation": transport_generation,
+                "stopping": self._stopping,
+            },
+            correlation_id=correlation_id,
+        )
+        if self.diagnostics is not None:
+            self.diagnostics.clear_transport_session()
+        with self._client_lock:
+            self._transport_session_id = ""
         if self._stopping:
             LOG.info("Disconnected from MQTT broker: %s", reason_code)
         else:
