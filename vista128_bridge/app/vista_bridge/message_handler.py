@@ -184,7 +184,7 @@ class ProtocolMessageHandler:
         report = parse_zone_status(data)
         if report is None:
             return
-        changed = self.state.apply_zone_status(report)
+        changed = self.state.apply_zone_status(report, received_at)
         start_zone = (report.block - 1) * 64 + 1
         LOG.info(
             "Decoded zone status block %d (zones %d-%d); %d changed",
@@ -286,7 +286,7 @@ class ProtocolMessageHandler:
             return
         zone_before = self.state.zones.get(event.zone)
         zone_was_faulted = bool(zone_before and zone_before.faulted)
-        changed_zones, changed_partitions = self.state.apply_system_event(event)
+        changed_zones, changed_partitions = self.state.apply_system_event(event, received_at)
         LOG.info(
             "Decoded event %s (%s): zone=%03d user=%03d partition=%d panel_time=%s",
             event.code,

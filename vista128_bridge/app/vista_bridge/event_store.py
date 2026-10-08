@@ -624,39 +624,129 @@ class EventStore:
             last_dump_inserted=int(metadata.get("last_dump_inserted", "0") or 0),
         )
 
-    def recent(self, limit: int = 20) -> list[dict[str, Any]]:
-        limit = max(1, min(100, int(limit)))
-        with closing(self._connect()) as db, db:
-            rows = db.execute(
-                """
-                SELECT id, occurrence, event_code, description, zone,
-                       user_number, partition_number, panel_timestamp, descriptor,
-                       seen_live, seen_history, last_received_at
-                FROM events
-                ORDER BY COALESCE(panel_timestamp, last_received_at) DESC, id DESC
-                LIMIT ?
-                """,
-                (limit,),
-            ).fetchall()
+    @staticmethod
+    def _event_row(row: sqlite3.Row) -> dict[str, Any]:
+        seen_live = bool(row["seen_live"])
+        seen_history = bool(row["seen_history"])
+        source = (
+            "both"
+            if seen_live and seen_history
+            else "live"
+            if seen_live
+            else "history"
+        )
+        return {
+            "id": row["id"],
+            "occurrence": row["occurrence"],
+            "event_code": row["event_code"],
+            "description": row["description"],
+            "zone": row["zone"],
+            "user": row["user_number"],
+            "partition": row["partition_number"],
+            "panel_timestamp": row["panel_timestamp"],
+            "descriptor": row["descriptor"],
+            "source": source,
+            "received_at": row["last_received_at"],
+        }
 
-        events: list[dict[str, Any]] = []
-        for row in rows:
-            seen_live = bool(row["seen_live"])
-            seen_history = bool(row["seen_history"])
-            source = "both" if seen_live and seen_history else "live" if seen_live else "history"
-            events.append(
-                {
-                    "id": row["id"],
-                    "occurrence": row["occurrence"],
-                    "event_code": row["event_code"],
-                    "description": row["description"],
-                    "zone": row["zone"],
-                    "user": row["user_number"],
-                    "partition": row["partition_number"],
-                    "panel_timestamp": row["panel_timestamp"],
-                    "descriptor": row["descriptor"],
-                    "source": source,
-                    "received_at": row["last_received_at"],
-                }
+    def query_page(
+        self,
+        *,
+        limit: int = 50,
+        partition: int = 0,
+        system_only: bool = False,
+        zone: int = 0,
+        user: int = 0,
+        event_code: str = "",
+        source: str = "",
+        search: str = "",
+        cursor: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Return a bounded, filterable page for administrative journal browsing."""
+        limit = max(1, min(100, int(limit)))
+        partition = max(0, min(8, int(partition)))
+        zone = max(0, min(999, int(zone)))
+        user = max(0, min(999, int(user)))
+        event_code = str(event_code).strip().upper()[:8]
+        source = str(source).strip().lower()
+        search = str(search).strip()[:80]
+
+        clauses: list[str] = []
+        parameters: list[Any] = []
+
+        if system_only:
+            clauses.append("partition_number = 0")
+        elif partition:
+            clauses.append("partition_number = ?")
+            parameters.append(partition)
+        if zone:
+            clauses.append("zone = ?")
+            parameters.append(zone)
+        if user:
+            clauses.append("user_number = ?")
+            parameters.append(user)
+        if event_code:
+            clauses.append("event_code = ?")
+            parameters.append(event_code)
+        if source == "live":
+            clauses.append("seen_live = 1 AND seen_history = 0")
+        elif source == "history":
+            clauses.append("seen_history = 1 AND seen_live = 0")
+        elif source == "both":
+            clauses.append("seen_live = 1 AND seen_history = 1")
+        elif source:
+            raise ValueError("event source must be live, history, both, or empty")
+        if search:
+            escaped = search.replace("!", "!!").replace("%", "!%").replace("_", "!_")
+            like = f"%{escaped}%"
+            clauses.append(
+                "(description LIKE ? ESCAPE '!' COLLATE NOCASE "
+                "OR descriptor LIKE ? ESCAPE '!' COLLATE NOCASE "
+                "OR event_code LIKE ? ESCAPE '!' COLLATE NOCASE)"
             )
-        return events
+            parameters.extend((like, like, like))
+
+        if cursor:
+            sort_at = str(cursor.get("sort_at", ""))[:64]
+            row_id = int(cursor.get("id", 0) or 0)
+            if not sort_at or row_id < 1:
+                raise ValueError("invalid event journal cursor")
+            clauses.append(
+                "(COALESCE(panel_timestamp, last_received_at) < ? "
+                "OR (COALESCE(panel_timestamp, last_received_at) = ? AND id < ?))"
+            )
+            parameters.extend((sort_at, sort_at, row_id))
+
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        sql = f"""
+            SELECT id, occurrence, event_code, description, zone,
+                   user_number, partition_number, panel_timestamp, descriptor,
+                   seen_live, seen_history, last_received_at,
+                   COALESCE(panel_timestamp, last_received_at) AS sort_at
+            FROM events
+            {where}
+            ORDER BY sort_at DESC, id DESC
+            LIMIT ?
+        """
+        parameters.append(limit + 1)
+
+        with closing(self._connect()) as db, db:
+            rows = db.execute(sql, parameters).fetchall()
+
+        has_more = len(rows) > limit
+        visible = rows[:limit]
+        next_cursor = None
+        if has_more and visible:
+            last = visible[-1]
+            next_cursor = {
+                "sort_at": str(last["sort_at"]),
+                "id": int(last["id"]),
+            }
+
+        return {
+            "events": [self._event_row(row) for row in visible],
+            "next_cursor": next_cursor,
+        }
+
+    def recent(self, limit: int = 20) -> list[dict[str, Any]]:
+        return self.query_page(limit=limit)["events"]

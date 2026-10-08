@@ -98,6 +98,10 @@ class ZoneState:
     low_battery: bool = False
     tamper: bool = False
     raw_status: int = 0
+    # Latest received evidence, not an inferred condition transition time.
+    # Retained across reconnect for inspection; VistaState owns freshness.
+    bypass_reported_at: str = ""
+    bypass_source: str = ""
 
     @property
     def active(self) -> bool:
@@ -544,7 +548,7 @@ class VistaState:
         self._reconcile_keypad_trouble(partition)
         return keypad
 
-    def apply_zone_status(self, report: ZoneStatusReport) -> set[int]:
+    def apply_zone_status(self, report: ZoneStatusReport, received_at: str = "") -> set[int]:
         self.zone_status_initialized = True
         self.zone_status_blocks_seen.add(report.block)
         changed: set[int] = set()
@@ -554,6 +558,8 @@ class VistaState:
             zone = self.zones.get(zone_number)
             if zone is None:
                 continue
+            zone.bypass_reported_at = received_at
+            zone.bypass_source = "zone_status"
             if zone.raw_status != raw_status:
                 zone.raw_status = raw_status
                 changed.add(zone_number)
@@ -589,11 +595,15 @@ class VistaState:
         zone.descriptor = descriptor
         return True
 
-    def apply_system_event(self, event: SystemEvent) -> tuple[set[int], set[int]]:
+    def apply_system_event(self, event: SystemEvent, received_at: str = "") -> tuple[set[int], set[int]]:
         self.last_event = event
         changed_zones: set[int] = set()
         changed_partitions: set[int] = set()
 
+        if event.code in {"05", "06"} and event.zone in self.zones:
+            zone = self.zones[event.zone]
+            zone.bypass_reported_at = received_at
+            zone.bypass_source = f"event_{event.code}"
         self._apply_zone_transition(event, changed_zones)
         self._apply_partition_event(event, changed_zones, changed_partitions)
         self._apply_cr2_annunciator_event(event, changed_partitions)

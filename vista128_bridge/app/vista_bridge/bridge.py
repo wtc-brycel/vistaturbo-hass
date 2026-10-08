@@ -36,6 +36,7 @@ class TxItem:
 class VistaBridge:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
+        self._control_result_listeners = set()
         self.state = VistaState()
         self.framer = VistaStreamFramer()
         self._telnet = TelnetSerialFilter()
@@ -129,7 +130,16 @@ class VistaBridge:
         self._panel_recovery_correlation_id = correlation_id
         return correlation_id
 
+    def subscribe_control_results(self, listener):
+        self._control_result_listeners.add(listener)
+        return lambda: self._control_result_listeners.discard(listener)
+
     def _publish_control_result(self, payload: dict) -> None:
+        for listener in tuple(getattr(self, "_control_result_listeners", ())):
+            try:
+                listener(dict(payload))
+            except Exception:
+                LOG.warning("Control-result subscriber failed")
         self.mqtt.publish_json("control/result", payload, qos=1)
 
     def _record_control_audit(self, payload: dict) -> None:
@@ -768,12 +778,24 @@ class VistaBridge:
 
     def _on_snapshot_check(self) -> None:
         complete = self.state.mark_authoritative_snapshot()
-        self.mqtt.publish(
-            "panel/state_fresh", "ON" if complete else "OFF", retain=True, qos=1
-        )
+        # Publish reconciled values before enabling their availability. A prior
+        # retained bypass/zone value must not become current while replay is
+        # still queued, or when an individual publish was rejected.
+        errors_before = self.mqtt.publish_errors
         if complete:
             self._publish_dynamic_state()
             self.mqtt.publish_alarm_states(self.state)
+        delivered = bool(
+            self.mqtt.connected and self.mqtt.publish_errors == errors_before
+        )
+        published = self.mqtt.publish(
+            "panel/state_fresh", "ON" if complete and delivered else "OFF",
+            retain=True, qos=1,
+        )
+        if not delivered or not published:
+            # Retry delivery from the in-memory panel model. This does not poll
+            # Zone Status or restart the healthy panel connection.
+            self.mqtt.request_recovery_replay()
 
     def _publish_dynamic_state(self, *, include_discovery: bool = False) -> None:
         if include_discovery:
@@ -804,6 +826,9 @@ class VistaBridge:
                 if include_discovery:
                     self.mqtt.publish_zone_discovery(zone)
                 self.mqtt.publish_zone_state(zone)
+            # Counts/lists need the same periodic delivery repair as individual
+            # zones. Retained-payload deduplication keeps unchanged data quiet.
+            self.mqtt.publish_zone_summaries(self.state)
 
         if self.state.last_event is not None:
             self.mqtt.publish_event(
@@ -833,12 +858,6 @@ class VistaBridge:
         self.mqtt.publish_discovery()
         self._publish_metrics()
         self.mqtt.publish(
-            "panel/state_fresh",
-            "ON" if self.state.live_snapshot_complete else "OFF",
-            retain=True,
-            qos=1,
-        )
-        self.mqtt.publish(
             "panel/automation_available",
             "ON" if self.control.automation_available() else "OFF",
             retain=True,
@@ -853,6 +872,17 @@ class VistaBridge:
         self._publish_dynamic_state(include_discovery=True)
         self.mqtt.publish_zone_summaries(self.state)
         self.mqtt.publish_alarm_states(self.state)
+        # Recovery may repair rejected delivery on an otherwise live broker.
+        # Preserve data-before-freshness ordering on this path too.
+        self.mqtt.publish(
+            "panel/state_fresh",
+            "ON" if (
+                self.state.live_snapshot_complete and self.mqtt.connected
+                and self.mqtt.publish_errors == publish_errors_before
+            ) else "OFF",
+            retain=True,
+            qos=1,
+        )
         if (
             not self.mqtt.connected
             or self.mqtt.publish_errors != publish_errors_before
