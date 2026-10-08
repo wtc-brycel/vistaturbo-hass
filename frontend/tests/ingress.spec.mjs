@@ -190,7 +190,7 @@ test("diagnostic history uses bounded older paging", async ({ page }) => {
 
 test("mobile pages preserve labels and fit without horizontal overflow", async ({ page }) => {
   const h = await mount(page, { width: 390 });
-  for (const view of ["overview", "events", "keypad", "diagnostics"]) {
+  for (const view of ["overview", "zones", "events", "keypad", "diagnostics"]) {
     await page.locator(`[data-view='${view}']`).click();
     await expect(page.locator(`[data-view='${view}'] span`)).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
@@ -203,11 +203,80 @@ test("capture exact source with deterministic app fixtures", async ({ page }) =>
   const output = join(root, "frontend/test-results/ingress-review"); mkdirSync(output, { recursive: true });
   for (const dark of [false, true]) {
     await page.emulateMedia({ colorScheme: dark ? "dark" : "light" });
-    for (const view of ["overview", "keypad", "events", "diagnostics"]) {
+    for (const view of ["overview", "zones", "keypad", "events", "diagnostics"]) {
       await page.locator(`[data-view='${view}']`).click();
       if (view === "events") await expect(page.locator("#event-list .event-row")).toHaveCount(50);
       await page.screenshot({ path: join(output, `${view}-${dark ? "dark" : "light"}.png`), fullPage: true });
     }
   }
   expect(h.errors).toEqual([]); h.close();
+});
+
+
+test("zone bypass evidence follows explicit panel restore and keeps filters live", async ({ page }) => {
+  const h = await mount(page, { state: "bypass" });
+  await page.getByRole("button", { name: "Zones", exact: true }).click();
+  await expect(page.locator("#zone-list .zone-row")).toHaveCount(7);
+  await page.locator("#zone-condition").selectOption("bypassed");
+  await expect(page.locator("#zone-list .zone-row")).toHaveCount(1);
+  await expect(page.locator("#zone-list")).toContainText("Zone 002");
+  await expect(page.locator("#zone-list")).toContainText("Bypass event 05");
+  h.current.snapshot = structuredClone(fixture.bypass_restored);
+  await expect(page.locator("#zone-list .zone-row")).toHaveCount(0);
+  await page.locator("#zone-condition").selectOption("");
+  await page.locator("#zone-search").fill("east");
+  await expect(page.locator("#zone-list .zone-row")).toHaveCount(1);
+  await expect(page.locator("#zone-list")).toContainText("Reported clear");
+  await expect(page.locator("#zone-list")).toContainText("Restore event 06");
+  expect(h.posts).toHaveLength(0); expect(h.errors).toEqual([]); h.close();
+});
+
+test("cached bypass reports never become current after browser or panel disconnect", async ({ page }) => {
+  const h = await mount(page, { state: "bypass" });
+  await page.getByRole("button", { name: "Zones", exact: true }).click();
+  h.close();
+  await expect(page.locator("#zones-warning")).toBeVisible();
+  await expect(page.locator("[data-zone='2'] .zone-conditions")).toHaveText("Unknown");
+  await expect(page.locator("[data-zone='2'] .zone-evidence")).toContainText("Reported bypassed");
+  await expect(page.locator("[data-zone='2'] .zone-evidence")).toContainText("Last known; not current");
+  await page.locator("#zone-condition").selectOption("bypassed");
+  await expect(page.locator("#zone-list .zone-row")).toHaveCount(0);
+  await page.locator("#zone-condition").selectOption("unknown");
+  await expect(page.locator("#zone-list .zone-row")).toHaveCount(7);
+  expect(h.posts).toHaveLength(0);
+});
+
+test("panel reconnect invalidates zones while socket remains live", async ({ page }) => {
+  const h = await mount(page, { state: "bypass" });
+  await page.getByRole("button", { name: "Zones", exact: true }).click();
+  h.current.snapshot = structuredClone(fixture.bypass_reconnecting);
+  await expect(page.locator("#zones-warning")).toBeVisible();
+  await expect(page.locator("[data-zone='2'] .zone-conditions")).toHaveText("Unknown");
+  h.current.snapshot = structuredClone(fixture.bypass_restored);
+  await expect(page.locator("#zones-warning")).toBeHidden();
+  await expect(page.locator("[data-zone='2'] .zone-conditions")).toHaveText("No reported conditions");
+  expect(h.errors).toEqual([]); h.close();
+});
+
+test("zones remain readable at narrow mobile widths with long panel text", async ({ page }) => {
+  const h = await mount(page, { width: 320, state: "bypass" });
+  h.current.snapshot.zones[1].descriptor = "<script>unsafe()</script>Long".repeat(5);
+  await page.getByRole("button", { name: "Zones", exact: true }).click();
+  await expect(page.locator("[data-zone='2'] .zone-description")).toContainText("<script>");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  expect(h.errors).toEqual([]); h.close();
+});
+
+test("management navigation supports Back and Forward without duplicate entries", async ({ page }) => {
+  const h = await mount(page);
+  await page.getByRole("button", { name: "Zones", exact: true }).click();
+  const length = await page.evaluate(() => history.length);
+  await page.getByRole("button", { name: "Zones", exact: true }).click();
+  expect(await page.evaluate(() => history.length)).toBe(length);
+  await page.getByRole("button", { name: "Diagnostics", exact: true }).click();
+  await page.goBack();
+  await expect(page.locator("#view-zones")).toHaveClass(/active/);
+  await page.goForward();
+  await expect(page.locator("#view-diagnostics")).toHaveClass(/active/);
+  expect(h.posts).toHaveLength(0); expect(h.errors).toEqual([]); h.close();
 });

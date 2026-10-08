@@ -14,6 +14,7 @@ from helpers import make_settings  # noqa: E402
 from vista_bridge.event_store import EventStore  # noqa: E402
 from vista_bridge.message_handler import ProtocolMessageHandler  # noqa: E402
 from vista_bridge.state import VistaState  # noqa: E402
+from vista_bridge.protocol import SystemEvent  # noqa: E402
 
 
 def make_packet(body_without_length_and_checksum: str) -> bytes:
@@ -78,6 +79,19 @@ class FakeSynchronizer:
 
 
 class EventHistoryHandlerTests(unittest.TestCase):
+    def test_historical_bypass_events_cannot_replace_current_panel_evidence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            settings = make_settings(spool_path=os.path.join(tmp, "printer.sqlite3"))
+            store = EventStore(os.path.join(tmp, "events.sqlite3"))
+            state = VistaState()
+            handler = ProtocolMessageHandler(settings, state, FakeMqtt(), FakePrinter(), FakeSynchronizer(), store)
+            for live, historical, expected in (("05", "06", True), ("06", "05", False)):
+                state.apply_system_event(SystemEvent(live, "Fixture", 27, 0, 1, 0, 12, 7, 10, 26), "2026-10-07T12:00:00+00:00")
+                handler.handle("event_log_entry", make_packet(f"ld{historical}0270001212315082600"), "2026-10-07T12:01:00+00:00")
+                self.assertEqual(state.zones[27].bypassed, expected)
+                self.assertEqual(state.zones[27].bypass_source, f"event_{live}")
+                self.assertEqual(state.zones[27].bypass_reported_at, "2026-10-07T12:00:00+00:00")
+
     def test_historical_entries_are_persisted_without_live_side_effects(self):
         with tempfile.TemporaryDirectory() as tmp:
             settings = make_settings(spool_path=os.path.join(tmp, "printer.sqlite3"))

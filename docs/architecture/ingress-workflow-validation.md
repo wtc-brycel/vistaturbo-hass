@@ -2,8 +2,8 @@
 
 Review: September 22, 2026. Scope: draft PR 60.
 
-The branding header is removed. The persistent system-condition strip and four
-existing destinations remain. Repeated overlines and descriptions are removed;
+The branding header is removed. The persistent system-condition strip remains;
+the five destinations now include the read-only Zones inspector. Repeated overlines and descriptions are removed;
 unknown-state reasons, read-only notices, command outcomes, and time provenance
 remain because they change operator decisions. The existing keypad bundle is
 unchanged.
@@ -18,6 +18,7 @@ unchanged.
 | Last received event | In-memory `last_event` plus receive time and zone descriptor | Not the last event in the whole retained database; no initiating-point inference from this row. |
 | Event Journal | Retained SQLite `events`, never PIN-bearing `keypad_interactions` | Fifty-row cursor pages; applied filters remain fixed until Apply. System scope is distinct from all partitions. Database browsing remains available when the panel is offline. |
 | Event emphasis | `event_codes.py` canonical code mappings | A restore is historical restoration, not proof of current system normal. Code 07 is Close (Arm). English description matching cannot determine alarm family. |
+| Zones | Assigned numeric zone identities, complete live state and last received ZS/05/06 evidence | Read-only partition/condition filters; unavailable conditions remain unknown and old bypass evidence is explicitly historical. |
 | Keypad | Current selected KD, core snapshot, original control gates, shared coordinator | Ordinary numeric/*/# keys only. No invented A-D, acknowledge, silence, reset, programming, or user-management workflow. |
 | Diagnostics | Current bridge health plus the structured Diagnostic Journal from ADR 0002 | Read-only. Current health remains live; retained diagnostics use bounded cursor pages, severity/category filters, and explicit newest/oldest ordering. Correlated recovery sequences are grouped as incidents, and selecting an incident shows its complete sequence regardless of category/severity filters while retaining the selected time order. No credentials, key sequences, raw payloads, private-key content, or diagnostic database paths are returned. |
 
@@ -88,7 +89,7 @@ diagnostic cursor paging, incident correlation, diagnostic ordering, and filter 
 
 Browser tests load the shipped HTML/CSS/JavaScript and unchanged keypad bundle
 with deterministic fixtures produced by the real snapshot builder. They check
-all four destinations, responsive labels/widths, light/dark rendering, keyboard
+all five destinations, responsive labels/widths, light/dark rendering, keyboard
 component input, acknowledgement feedback, stale-state invalidation, event paging,
 diagnostic category/severity filters, newest/oldest ordering, complete incident views, and diagnostic paging.
 Captures show fixture state, not a connected installation.
@@ -97,3 +98,11 @@ These checks do not qualify the installed Supervisor proxy, its actual API
 permissions, real user-role changes, or hardware timing. The PR remains draft
 until an installed test verifies administrator/member access, nested ingress
 URLs, WebSockets, panel disconnect/reconnect, and physical keypad response.
+
+
+## Recovered October refinement
+
+The recovered review branch adds read-only zone inspection and current delivery
+health without introducing panel polling or bypass-clearing heuristics.
+See [state-delivery review](state-delivery-review-2026-10-08.md) for reconstruction
+provenance, fresh validation and remaining installed-system acceptance.

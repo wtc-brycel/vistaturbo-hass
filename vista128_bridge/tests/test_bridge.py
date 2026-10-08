@@ -185,10 +185,17 @@ class BridgeFrameTests(unittest.TestCase):
         )
         metrics_calls = []
         dynamic_calls = []
+        timeline = []
+        publish = bridge.mqtt.publish
+        def tracked_publish(topic, *args, **kwargs):
+            timeline.append(topic)
+            return publish(topic, *args, **kwargs)
+        bridge.mqtt.publish = tracked_publish
         bridge._publish_metrics = lambda: metrics_calls.append(True)
-        bridge._publish_dynamic_state = (
-            lambda *, include_discovery=False: dynamic_calls.append(include_discovery)
-        )
+        def publish_dynamic(*, include_discovery=False):
+            timeline.append("dynamic_state")
+            dynamic_calls.append(include_discovery)
+        bridge._publish_dynamic_state = publish_dynamic
 
         self.assertTrue(bridge._publish_mqtt_recovery_snapshot())
 
@@ -197,6 +204,7 @@ class BridgeFrameTests(unittest.TestCase):
         self.assertEqual(bridge.mqtt.alarm_state_publishes, 1)
         self.assertEqual(metrics_calls, [True])
         self.assertEqual(dynamic_calls, [True])
+        self.assertLess(timeline.index("dynamic_state"), timeline.index("panel/state_fresh"))
         self.assertIn(
             (("panel/state_fresh", "ON"), {"retain": True, "qos": 1}),
             bridge.mqtt.published,
@@ -231,6 +239,10 @@ class BridgeFrameTests(unittest.TestCase):
         bridge._publish_dynamic_state = lambda **kwargs: None
 
         self.assertFalse(bridge._publish_mqtt_recovery_snapshot())
+        self.assertIn(
+            (("panel/state_fresh", "OFF"), {"retain": True, "qos": 1}),
+            bridge.mqtt.published,
+        )
         self.assertNotIn(
             (("bridge/availability", "online"), {"retain": True, "qos": 1}),
             bridge.mqtt.published,

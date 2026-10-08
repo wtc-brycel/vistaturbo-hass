@@ -279,6 +279,8 @@ class MessageHandlerTests(unittest.TestCase):
             "2026-08-16T01:50:02+00:00",
         )
         self.assertTrue(self.state.zones[34].bypassed)
+        self.assertEqual(self.state.zones[34].bypass_source, "event_05")
+        self.assertEqual(self.state.zones[34].bypass_reported_at, "2026-08-16T01:50:02+00:00")
         self.assertEqual(self.mqtt.summary_calls, before + 1)
         self.assertEqual(self.sync.keypad_refreshes[-1], 1)
 

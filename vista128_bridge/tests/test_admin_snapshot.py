@@ -143,6 +143,58 @@ class AdminSnapshotTests(unittest.TestCase):
         )
         self.assertEqual(snapshot["user"]["id"], "ha-user")
 
+    def test_zone_evidence_is_distinct_from_current_conditions(self):
+        bridge = self._bridge()
+        zone = bridge.state.zones[65]
+        zone.partition = 2
+        zone.bypassed = True
+        zone.bypass_source = "event_05"
+        zone.bypass_reported_at = "2026-10-07T12:00:00+00:00"
+        builder = AdminSnapshotBuilder(bridge)
+        row = builder.build()["zones"][0]
+        self.assertEqual(row["zone"], 65)
+        self.assertTrue(row["current"])
+        self.assertTrue(row["conditions"]["bypassed"])
+        bridge.state.reset_connection_derived_annunciators()
+        row = builder.build()["zones"][0]
+        self.assertFalse(row["current"])
+        self.assertTrue(all(value is None for value in row["conditions"].values()))
+        self.assertTrue(row["bypass_evidence"]["value"])
+        self.assertEqual(row["bypass_evidence"]["source"], "event_05")
+
+    def test_offline_and_automation_suspension_mask_zone_conditions(self):
+        bridge = self._bridge()
+        bridge.state.zones[1].partition = 1
+        builder = AdminSnapshotBuilder(bridge)
+        bridge._is_connected = lambda: False
+        self.assertFalse(builder.build()["zones"][0]["current"])
+        bridge._is_connected = lambda: True
+        bridge.control = SimpleNamespace(automation_available=lambda: False,
+                                         automation_availability_source=lambda: "communication_off")
+        self.assertIsNone(builder.build()["zones"][0]["conditions"]["bypassed"])
+
+    def test_zone_snapshot_reports_completeness_without_exposing_unassigned_zones(self):
+        bridge = self._bridge()
+        self.assertEqual(AdminSnapshotBuilder(bridge).build()["zones"], [])
+        bridge.state.zones[128].partition = 1
+        bridge.state.zone_status_blocks_seen = {1}
+        snapshot = AdminSnapshotBuilder(bridge).build()
+        self.assertEqual(snapshot["synchronizer"]["zone_status_blocks"], [1])
+        self.assertIsNone(snapshot["zones"][0]["conditions"]["bypassed"])
+        self.assertIsNone(snapshot["zones"][0]["bypass_evidence"]["value"])
+
+    def test_snapshot_includes_bounded_mqtt_watchdog_health(self):
+        bridge = self._bridge()
+        bridge.mqtt.diagnostic_state = lambda: {
+            "transport_generation": 3, "watchdog_restarts": 1,
+            "last_puback_age_seconds": 2.5, "heartbeat_pending_seconds": None,
+            "transport_session_id": "not-part-of-the-ui-contract",
+        }
+        snapshot = AdminSnapshotBuilder(bridge).build()
+        self.assertEqual(snapshot["mqtt"]["watchdog_restarts"], 1)
+        self.assertEqual(snapshot["mqtt"]["last_puback_age_seconds"], 2.5)
+        self.assertNotIn("transport_session_id", snapshot["mqtt"])
+
     def test_snapshot_excludes_credentials(self):
         encoded = json.dumps(AdminSnapshotBuilder(self._bridge()).build())
         self.assertNotIn("must-not-leak", encoded)

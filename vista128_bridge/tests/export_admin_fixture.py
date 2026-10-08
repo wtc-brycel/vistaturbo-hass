@@ -116,12 +116,23 @@ diagnostics_api = {
 bridge.state.apply_system_event(SystemEvent("01", "Fire Alarm", 1, 0, 1, 14, 23, 21, 9, 26))
 fire = snapshot(bridge)
 fire["last_event"]["descriptor"] = "Lobby smoke"
+bridge = Bridge()
+bridge.state.zones[2].descriptor = "East exit"
+bridge.state.apply_system_event(SystemEvent("05", "Zone Bypass", 2, 0, 1, 12, 23, 21, 9, 26), "2026-09-22T03:12:00+00:00")
+bypass = snapshot(bridge)
+bridge.state.apply_system_event(SystemEvent("06", "Zone Bypass Restore", 2, 0, 1, 13, 23, 21, 9, 26), "2026-09-22T03:13:00+00:00")
+bypass_restored = snapshot(bridge)
+bridge.state.reset_connection_derived_annunciators()
+bypass_reconnecting = snapshot(bridge)
 bridge = Bridge(); bridge.state.system_battery_low = None
 unknown = snapshot(bridge)
 print(json.dumps({
     "normal": normal,
     "fire": fire,
     "unknown": unknown,
+    "bypass": bypass,
+    "bypass_restored": bypass_restored,
+    "bypass_reconnecting": bypass_reconnecting,
     "events": records,
     "diagnostics_api": diagnostics_api,
 }, separators=(",", ":")))
