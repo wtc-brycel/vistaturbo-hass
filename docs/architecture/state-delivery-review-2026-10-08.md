@@ -27,8 +27,15 @@ part of this work. No ZIP/download bundles are checked into the repository.
 - Five Playwright scenarios and production-built fixtures are restored for zone
   filtering, explicit restore, browser loss, panel reconnect, mobile text safety,
   and Back/Forward/repeated navigation (69 browser tests total when listed)
-- Browser execution and exact-commit remote CI remain outstanding. Previous
-  reports for the lost checkout do not establish a browser pass for this branch
+- Exact source/test commit `36c6699ff89f6c79ada01f952265a18ab5d23851`
+  passed all three GitHub Actions jobs, including all 69 Playwright tests:
+  [verified CI run](https://github.com/wtc-brycel/vistaturbo-hass/actions/runs/37711827943)
+- The run's 10 source-rendered ingress captures are saved as an Actions artifact.
+  Desktop Zones light/dark, Overview and Diagnostics captures were visually
+  inspected. These are synthetic fixtures, not screenshots of the installation
+- Previous reports for the lost checkout are not used as proof of this result;
+  the published reconstruction was fetched back and its complete tree matched
+  the fresh local test tree before exact-head CI completed successfully
 
 ## Confirmed delivery gaps
 
